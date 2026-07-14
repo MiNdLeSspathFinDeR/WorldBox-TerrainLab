@@ -217,4 +217,6 @@ Load:
 
 Steam uploads the whole map directory, so the standard files and sidecar travel
 together. A direct WBXGEO import extracts only the fixed `base/*` payload names;
-arbitrary ZIP paths are never extracted.
+arbitrary ZIP paths are never extracted. TerrainLab validates the embedded base
+map hash before extracting into a temporary directory, then renames that
+directory into the first free `saveN` slot.

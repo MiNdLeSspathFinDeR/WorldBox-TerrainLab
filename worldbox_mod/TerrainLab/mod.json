@@ -1,7 +1,7 @@
 {
   "name": "TerrainLab",
   "author": "Vlad",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "description": "Extensible GIS terrain project layer with vanilla WorldBox fallback.",
   "iconPath": "icon.png",
   "GUID": "Vlad.TerrainLab",

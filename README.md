@@ -3,14 +3,15 @@ TerrainLab combines an adaptive image-to-map converter with an extensible GIS
 project layer for WorldBox.
 
 > [!IMPORTANT]
-> This is an intermediate alpha release. Keep the adjacent vanilla `map.wbox`
-> when exchanging TerrainLab projects.
+> This is an intermediate alpha release. WBXGEO embeds a vanilla `map.wbox`,
+> while normal save directories retain their standalone fallback map.
 
 ## Table of contents
 - [Key Features](#key-features)
 - [Installation](#installation)
   - [PC](#pc)
   - [Android](#android)
+- [WorldBox mod](#worldbox-mod)
 - [Usage](#usage)
   - [Simple](#simple)
   - [Config File](#config-file)
@@ -43,6 +44,20 @@ pkg upgrade -y && pkg install python python-pillow git -y
 ```sh
 pip install git+https://github.com/MiNdLeSspathFinDeR/WorldBox-TerrainLab
 ```
+
+## WorldBox mod
+
+TerrainLab requires NeoModLoader and WorldBox experimental mode. Install the
+source mod from a repository checkout with:
+
+```powershell
+worldbox_mod\install.cmd
+```
+
+The in-game project view saves and validates the WBXGEO sidecar, exports a
+portable package, and imports exchange packages into a free WorldBox save slot.
+The relief view inspects the Int16 elevation and categorical core layers. See
+[TerrainLab in WorldBox](docs/WORLDBOX_MOD.md) for paths and lifecycle details.
 
 ## Usage
 ### Simple

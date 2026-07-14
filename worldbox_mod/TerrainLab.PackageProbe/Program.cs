@@ -90,6 +90,27 @@ internal static class Program
             File.Exists(WbxGeoPackage.GetSidecarPath(importDirectory)),
             "Imported WBXGEO sidecar is missing.");
 
+        string corruptPackage = Path.Combine(testRoot, "corrupt.wbxgeo");
+        File.Copy(packagePath, corruptPackage);
+        using (ZipArchive archive = ZipFile.Open(corruptPackage, ZipArchiveMode.Update))
+        {
+            ZipArchiveEntry embeddedMap = archive.GetEntry("base/map.wbox");
+            embeddedMap.Delete();
+            using (Stream output = archive.CreateEntry("base/map.wbox").Open())
+            {
+                output.WriteByte(99);
+            }
+        }
+
+        Assert(
+            !WbxGeoPackage.TryLoad(
+                corruptPackage,
+                null,
+                registry,
+                out _,
+                out _),
+            "Package with a corrupt embedded vanilla map was accepted.");
+
         File.WriteAllBytes(baseMap, new byte[] { 9, 9, 9 });
         Assert(
             !WbxGeoPackage.TryLoad(

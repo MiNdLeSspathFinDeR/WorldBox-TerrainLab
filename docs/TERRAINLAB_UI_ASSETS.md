@@ -18,6 +18,18 @@ The game map remains the central workspace. TerrainLab adds:
 The UI should not place the map inside a decorative card. Panels overlay or dock
 against screen edges and can be collapsed independently.
 
+## Implementation status
+
+Version 0.3 implements the standalone side button and a stock WorldBox project
+window without waiting for custom art. The map view has working save, validate,
+export, exchange-folder, and package-import commands. The relief view exposes a
+read-only inventory and properties for the four current data layers.
+
+The compact toolbar, docked layer tree, map inspection cursor, editable DEM
+properties, and bottom status strip remain the next interface batch. Their
+semantic command IDs below are unchanged, so later icon delivery will not
+require changes to the WBXGEO or runtime APIs.
+
 ## Batch A: required for the first usable build
 
 ### Project and exchange

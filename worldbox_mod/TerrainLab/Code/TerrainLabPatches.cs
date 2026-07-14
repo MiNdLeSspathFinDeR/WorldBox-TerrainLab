@@ -32,8 +32,13 @@ namespace TerrainLab
                 new[] { typeof(string), typeof(bool), typeof(bool) });
         }
 
-        private static void Postfix(string pFolder, SavedMap __result)
+        private static void Postfix(string pFolder, bool pCompress, SavedMap __result)
         {
+            if (!pCompress)
+            {
+                return;
+            }
+
             TerrainLabRuntime.Instance?.HandleWorldSaved(pFolder, __result);
         }
     }

@@ -340,6 +340,7 @@ namespace TerrainLab
                 {
                     WbxGeoManifest manifest = ReadManifest(archive);
                     ValidateManifest(manifest);
+                    ValidateEmbeddedBaseMap(archive, manifest);
 
                     if (!string.IsNullOrWhiteSpace(externalBaseMapPath) &&
                         File.Exists(externalBaseMapPath))
