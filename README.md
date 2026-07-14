@@ -56,7 +56,8 @@ worldbox_mod\install.cmd
 
 The in-game project view saves and validates the WBXGEO sidecar, exports a
 portable package, and imports exchange packages into a free WorldBox save slot.
-The relief view inspects the Int16 elevation and categorical core layers. See
+The relief view inspects the core layers and provides map-based Int16 DEM tools
+with brush radius, undo/redo, and a coordinate/elevation status strip. See
 [TerrainLab in WorldBox](docs/WORLDBOX_MOD.md) for paths and lifecycle details.
 
 ## Usage

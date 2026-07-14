@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using System.Reflection;
 using HarmonyLib;
 
@@ -36,6 +37,43 @@ namespace TerrainLab
         Artificial = 7
     }
 
+    public enum TerrainElevationOperation
+    {
+        Set,
+        Raise,
+        Lower,
+        Smooth
+    }
+
+    public sealed class TerrainElevationEdit
+    {
+        internal TerrainElevationEdit(
+            string projectId,
+            int[] indices,
+            short[] before,
+            short[] after,
+            int[] worldCacheBefore)
+        {
+            ProjectId = projectId;
+            Indices = indices;
+            Before = before;
+            After = after;
+            WorldCacheBefore = worldCacheBefore;
+        }
+
+        public string ProjectId { get; }
+
+        public int ChangedCellCount => Indices.Length;
+
+        internal int[] Indices { get; }
+
+        internal short[] Before { get; }
+
+        internal short[] After { get; }
+
+        internal int[] WorldCacheBefore { get; }
+    }
+
     public sealed class TerrainWorldState
     {
         private static readonly FieldInfo TilesListField =
@@ -58,6 +96,8 @@ namespace TerrainLab
         public byte[] Material { get; private set; }
 
         public int CellCount => Elevation?.Length ?? 0;
+
+        public bool IsDirty { get; private set; }
 
         private TerrainWorldState()
         {
@@ -167,6 +207,135 @@ namespace TerrainLab
             }
         }
 
+        public bool TryGetElevation(int x, int y, out short elevation)
+        {
+            if (x < 0 || x >= Width || y < 0 || y >= Height || Elevation == null)
+            {
+                elevation = TerrainElevationEncoding.NoData;
+                return false;
+            }
+
+            elevation = Elevation[checked(y * Width + x)];
+            return true;
+        }
+
+        public TerrainElevationEdit ApplyElevationBrush(
+            int centerX,
+            int centerY,
+            int radius,
+            TerrainElevationOperation operation,
+            short targetElevation,
+            short step)
+        {
+            if (centerX < 0 || centerX >= Width || centerY < 0 || centerY >= Height)
+            {
+                throw new ArgumentOutOfRangeException(nameof(centerX));
+            }
+
+            if (radius < 0 || radius > 64)
+            {
+                throw new ArgumentOutOfRangeException(nameof(radius));
+            }
+
+            if (targetElevation == TerrainElevationEncoding.NoData)
+            {
+                throw new ArgumentException("Elevation 9999 is reserved for NODATA.");
+            }
+
+            if (step <= 0)
+            {
+                throw new ArgumentOutOfRangeException(nameof(step));
+            }
+
+            List<int> candidateIndices = CollectBrushIndices(centerX, centerY, radius);
+            List<int> changedIndices = new List<int>(candidateIndices.Count);
+            List<short> beforeValues = new List<short>(candidateIndices.Count);
+            List<short> afterValues = new List<short>(candidateIndices.Count);
+
+            foreach (int index in candidateIndices)
+            {
+                short before = Elevation[index];
+                if (before == TerrainElevationEncoding.NoData &&
+                    operation != TerrainElevationOperation.Set)
+                {
+                    continue;
+                }
+
+                short after;
+                switch (operation)
+                {
+                    case TerrainElevationOperation.Set:
+                        after = targetElevation;
+                        break;
+                    case TerrainElevationOperation.Raise:
+                        after = ClampElevation((long)before + step, true);
+                        break;
+                    case TerrainElevationOperation.Lower:
+                        after = ClampElevation((long)before - step, false);
+                        break;
+                    case TerrainElevationOperation.Smooth:
+                        after = CalculateSmoothedElevation(index, before);
+                        break;
+                    default:
+                        throw new ArgumentOutOfRangeException(nameof(operation));
+                }
+
+                if (after == before)
+                {
+                    continue;
+                }
+
+                changedIndices.Add(index);
+                beforeValues.Add(before);
+                afterValues.Add(after);
+            }
+
+            TerrainElevationEdit edit = new TerrainElevationEdit(
+                ProjectId,
+                changedIndices.ToArray(),
+                beforeValues.ToArray(),
+                afterValues.ToArray(),
+                CaptureWorldCache(changedIndices));
+            ApplyElevationEdit(edit, true);
+            return edit;
+        }
+
+        public void ApplyElevationEdit(TerrainElevationEdit edit, bool useAfterValues)
+        {
+            if (edit == null)
+            {
+                throw new ArgumentNullException(nameof(edit));
+            }
+
+            if (!string.Equals(edit.ProjectId, ProjectId, StringComparison.Ordinal))
+            {
+                throw new InvalidOperationException("Elevation edit belongs to another project.");
+            }
+
+            short[] source = useAfterValues ? edit.After : edit.Before;
+            for (int offset = 0; offset < edit.Indices.Length; offset++)
+            {
+                int index = edit.Indices[offset];
+                if (index < 0 || index >= CellCount)
+                {
+                    throw new InvalidOperationException("Elevation edit index is outside the project grid.");
+                }
+
+                Elevation[index] = source[offset];
+            }
+
+            if (edit.ChangedCellCount > 0)
+            {
+                IsDirty = true;
+                ApplyElevationEditToWorldCache(edit, source);
+            }
+        }
+
+        public void MarkSaved()
+        {
+            IsDirty = false;
+        }
+
         public void RefreshSemanticsFromWorld()
         {
             if (!MatchesCurrentWorld())
@@ -178,6 +347,114 @@ namespace TerrainLab
             for (int index = 0; index < tiles.Length; index++)
             {
                 ClassifyTile(index, tiles[index]);
+            }
+        }
+
+        private List<int> CollectBrushIndices(int centerX, int centerY, int radius)
+        {
+            List<int> indices = new List<int>();
+            int radiusSquared = radius * radius;
+            for (int offsetY = -radius; offsetY <= radius; offsetY++)
+            {
+                int y = centerY + offsetY;
+                if (y < 0 || y >= Height)
+                {
+                    continue;
+                }
+
+                for (int offsetX = -radius; offsetX <= radius; offsetX++)
+                {
+                    if (offsetX * offsetX + offsetY * offsetY > radiusSquared)
+                    {
+                        continue;
+                    }
+
+                    int x = centerX + offsetX;
+                    if (x >= 0 && x < Width)
+                    {
+                        indices.Add(checked(y * Width + x));
+                    }
+                }
+            }
+
+            return indices;
+        }
+
+        private short CalculateSmoothedElevation(int index, short fallback)
+        {
+            int centerX = index % Width;
+            int centerY = index / Width;
+            long sum = 0;
+            int count = 0;
+            for (int y = Math.Max(0, centerY - 1); y <= Math.Min(Height - 1, centerY + 1); y++)
+            {
+                for (int x = Math.Max(0, centerX - 1); x <= Math.Min(Width - 1, centerX + 1); x++)
+                {
+                    short value = Elevation[checked(y * Width + x)];
+                    if (value == TerrainElevationEncoding.NoData)
+                    {
+                        continue;
+                    }
+
+                    sum += value;
+                    count++;
+                }
+            }
+
+            return count == 0
+                ? fallback
+                : ClampElevation((long)Math.Round(sum / (double)count), false);
+        }
+
+        private static short ClampElevation(long value, bool increasing)
+        {
+            long clamped = Math.Max(short.MinValue, Math.Min(short.MaxValue, value));
+            if (clamped == TerrainElevationEncoding.NoData)
+            {
+                clamped += increasing ? 1 : -1;
+            }
+
+            return (short)clamped;
+        }
+
+        private int[] CaptureWorldCache(List<int> indices)
+        {
+            if (!MatchesCurrentWorld())
+            {
+                return null;
+            }
+
+            WorldTile[] tiles = GetCurrentTiles();
+            int[] values = new int[indices.Count];
+            for (int offset = 0; offset < indices.Count; offset++)
+            {
+                values[offset] = tiles[indices[offset]].Height;
+            }
+
+            return values;
+        }
+
+        private void ApplyElevationEditToWorldCache(
+            TerrainElevationEdit edit,
+            short[] values)
+        {
+            if (!MatchesCurrentWorld())
+            {
+                return;
+            }
+
+            WorldTile[] tiles = GetCurrentTiles();
+            for (int offset = 0; offset < edit.Indices.Length; offset++)
+            {
+                short value = values[offset];
+                if (value != TerrainElevationEncoding.NoData)
+                {
+                    tiles[edit.Indices[offset]].Height = value;
+                }
+                else if (edit.WorldCacheBefore != null)
+                {
+                    tiles[edit.Indices[offset]].Height = edit.WorldCacheBefore[offset];
+                }
             }
         }
 

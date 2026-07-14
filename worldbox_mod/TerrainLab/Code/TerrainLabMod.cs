@@ -9,6 +9,7 @@ namespace TerrainLab
     {
         private Harmony _harmony;
         private TerrainLabRuntime _runtime;
+        private TerrainLabEditor _editor;
         private TerrainLabUi _ui;
 
         protected override void OnModLoad()
@@ -29,6 +30,14 @@ namespace TerrainLab
 
                 _runtime.Initialize();
 
+                _editor = GetComponent<TerrainLabEditor>();
+                if (_editor == null)
+                {
+                    _editor = gameObject.AddComponent<TerrainLabEditor>();
+                }
+
+                _editor.Initialize(_runtime);
+
                 _harmony = new Harmony("Vlad.TerrainLab");
                 _harmony.PatchAll(Assembly.GetExecutingAssembly());
 
@@ -38,8 +47,8 @@ namespace TerrainLab
                     _ui = gameObject.AddComponent<TerrainLabUi>();
                 }
 
-                _ui.Initialize(GetDeclaration());
-                LogInfo("GIS window and WBXGEO persistence initialized.");
+                _ui.Initialize(GetDeclaration(), _editor);
+                LogInfo("GIS window, DEM editor and WBXGEO persistence initialized.");
             }
             catch (Exception exception)
             {

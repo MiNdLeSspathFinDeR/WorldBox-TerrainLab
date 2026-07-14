@@ -114,6 +114,7 @@ namespace TerrainLab
                 }
 
                 WbxGeoPackage.Save(directory, State, savedMap, ModuleRegistry);
+                State.MarkSaved();
                 Debug.Log("[TerrainLab] Saved " + WbxGeoPackage.GetSidecarPath(directory));
             }
             catch (Exception exception)

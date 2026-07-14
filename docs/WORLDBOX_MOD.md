@@ -24,9 +24,20 @@ the current WBXGEO project. It lists the three newest packages in the TerrainLab
 exchange directory and imports a selected package into the first free WorldBox
 `saveN` directory.
 
-The relief view is a read-only inspector for the authoritative elevation,
-landform, surface-material, and embedded vanilla layers. Hydrology and erosion
-remain explicit reserved slots until their processing backends are added.
+The relief view inspects the authoritative elevation, landform,
+surface-material, and embedded vanilla layers. Its elevation layer also exposes
+inspect, set, raise, lower, and smooth tools with target, step, and brush-radius
+controls. A map overlay marks the active brush, while the bottom strip reports
+cell coordinates, Int16 elevation, `LOCAL:WORLDBOX`, and budget usage. Each map
+click applies one deterministic brush stamp; undo/redo retains the latest 32
+stamps.
+
+DEM operations change the independent signed Int16 elevation grid and mark the
+WBXGEO project modified. `9999` cannot be painted because it remains reserved
+for `NODATA`. The existing WorldBox terrain morphotype is deliberately left
+unchanged, so a mountain tile can carry a separately controlled analytical
+height. Hydrology and erosion remain explicit reserved slots until their
+processing backends are added.
 
 The exchange directory is
 `<WorldBox persistent data>/TerrainLab/Exchange`. Import first validates the

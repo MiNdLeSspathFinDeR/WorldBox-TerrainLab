@@ -79,6 +79,7 @@ internal static class Program
             "Package reload failed: " + loadError);
         Assert(loaded.Elevation[5] == TerrainElevationEncoding.NoData, "NODATA changed.");
         Assert(loaded.Width == width && loaded.Height == height, "Dimensions changed.");
+        ValidateElevationEditing(loaded);
 
         string importDirectory = Path.Combine(testRoot, "imported");
         WbxGeoPackage.ImportVanillaPayload(packagePath, importDirectory);
@@ -120,6 +121,50 @@ internal static class Program
                 out _,
                 out _),
             "Stale overlay was accepted after base-map checksum changed.");
+    }
+
+    private static void ValidateElevationEditing(TerrainWorldState state)
+    {
+        const int centerX = 2;
+        const int centerY = 2;
+        int centerIndex = centerY * state.Width + centerX;
+        short originalCenter = state.Elevation[centerIndex];
+
+        TerrainElevationEdit edit = state.ApplyElevationBrush(
+            centerX,
+            centerY,
+            1,
+            TerrainElevationOperation.Set,
+            120,
+            1);
+        Assert(edit.ChangedCellCount == 5, "Radius-one brush did not use a circle mask.");
+        Assert(state.Elevation[centerIndex] == 120, "Brush did not update its center cell.");
+        Assert(state.IsDirty, "Elevation edit did not mark the project dirty.");
+
+        state.ApplyElevationEdit(edit, false);
+        Assert(state.Elevation[centerIndex] == originalCenter, "Undo did not restore elevation.");
+
+        bool noDataRejected = false;
+        try
+        {
+            state.ApplyElevationBrush(
+                centerX,
+                centerY,
+                0,
+                TerrainElevationOperation.Set,
+                TerrainElevationEncoding.NoData,
+                1);
+        }
+        catch (ArgumentException)
+        {
+            noDataRejected = true;
+        }
+
+        Assert(noDataRejected, "Reserved NODATA was accepted as an elevation value.");
+
+        state.ApplyElevationBrush(0, 0, 0, TerrainElevationOperation.Set, 9998, 1);
+        state.ApplyElevationBrush(0, 0, 0, TerrainElevationOperation.Raise, 0, 1);
+        Assert(state.Elevation[0] == 10000, "Raise operation produced reserved NODATA.");
     }
 
     private static void ValidateArchive(string packagePath, int expectedCells)
