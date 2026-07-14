@@ -1,0 +1,296 @@
+# WorldBox TerrainLab
+TerrainLab combines an adaptive image-to-map converter with an extensible GIS
+project layer for WorldBox.
+
+> [!IMPORTANT]
+> This is an intermediate alpha release. Keep the adjacent vanilla `map.wbox`
+> when exchanging TerrainLab projects.
+
+## Table of contents
+- [Key Features](#key-features)
+- [Installation](#installation)
+  - [PC](#pc)
+  - [Android](#android)
+- [Usage](#usage)
+  - [Simple](#simple)
+  - [Config File](#config-file)
+  - [Parameters](#parameters)
+
+## Key Features
+1. Adaptive terrain: water, shorelines, relief, and land classes are inferred against each source image's own color and contrast range.
+2. Gameplay-safe by default: explosives, lava, grey goo, corrupted terrain, and other disruptive tiles are excluded.
+3. Direct WorldBox saves: complete `saveN` folders can be created in the game's save directory.
+4. Auto sizing: if only one size parameter is set, the other is calculated from the image ratio.
+5. Configurable: the legacy direct-palette algorithm and custom tile sets remain available.
+
+The terrain-analysis stages and planned hydrology/erosion modules are described in [GIS terrain pipeline](docs/GIS_PIPELINE.md). The in-game NML mod stores extended projects in the portable [WBXGEO overlay format](docs/WBXGEO_FORMAT.md), while preserving a normal WorldBox map for users without the mod.
+
+## Installation
+### PC
+1. Download and install [Python](https://www.python.org/downloads/)  (Ver. 3.8+)
+2. Install the tool:
+```sh
+pip install git+https://github.com/MiNdLeSspathFinDeR/WorldBox-TerrainLab
+```
+
+### Android
+1. Download and Install [Termux from F-Droid](https://f-droid.org/packages/com.termux/)
+2.  Run the following commands to install Python and the tool's requirements:
+```sh
+pkg upgrade -y && pkg install python python-pillow git -y
+```
+3. Install the tool:
+```sh
+pip install git+https://github.com/MiNdLeSspathFinDeR/WorldBox-TerrainLab
+```
+
+## Usage
+### Simple
+Every image format that [PIL (pillow) supports](https://pillow.readthedocs.io/en/stable/handbook/image-file-formats.html#image-file-formats) is supported by this tool. You can quickly convert an image with this command:
+```sh
+imagetomap image.png
+```
+
+> [!Note]
+Please note that the WorldBox map's dimensions need to be a multiple of 64, so for some images' sizes that are not multiples of 64, resizing will be necessary. This can lead to the images having unintended artifacts.
+
+The converted image will then be stored in a folder with the image's name in the current directory.
+
+To save the converted map directly into WorldBox saves as a new `saveN` slot:
+```sh
+imagetomap image.png --save-to-game
+```
+
+For a maximum-baseline 20 by 20 world using adaptive terrain and the safe palette:
+```sh
+imagetomap image.png --save-to-game -W 20 -H 20 --algorithm terrain --palette safe
+```
+
+TerrainLab limits maps to 1,884,160 game cells: the cell count of a 20 by 20
+WorldBox-block map plus 15%. Aspect ratio is unrestricted, so a 40 by 10 map is
+valid while a 22 by 22 map is rejected.
+
+On Windows the tool auto-detects the default WorldBox saves folder:
+`%USERPROFILE%\AppData\LocalLow\mkarpenko\WorldBox\saves`.
+You can override it:
+```sh
+imagetomap image.png --game-saves-dir "C:\Path\To\WorldBox\saves"
+```
+
+To keep a workspace folder open and convert images when they are added or changed:
+```sh
+imagetomap Workspace/ --watch --save-to-game
+```
+
+You can convert multiple images in one go by simply giving more to the program:
+```sh
+imagetomap image.png image_two.png
+```
+
+Or by giving the program a folder, of which it will search for images inside of it:
+```sh
+imagetomap folder/
+```
+
+There are some parameters that be set. See:
+```sh
+imagetomap --help
+```
+
+### Config File
+You can configure tiles you want or do not want the program to use with the config file. Run the following command to generate one:
+```sh
+imagetomap --generate-config
+```
+
+After that, the program will create an `itm_config.json` file in the current directory. The file should look like this:
+```json
+{
+    "output": "./",
+    "algorithm": "terrain",
+    "palette": "safe",
+    "terrain_clusters": 14,
+    "terrain_smooth": 1,
+    "terrain_min_region": 32,
+    "tiles": {
+        "deep_ocean": true,
+        "close_ocean": true,
+        "shallow_waters": true,
+        "sand": true,
+        "soil_low": true,
+        "soil_high": true,
+        "soil_low:grass_low": true,
+        "soil_high:grass_high": true,
+        "soil_low:mushroom_low": false,
+        "soil_high:mushroom_high": false,
+        "soil_low:corrupted_low": false,
+        "soil_high:corrupted_high": false,
+        "soil_low:infernal_low": false,
+        "soil_high:infernal_high": false,
+        "soil_low:candy_low": false,
+        "soil_high:candy_high": false,
+        "soil_low:crystal_low": false,
+        "soil_high:crystal_high": false,
+        "soil_low:permafrost_low": true,
+        "soil_high:permafrost_high": true,
+        "soil_low:savanna_low": true,
+        "soil_high:savanna_high": true,
+        "soil_low:enchanted_low": true,
+        "soil_high:enchanted_high": true,
+        "soil_low:swamp_low": true,
+        "soil_high:swamp_high": true,
+        "soil_low:jungle_low": true,
+        "soil_high:jungle_high": true,
+        "soil_low:desert_low": true,
+        "soil_high:desert_high": true,
+        "soil_low:lemon_low": false,
+        "soil_high:lemon_high": false,
+        "soil_low:waste_low": false,
+        "soil_high:waste_high": false,
+        "soil_low:tumor_low": false,
+        "soil_high:tumor_high": false,
+        "soil_low:biomass_low": false,
+        "soil_high:biomass_high": false,
+        "soil_low:pumpkin_low": false,
+        "soil_high:pumpkin_high": false,
+        "soil_low:cybertile_low": false,
+        "soil_high:cybertile_high": false,
+        "lava3": false,
+        "lava2": false,
+        "lava1": false,
+        "lava0": false,
+        "pit_deep_ocean:tnt": false,
+        "pit_deep_ocean:water_bomb": false,
+        "pit_deep_ocean:tnt_timed": false,
+        "pit_deep_ocean:landmine": false,
+        "pit_deep_ocean:fuse": false,
+        "pit_deep_ocean:fireworks": false,
+        "pit_deep_ocean:field": false,
+        "pit_deep_ocean:road": false,
+        "hills": true,
+        "mountains": true,
+        "grey_goo": false
+    }
+}
+```
+
+You can exclude tiles by changing their values to `false`.
+When `palette` is `safe`, unsafe entries remain excluded even if an older config enables them. Use `"palette": "full"` only for intentionally destructive or experimental maps.
+
+The program will use the `itm_config.json` file in the current directory by default. But if you want to, you can make it ignore the file by adding the`--no-config` option:
+```sh
+imagetomap image.png --no-config
+```
+
+### Parameters
+#### `images`
+Image files to convert to maps. If this option is supplied with folders, the program will search for images inside them.
+```sh
+imagetomap image.png
+imagetomap image.png image_two.png
+imagetomap folder/
+```
+
+#### `--no-config`
+Ignore the config file.
+```sh
+imagetomap image.png --no-config
+```
+
+#### `--generate-config`
+Generate a config file in the current directory.
+```sh
+imagetomap --generate-config
+```
+
+#### `--algorithm`
+Choose `terrain` for adaptive semantic conversion (default), or `palette` for the original direct RGB matching.
+```sh
+imagetomap image.png --algorithm terrain
+```
+
+#### `--palette`
+Choose the gameplay-safe tile set (default) or explicitly opt into every known tile.
+```sh
+imagetomap image.png --palette safe
+```
+
+#### `--terrain-clusters`
+Number of adaptive land clusters, from 4 to 64. Default is `14`.
+```sh
+imagetomap image.png --terrain-clusters 18
+```
+
+#### `--terrain-smooth`
+Number of isolated-tile cleanup passes, from 0 to 8. Default is `1`.
+```sh
+imagetomap image.png --terrain-smooth 2
+```
+
+#### `--terrain-min-region`
+Convert isolated land components below this tile area back to water. Default is `32`; use `0` to preserve every source mark. Scale the value by four when width and height are doubled and you want the same visual cleanup.
+```sh
+imagetomap image.png --terrain-min-region 128
+```
+
+#### `-D, --dither`
+Enable dithering for smoother colour transitions. Not recommended for maps designed to actually be played with.
+```sh
+imagetomap image.png --dither
+```
+
+#### `-W, --width`
+Target width of the map(s). Default to auto.
+```sh
+imagetomap image.png --width 8
+```
+
+#### `-H, --height`
+Target height of the map(s). Default to auto.
+```sh
+imagetomap image.png --height 8
+```
+
+#### `-R, --recursive`
+Enable recursive searching inside folders.
+```sh
+imagetomap folder/ --recursive
+```
+
+#### `-O, --output`
+Where to save the converted maps and previews. Default to the current directory.
+```sh
+imagetomap image.png --output Converted/
+```
+
+#### `--map-name`
+World name stored in the generated map metadata. Defaults to the image file name.
+```sh
+imagetomap image.png --map-name "Imported World"
+```
+
+#### `--save-to-game`
+Save converted maps directly into the WorldBox saves folder as new `saveN` slots.
+The tool writes `map.wbox`, `map.meta`, `preview.png`, `preview_small.png`, and `map_stats.s3db`.
+```sh
+imagetomap image.png --save-to-game
+```
+
+#### `--game-saves-dir`
+Override the WorldBox saves folder. This also enables `--save-to-game`.
+```sh
+imagetomap image.png --game-saves-dir "C:\Path\To\WorldBox\saves"
+```
+
+#### `--watch`
+Keep running and convert images when they are added or changed in the supplied folder.
+If no image or folder is supplied, the current directory is watched.
+```sh
+imagetomap Workspace/ --watch --save-to-game
+```
+
+#### `--watch-interval`
+Seconds between workspace scans in `--watch` mode. Default is `2.0`.
+```sh
+imagetomap Workspace/ --watch --watch-interval 1
+```

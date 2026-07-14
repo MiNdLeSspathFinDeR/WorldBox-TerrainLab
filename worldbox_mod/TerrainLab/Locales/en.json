@@ -1,0 +1,13 @@
+{
+  "terrain_lab_window_title": "Terrain Lab",
+  "terrain_lab_side_button": "Terrain Lab",
+  "terrain_lab_side_button Description": "Terrain and GIS tools",
+  "terrain_lab_menu_heading": "GIS MODULES",
+  "terrain_lab_module_map": "Map",
+  "terrain_lab_module_relief": "Relief",
+  "terrain_lab_module_hydrology": "Hydrology",
+  "terrain_lab_module_erosion": "Erosion",
+  "terrain_lab_module_settings": "Settings",
+  "terrain_lab_status_ready": "Ready",
+  "terrain_lab_selected_format": "Selected: {0}"
+}

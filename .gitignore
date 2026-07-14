@@ -1,0 +1,14 @@
+__pycache__/
+*.py[cod]
+.pytest_cache/
+*.egg-info/
+
+# Local reference maps. Keep third-party game artwork out of the public repo.
+/botw_map.jpeg
+/er_map.jpg
+/er_map.webp
+
+worldbox_mod/TerrainLab/bin/
+worldbox_mod/TerrainLab/obj/
+worldbox_mod/TerrainLab.PackageProbe/bin/
+worldbox_mod/TerrainLab.PackageProbe/obj/

@@ -1,0 +1,13 @@
+{
+  "terrain_lab_window_title": "Лаборатория рельефа",
+  "terrain_lab_side_button": "Лаборатория рельефа",
+  "terrain_lab_side_button Description": "Инструменты рельефа и GIS",
+  "terrain_lab_menu_heading": "GIS-МОДУЛИ",
+  "terrain_lab_module_map": "Карта",
+  "terrain_lab_module_relief": "Рельеф",
+  "terrain_lab_module_hydrology": "Гидрология",
+  "terrain_lab_module_erosion": "Эрозия",
+  "terrain_lab_module_settings": "Настройки",
+  "terrain_lab_status_ready": "Готово",
+  "terrain_lab_selected_format": "Выбрано: {0}"
+}

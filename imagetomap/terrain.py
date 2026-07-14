@@ -1,0 +1,660 @@
+from collections import deque
+from dataclasses import dataclass
+from typing import Dict, Iterable, Sequence, Tuple
+
+import numpy as np
+from PIL import Image as Img
+from PIL.Image import Image
+
+from .consts import TILES
+
+
+@dataclass(frozen=True)
+class TerrainState:
+    luma_low: float
+    luma_mid: float
+    luma_high: float
+    sat_mid: float
+    sat_high: float
+    slope_mid: float
+    slope_high: float
+    water_threshold: float
+
+
+def classify_adaptive_terrain(
+    image: Image,
+    tiles: Iterable[str],
+    clusters: int = 14,
+    smooth_passes: int = 1,
+    min_land_region: int = 32,
+) -> Image:
+    """Classify a map image into playable WorldBox terrain tiles.
+
+    The classifier is intentionally deterministic and local: it adapts to the
+    source map's own luminance/saturation range, detects water before land
+    clustering, then classifies land clusters with slope and color features.
+    """
+    tile_names = tuple(tile for tile in tiles if tile in TILES)
+    if not tile_names:
+        raise ValueError("No valid WorldBox tiles supplied")
+
+    rgb = np.asarray(image.convert("RGB"), dtype=np.float32) / 255.0
+    red = rgb[:, :, 0]
+    green = rgb[:, :, 1]
+    blue = rgb[:, :, 2]
+
+    hue, saturation, value = rgb_to_hsv(rgb)
+    luma = (0.2126 * red) + (0.7152 * green) + (0.0722 * blue)
+    dark_percentile = float(np.percentile(luma, 0.5))
+    void_threshold = min(max(dark_percentile * 1.25, 0.018), 0.06)
+    void_mask = luma <= void_threshold
+    non_void = ~void_mask
+
+    luma_low, luma_mid, luma_high = percentiles(luma[non_void], (4.0, 50.0, 96.0))
+    sat_mid, sat_high = percentiles(saturation[non_void], (50.0, 82.0))
+    luma_norm = normalize(luma, luma_low, luma_high)
+
+    slope = gradient_magnitude(luma_norm)
+    slope_mid, slope_high = percentiles(slope[non_void], (50.0, 86.0))
+
+    water_score = make_water_score(red, green, blue, hue, saturation, luma_norm)
+    water_threshold = adaptive_water_threshold(water_score, non_void)
+    state = TerrainState(
+        luma_low=luma_low,
+        luma_mid=luma_mid,
+        luma_high=luma_high,
+        sat_mid=sat_mid,
+        sat_high=sat_high,
+        slope_mid=slope_mid,
+        slope_high=slope_high,
+        water_threshold=water_threshold,
+    )
+
+    indices = np.full(luma.shape, tile_index(tile_names, "soil_low"), dtype=np.uint8)
+    water_mask = detect_water(water_score, hue, saturation, luma_norm, non_void, state)
+    if state.sat_mid < 0.28:
+        water_mask |= detect_muted_boundary_water(
+            saturation=saturation,
+            luma_norm=luma_norm,
+            non_void=non_void,
+            void_mask=void_mask,
+        )
+    water_mask |= void_mask
+    if min_land_region > 1:
+        water_mask = fill_small_land_regions(water_mask, min_land_region)
+
+    assign_water(indices, water_mask, void_mask, tile_names)
+    land_mask = ~water_mask
+    assign_land_clusters(
+        indices=indices,
+        tile_names=tile_names,
+        land_mask=land_mask,
+        luma_norm=luma_norm,
+        saturation=saturation,
+        hue=hue,
+        slope=slope,
+        red=red,
+        green=green,
+        blue=blue,
+        clusters=clusters,
+        state=state,
+    )
+
+    if smooth_passes > 0:
+        indices = smooth_tiles(indices, water_mask, tile_names, passes=smooth_passes)
+
+    return make_index_image(indices, tile_names)
+
+
+def rgb_to_hsv(rgb: np.ndarray) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
+    red = rgb[:, :, 0]
+    green = rgb[:, :, 1]
+    blue = rgb[:, :, 2]
+
+    max_channel = np.max(rgb, axis=2)
+    min_channel = np.min(rgb, axis=2)
+    delta = max_channel - min_channel
+
+    hue = np.zeros_like(max_channel)
+    non_zero = delta > 1e-6
+
+    red_max = (max_channel == red) & non_zero
+    green_max = (max_channel == green) & non_zero
+    blue_max = (max_channel == blue) & non_zero
+
+    hue[red_max] = ((green[red_max] - blue[red_max]) / delta[red_max]) % 6.0
+    hue[green_max] = ((blue[green_max] - red[green_max]) / delta[green_max]) + 2.0
+    hue[blue_max] = ((red[blue_max] - green[blue_max]) / delta[blue_max]) + 4.0
+    hue /= 6.0
+
+    saturation = np.zeros_like(max_channel)
+    non_black = max_channel > 1e-6
+    saturation[non_black] = delta[non_black] / max_channel[non_black]
+
+    return hue, saturation, max_channel
+
+
+def percentiles(values: np.ndarray, points: Sequence[float]) -> Tuple[float, ...]:
+    if values.size == 0:
+        return tuple(0.0 for _ in points)
+    return tuple(float(value) for value in np.percentile(values, points))
+
+
+def normalize(values: np.ndarray, low: float, high: float) -> np.ndarray:
+    if high <= low:
+        return np.zeros_like(values, dtype=np.float32)
+    return np.clip((values - low) / (high - low), 0.0, 1.0).astype(np.float32)
+
+
+def gradient_magnitude(values: np.ndarray) -> np.ndarray:
+    y_grad = np.zeros_like(values, dtype=np.float32)
+    x_grad = np.zeros_like(values, dtype=np.float32)
+    y_grad[1:, :] = values[1:, :] - values[:-1, :]
+    x_grad[:, 1:] = values[:, 1:] - values[:, :-1]
+    return np.sqrt((x_grad * x_grad) + (y_grad * y_grad)).astype(np.float32)
+
+
+def local_roughness(values: np.ndarray) -> np.ndarray:
+    padded = np.pad(values, 1, mode="edge")
+    center = padded[1:-1, 1:-1]
+    roughness = np.zeros(values.shape, dtype=np.float32)
+    roughness += np.abs(center - padded[:-2, 1:-1])
+    roughness += np.abs(center - padded[2:, 1:-1])
+    roughness += np.abs(center - padded[1:-1, :-2])
+    roughness += np.abs(center - padded[1:-1, 2:])
+    return roughness / 4.0
+
+
+def smooth_float(values: np.ndarray, passes: int) -> np.ndarray:
+    result = values.astype(np.float32, copy=True)
+    for _ in range(passes):
+        padded = np.pad(result, 1, mode="edge")
+        smoothed = np.zeros(result.shape, dtype=np.float32)
+        for row_offset in range(3):
+            for col_offset in range(3):
+                smoothed += padded[
+                    row_offset : row_offset + result.shape[0],
+                    col_offset : col_offset + result.shape[1],
+                ]
+        result = smoothed / 9.0
+    return result
+
+
+def make_water_score(
+    red: np.ndarray,
+    green: np.ndarray,
+    blue: np.ndarray,
+    hue: np.ndarray,
+    saturation: np.ndarray,
+    luma_norm: np.ndarray,
+) -> np.ndarray:
+    coolness = (blue - red) + (0.35 * (green - red))
+    blue_hue = ((hue >= 0.45) & (hue <= 0.72)).astype(np.float32)
+    cyan_hue = ((hue >= 0.38) & (hue < 0.45)).astype(np.float32)
+    score = (1.55 * coolness) + (0.42 * blue_hue) + (0.22 * cyan_hue)
+    score += 0.18 * saturation
+    score -= 0.16 * np.maximum(luma_norm - 0.80, 0.0)
+    return score.astype(np.float32)
+
+
+def adaptive_water_threshold(water_score: np.ndarray, non_void: np.ndarray) -> float:
+    values = water_score[non_void]
+    if values.size == 0:
+        return 0.0
+    high = float(np.percentile(values, 88.0))
+    mid = float(np.percentile(values, 65.0))
+    return max((high * 0.72) + (mid * 0.28), 0.06)
+
+
+def detect_water(
+    water_score: np.ndarray,
+    hue: np.ndarray,
+    saturation: np.ndarray,
+    luma_norm: np.ndarray,
+    non_void: np.ndarray,
+    state: TerrainState,
+) -> np.ndarray:
+    cool_hue = ((hue >= 0.40) & (hue <= 0.74)) | (water_score > state.water_threshold * 1.35)
+    not_snow = ~((luma_norm > 0.86) & (saturation < max(state.sat_mid * 0.65, 0.12)))
+    water = non_void & cool_hue & not_snow & (water_score >= state.water_threshold)
+
+    neighbors = neighbor_count(water)
+    strong_water = water_score >= state.water_threshold + 0.12
+    water &= (neighbors >= 2) | strong_water
+    return water
+
+
+def detect_muted_boundary_water(
+    saturation: np.ndarray,
+    luma_norm: np.ndarray,
+    non_void: np.ndarray,
+    void_mask: np.ndarray,
+) -> np.ndarray:
+    """Find desaturated water connected to the map paper's outer boundary."""
+    if not np.any(non_void):
+        return np.zeros(non_void.shape, dtype=bool)
+
+    roughness = smooth_float(local_roughness(luma_norm), passes=2)
+    sat_cut = float(np.percentile(saturation[non_void], 55.0))
+    rough_cut = float(np.percentile(roughness[non_void], 60.0))
+
+    candidate = (
+        non_void
+        & (saturation <= sat_cut)
+        & (roughness <= rough_cut)
+        & (luma_norm < 0.72)
+    )
+    candidate = binary_close(candidate, iterations=3)
+
+    coarse_size = fit_size(candidate.shape, max_dimension=512)
+    coarse_candidate = resize_mask(candidate, coarse_size, threshold=0.38)
+    coarse_candidate = binary_close(coarse_candidate, iterations=1)
+    coarse_void = resize_mask(void_mask, coarse_size, threshold=0.10)
+    seed_zone = binary_dilate(coarse_void, iterations=2)
+
+    edge = np.zeros(coarse_candidate.shape, dtype=bool)
+    edge[[0, -1], :] = True
+    edge[:, [0, -1]] = True
+    seeds = coarse_candidate & (seed_zone | edge)
+    if not np.any(seeds):
+        return np.zeros(candidate.shape, dtype=bool)
+
+    connected = flood_connected(coarse_candidate, seeds)
+    full_size = (candidate.shape[1], candidate.shape[0])
+    return resize_mask(connected, full_size, threshold=0.50) & candidate
+
+
+def assign_water(
+    indices: np.ndarray,
+    water_mask: np.ndarray,
+    void_mask: np.ndarray,
+    tile_names: Sequence[str],
+) -> None:
+    if not np.any(water_mask):
+        return
+
+    inner = binary_erode(water_mask, iterations=2, border_value=True)
+    deep = binary_erode(inner, iterations=4, border_value=True) | void_mask
+    close = inner & ~deep
+    shallow = water_mask & ~inner & ~deep
+
+    indices[deep] = tile_index(tile_names, "deep_ocean")
+    indices[close] = tile_index(tile_names, "close_ocean", "shallow_waters")
+    indices[shallow] = tile_index(tile_names, "shallow_waters", "close_ocean")
+
+
+def assign_land_clusters(
+    indices: np.ndarray,
+    tile_names: Sequence[str],
+    land_mask: np.ndarray,
+    luma_norm: np.ndarray,
+    saturation: np.ndarray,
+    hue: np.ndarray,
+    slope: np.ndarray,
+    red: np.ndarray,
+    green: np.ndarray,
+    blue: np.ndarray,
+    clusters: int,
+    state: TerrainState,
+) -> None:
+    land_positions = np.flatnonzero(land_mask.ravel())
+    if land_positions.size == 0:
+        return
+
+    slope_norm = normalize(slope, state.slope_mid * 0.35, state.slope_high)
+    features = make_features(
+        luma_norm,
+        saturation,
+        hue,
+        slope_norm,
+        red,
+        green,
+        blue,
+    )
+    flat_features = features.reshape((-1, features.shape[-1]))
+    land_features = flat_features[land_positions]
+
+    centers = fit_kmeans(land_features, max(4, clusters))
+    center_tiles = classify_centers(centers, tile_names, state)
+
+    chunk_size = 250_000
+    flat_indices = indices.ravel()
+    for start in range(0, land_positions.size, chunk_size):
+        pos = land_positions[start : start + chunk_size]
+        labels = nearest_centers(flat_features[pos], centers)
+        flat_indices[pos] = center_tiles[labels]
+
+
+def make_features(
+    luma_norm: np.ndarray,
+    saturation: np.ndarray,
+    hue: np.ndarray,
+    slope: np.ndarray,
+    red: np.ndarray,
+    green: np.ndarray,
+    blue: np.ndarray,
+) -> np.ndarray:
+    green_score = green - np.maximum(red, blue)
+    red_score = red - np.maximum(green, blue * 0.75)
+    coolness = (blue - red) + (0.35 * (green - red))
+    hue_angle = hue * (2.0 * np.pi)
+
+    return np.stack(
+        (
+            luma_norm * 1.45,
+            saturation * 0.85,
+            np.sin(hue_angle) * 0.35,
+            np.cos(hue_angle) * 0.35,
+            slope,
+            green_score * 1.25,
+            red_score * 1.10,
+            coolness * 1.20,
+        ),
+        axis=2,
+    ).astype(np.float32)
+
+
+def fit_kmeans(features: np.ndarray, clusters: int) -> np.ndarray:
+    sample_size = min(features.shape[0], 60_000)
+    rng = np.random.default_rng(1729)
+    if features.shape[0] > sample_size:
+        sample = features[rng.choice(features.shape[0], size=sample_size, replace=False)]
+    else:
+        sample = features
+
+    unique_clusters = min(clusters, max(1, sample.shape[0]))
+    centers = sample[rng.choice(sample.shape[0], size=unique_clusters, replace=False)].copy()
+
+    for _ in range(18):
+        labels = nearest_centers(sample, centers)
+        next_centers = centers.copy()
+        for label in range(unique_clusters):
+            members = sample[labels == label]
+            if members.size:
+                next_centers[label] = members.mean(axis=0)
+        if np.allclose(centers, next_centers, atol=1e-4):
+            break
+        centers = next_centers
+
+    return centers
+
+
+def nearest_centers(features: np.ndarray, centers: np.ndarray) -> np.ndarray:
+    distances = ((features[:, None, :] - centers[None, :, :]) ** 2).sum(axis=2)
+    return np.argmin(distances, axis=1)
+
+
+def classify_centers(
+    centers: np.ndarray,
+    tile_names: Sequence[str],
+    state: TerrainState,
+) -> np.ndarray:
+    result = np.empty(centers.shape[0], dtype=np.uint8)
+    for index, center in enumerate(centers):
+        luma = float(center[0] / 1.45)
+        saturation = float(center[1] / 0.85)
+        slope = float(center[4])
+        green_score = float(center[5] / 1.25)
+        red_score = float(center[6] / 1.10)
+        coolness = float(center[7] / 1.20)
+        hue = float((np.arctan2(center[2] / 0.35, center[3] / 0.35) / (2.0 * np.pi)) % 1.0)
+
+        tile = classify_land_tile(
+            luma=luma,
+            saturation=saturation,
+            slope=slope,
+            green_score=green_score,
+            red_score=red_score,
+            coolness=coolness,
+            hue=hue,
+            state=state,
+        )
+        result[index] = tile_index(tile_names, tile, "soil_low")
+    return result
+
+
+def classify_land_tile(
+    luma: float,
+    saturation: float,
+    slope: float,
+    green_score: float,
+    red_score: float,
+    coolness: float,
+    hue: float,
+    state: TerrainState,
+) -> str:
+    warm = 0.06 <= hue <= 0.18
+    yellow = 0.11 <= hue <= 0.24
+    greenish = 0.20 <= hue <= 0.43
+
+    if luma > 0.82 and saturation < max(state.sat_mid, 0.18):
+        return "soil_high:permafrost_high" if coolness > -0.08 else "sand"
+    if slope > 0.58 and luma < 0.70:
+        return "mountains" if luma < 0.46 or slope > 0.78 else "hills"
+    if luma < 0.18:
+        return "mountains" if slope > 0.34 else "soil_high:swamp_high"
+    if coolness > 0.10 and luma > 0.55 and saturation < 0.25:
+        return "soil_low:permafrost_low"
+    if green_score > 0.08 and greenish:
+        if luma < 0.38:
+            return "soil_high:jungle_high"
+        if saturation > 0.38:
+            return "soil_low:jungle_low"
+        return "soil_low:grass_low"
+    if yellow and luma > 0.58:
+        if saturation > 0.38:
+            return "soil_low:savanna_low"
+        return "soil_low:desert_low" if luma > 0.66 else "soil_high:desert_high"
+    if warm and red_score > 0.05:
+        return "soil_high" if luma < 0.45 else "soil_low"
+    if saturation < 0.16 and luma < 0.52:
+        return "hills" if slope > 0.25 else "soil_high"
+    if saturation < 0.20 and luma > 0.70:
+        return "sand"
+    if luma < 0.36:
+        return "soil_high"
+    return "soil_low:grass_low" if green_score > -0.03 else "soil_low"
+
+
+def smooth_tiles(
+    indices: np.ndarray,
+    water_mask: np.ndarray,
+    tile_names: Sequence[str],
+    passes: int,
+) -> np.ndarray:
+    water_tiles = {
+        index
+        for index, tile in enumerate(tile_names)
+        if tile in {"deep_ocean", "close_ocean", "shallow_waters"}
+    }
+    result = indices.copy()
+    for _ in range(passes):
+        own_neighbors = np.zeros(result.shape, dtype=np.uint8)
+        best_neighbors = np.zeros(result.shape, dtype=np.uint8)
+        best_tile = result.copy()
+
+        for tile in np.unique(result):
+            tile_mask = result == tile
+            counts = neighbor_count(tile_mask)
+            own_neighbors[tile_mask] = counts[tile_mask]
+
+            domain = water_mask if int(tile) in water_tiles else ~water_mask
+            better = domain & (counts > best_neighbors)
+            best_neighbors[better] = counts[better]
+            best_tile[better] = tile
+
+        next_result = result.copy()
+        isolated = own_neighbors <= 1
+        next_result[isolated] = best_tile[isolated]
+        result = next_result
+    return result
+
+
+def fit_size(shape: Tuple[int, int], max_dimension: int) -> Tuple[int, int]:
+    height, width = shape
+    scale = min(1.0, max_dimension / max(height, width))
+    return max(1, round(width * scale)), max(1, round(height * scale))
+
+
+def resize_mask(
+    mask: np.ndarray,
+    size: Tuple[int, int],
+    threshold: float,
+) -> np.ndarray:
+    image = Img.fromarray(mask.astype(np.uint8) * 255)
+    resized = image.resize(size, resample=Img.Resampling.BOX)
+    return np.asarray(resized, dtype=np.uint8) >= round(255 * threshold)
+
+
+def binary_dilate(mask: np.ndarray, iterations: int) -> np.ndarray:
+    result = mask.copy()
+    for _ in range(iterations):
+        result |= neighbor_count(result) > 0
+    return result
+
+
+def binary_erode(
+    mask: np.ndarray,
+    iterations: int,
+    border_value: bool = False,
+) -> np.ndarray:
+    result = mask.copy()
+    for _ in range(iterations):
+        result &= neighbor_count(result, border_value=border_value) == 8
+    return result
+
+
+def binary_close(mask: np.ndarray, iterations: int) -> np.ndarray:
+    return binary_erode(binary_dilate(mask, iterations), iterations)
+
+
+def flood_connected(mask: np.ndarray, seeds: np.ndarray) -> np.ndarray:
+    reached = seeds & mask
+    queue = deque(zip(*np.where(reached)))
+    height, width = mask.shape
+
+    while queue:
+        row, col = queue.popleft()
+        for next_row, next_col in (
+            (row - 1, col),
+            (row + 1, col),
+            (row, col - 1),
+            (row, col + 1),
+        ):
+            if (
+                0 <= next_row < height
+                and 0 <= next_col < width
+                and mask[next_row, next_col]
+                and not reached[next_row, next_col]
+            ):
+                reached[next_row, next_col] = True
+                queue.append((next_row, next_col))
+
+    return reached
+
+
+def fill_small_land_regions(water_mask: np.ndarray, min_area: int) -> np.ndarray:
+    """Turn tiny 8-connected land components back into water."""
+    land_mask = ~water_mask
+    parents = []
+    areas = []
+    runs = []
+
+    def find(label: int) -> int:
+        root = label
+        while parents[root] != root:
+            root = parents[root]
+        while parents[label] != label:
+            next_label = parents[label]
+            parents[label] = root
+            label = next_label
+        return root
+
+    def union(first: int, second: int) -> None:
+        first_root = find(first)
+        second_root = find(second)
+        if first_root == second_root:
+            return
+        if areas[first_root] < areas[second_root]:
+            first_root, second_root = second_root, first_root
+        parents[second_root] = first_root
+        areas[first_root] += areas[second_root]
+
+    previous_runs = []
+    for row_index, row in enumerate(land_mask):
+        padded = np.pad(row.astype(np.int8), (1, 1), mode="constant")
+        changes = np.diff(padded)
+        starts = np.flatnonzero(changes == 1)
+        ends = np.flatnonzero(changes == -1)
+        current_runs = []
+        previous_index = 0
+
+        for start_value, end_value in zip(starts, ends):
+            start = int(start_value)
+            end = int(end_value)
+            label = len(parents)
+            parents.append(label)
+            areas.append(end - start)
+
+            while (
+                previous_index < len(previous_runs)
+                and previous_runs[previous_index][2] < start
+            ):
+                previous_index += 1
+
+            overlap_index = previous_index
+            while (
+                overlap_index < len(previous_runs)
+                and previous_runs[overlap_index][1] <= end
+            ):
+                union(label, previous_runs[overlap_index][0])
+                overlap_index += 1
+
+            run = (label, start, end)
+            current_runs.append(run)
+            runs.append((row_index, start, end, label))
+
+        previous_runs = current_runs
+
+    result = water_mask.copy()
+    for row, start, end, label in runs:
+        if areas[find(label)] < min_area:
+            result[row, start:end] = True
+    return result
+
+
+def neighbor_count(mask: np.ndarray, border_value: bool = False) -> np.ndarray:
+    padded = np.pad(
+        mask.astype(np.uint8),
+        1,
+        mode="constant",
+        constant_values=int(border_value),
+    )
+    return (
+        padded[:-2, :-2]
+        + padded[:-2, 1:-1]
+        + padded[:-2, 2:]
+        + padded[1:-1, :-2]
+        + padded[1:-1, 2:]
+        + padded[2:, :-2]
+        + padded[2:, 1:-1]
+        + padded[2:, 2:]
+    )
+
+
+def tile_index(tile_names: Sequence[str], *preferred: str) -> int:
+    lookup: Dict[str, int] = {tile: index for index, tile in enumerate(tile_names)}
+    for tile in preferred:
+        if tile in lookup:
+            return lookup[tile]
+    return 0
+
+
+def make_index_image(indices: np.ndarray, tile_names: Sequence[str]) -> Image:
+    image = Img.fromarray(indices, mode="P")
+    palette = []
+    for tile in tile_names:
+        palette.extend(TILES[tile])
+    palette.extend([0, 0, 0] * (256 - len(tile_names)))
+    image.putpalette(palette[: 256 * 3])
+    return image
