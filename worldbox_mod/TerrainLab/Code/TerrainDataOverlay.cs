@@ -46,7 +46,8 @@ namespace TerrainLab
 
         public TerrainDataOverlayMode Mode { get; private set; }
 
-        public bool IsVisible => Mode != TerrainDataOverlayMode.None && _chunks.Count > 0;
+        public bool IsVisible =>
+            Mode != TerrainDataOverlayMode.None && _sourceState != null;
 
         public bool References(TerrainWorldState state)
         {
@@ -73,13 +74,8 @@ namespace TerrainLab
                 }
             }
 
-            if (_chunks.Count == 0)
-            {
-                _sourceState = null;
-                _chunkColumns = 0;
-                return;
-            }
-
+            // A valid all-zero raster is still an active layer. Keeping its
+            // source allows the first wet cell to create a chunk incrementally.
             Mode = mode;
         }
 

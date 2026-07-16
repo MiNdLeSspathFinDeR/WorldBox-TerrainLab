@@ -20,7 +20,7 @@ against screen edges and can be collapsed independently.
 
 ## Implementation status
 
-Version 1.2.3 implements the standalone side button, an adaptive top GIS
+Version 1.2.4 implements the standalone side button, an adaptive top GIS
 toolbar, and a stock WorldBox internal window. The toolbar copies the bottom
 WorldBox panel and button sprites, stretches to the logical canvas width, and
 balances commands across as few rows as the current UI scale permits. Its frame
@@ -66,8 +66,9 @@ icon. It is a repeat-click toggle with a green native activity lamp; the lamp
 turns amber when the configured area ceiling is reached. The Parameters page
 contains maximum flooded area, finite contact volume, geyser pulse volume, and
 cells-per-tick controls, a `0..16` evaporation-per-30-second field, and live
-managed-cell/source diagnostics. A segmented
-`D8 | D-infinity | MFD` selector changes only future live channel routing and
+managed-cell/source diagnostics plus geyser, injected-volume, and
+consumed-volume counters. A segmented `D8 | D-infinity | MFD` selector changes
+only future live channel routing and
 highlights the active method; each option has a method-specific hover summary.
 
 The Layers chapter also exposes the authoritative Int16 DEM directly, without
@@ -91,6 +92,9 @@ Five river-valley diagnostics now follow the water controls: persistent
 river/waterbody class, moisture, erodibility, compact local slope, and compact
 local aspect. They reuse the existing raster/vector/style/filter/visibility
 sprites with distinct badges until purpose-drawn water-process icons arrive.
+Erodibility and local terrain derivatives cover every valid DEM cell. Empty
+managed-water, storage, feature, or moisture rasters remain selected and begin
+drawing as soon as the first routed water cells appear.
 
 The standalone side button cycles through three levels: off, toolbar only, and
 toolbar plus general settings. Another press from settings closes the complete

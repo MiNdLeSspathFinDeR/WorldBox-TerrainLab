@@ -121,6 +121,84 @@ namespace TerrainLab
             return (byte)Math.Max(1, Math.Min(MaximumEncodedValue, value));
         }
 
+        public static bool EnsureTerrainAttributes(
+            TerrainWorldState state,
+            TerrainWaterState water)
+        {
+            if (state == null || water == null ||
+                water.Erodibility == null ||
+                water.Erodibility.Length != state.CellCount ||
+                water.LocalSlope == null ||
+                water.LocalSlope.Length != state.CellCount ||
+                water.LocalAspect == null ||
+                water.LocalAspect.Length != state.CellCount)
+            {
+                throw new InvalidOperationException(
+                    "River-valley terrain attributes do not match the project grid.");
+            }
+
+            bool changed = false;
+            for (int index = 0; index < state.CellCount; index++)
+            {
+                if (state.Elevation[index] == TerrainElevationEncoding.NoData)
+                {
+                    changed |= SetIfDifferent(
+                        water.Erodibility,
+                        index,
+                        NoDirection);
+                    changed |= SetIfDifferent(
+                        water.LocalSlope,
+                        index,
+                        NoDirection);
+                    changed |= SetIfDifferent(
+                        water.LocalAspect,
+                        index,
+                        NoDirection);
+                    continue;
+                }
+
+                byte erodibility = water.Erodibility[index];
+                if (erodibility == 0 || erodibility == NoDirection)
+                {
+                    changed |= SetIfDifferent(
+                        water.Erodibility,
+                        index,
+                        GetBaseErodibility(
+                            state.Material[index],
+                            state.Landform[index]));
+                }
+
+                if (water.LocalSlope[index] == NoDirection)
+                {
+                    CalculateLocalTerrain(
+                        state.Width,
+                        state.Height,
+                        state.Elevation,
+                        index,
+                        state.HorizontalMetresPerCell,
+                        out byte slope,
+                        out byte aspect,
+                        out _);
+                    changed |= SetIfDifferent(water.LocalSlope, index, slope);
+                    changed |= SetIfDifferent(water.LocalAspect, index, aspect);
+                }
+            }
+
+            water.IsDirty |= changed;
+            return changed;
+        }
+
+        private static bool SetIfDifferent(byte[] layer, int index, byte value)
+        {
+            if (layer[index] == value)
+            {
+                return false;
+            }
+
+            layer[index] = value;
+            return true;
+        }
+
         public static byte GetFlowResistance(
             byte material,
             byte hydroFeature,
@@ -364,6 +442,44 @@ namespace TerrainLab
             water.Erodibility[index] = 0;
             water.LocalSlope[index] = NoDirection;
             water.LocalAspect[index] = NoDirection;
+            water.IsDirty = true;
+        }
+
+        public static void ClearCell(
+            TerrainWorldState state,
+            TerrainWaterState water,
+            int index)
+        {
+            if (state == null || water == null || index < 0 ||
+                index >= state.CellCount)
+            {
+                return;
+            }
+
+            water.HydroFeature[index] = (byte)TerrainHydroFeature.None;
+            water.Moisture[index] = 0;
+            if (state.Elevation[index] == TerrainElevationEncoding.NoData)
+            {
+                water.Erodibility[index] = NoDirection;
+                water.LocalSlope[index] = NoDirection;
+                water.LocalAspect[index] = NoDirection;
+            }
+            else
+            {
+                water.Erodibility[index] = GetBaseErodibility(
+                    state.Material[index],
+                    state.Landform[index]);
+                CalculateLocalTerrain(
+                    state.Width,
+                    state.Height,
+                    state.Elevation,
+                    index,
+                    state.HorizontalMetresPerCell,
+                    out water.LocalSlope[index],
+                    out water.LocalAspect[index],
+                    out _);
+            }
+
             water.IsDirty = true;
         }
 

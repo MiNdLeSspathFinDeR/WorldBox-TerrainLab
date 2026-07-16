@@ -2,6 +2,25 @@
 
 ## Unreleased
 
+## 1.2.4 - 2026-07-17
+
+- Water-state rasters are now initialized when a world is attached, so every
+  water-layer button has a valid dataset before live routing is enabled.
+- Valid all-zero water rasters remain selected and begin rendering
+  incrementally when their first wet cells arrive instead of reporting an
+  empty layer and silently detaching.
+- Base erodibility and compact metric Horn slope/aspect are initialized for
+  every valid DEM cell. Drying clears dynamic water state without deleting
+  those intrinsic terrain attributes.
+- Moved native geyser observation from a drop-manager inference to the actual
+  `Building.spawnBurstSpecial(int)` call. A pristine water simulation starts on
+  its first geyser pulse, searches outside the building footprint for a safe
+  outlet up to four cells away, and reports pulse/injected/consumed counters.
+  Routing continues while GIS/settings windows are open and pauses only with
+  the game or a conflicting scientific analysis.
+- Advanced `hydrology.water_dynamics` to schema `1.5.0`; older payloads migrate
+  the full-grid terrain attributes while preserving dynamic river data.
+
 ## 1.2.3 - 2026-07-17
 
 - Decoupled toolbar chapter navigation from active map-tool state. Inspector,

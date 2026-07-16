@@ -183,6 +183,9 @@ namespace TerrainLab
             }
 
             WaterDynamics.ValidateAndRecount(CellCount);
+            TerrainRiverValleyModel.EnsureTerrainAttributes(
+                this,
+                WaterDynamics);
             return WaterDynamics;
         }
 

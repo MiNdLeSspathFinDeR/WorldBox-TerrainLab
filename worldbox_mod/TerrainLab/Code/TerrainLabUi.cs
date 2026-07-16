@@ -67,6 +67,7 @@ namespace TerrainLab
         private const string WindowTitleKey = "terrain_lab_window_title";
         private const string SideButtonKey = "terrain_lab_side_button";
         private const string IconResourceRoot = "terrainlab/icons/";
+        private const float LiveModuleRefreshIntervalSeconds = 1f;
 
         private static readonly Color NeutralText = new Color(0.83f, 0.79f, 0.66f, 1f);
         private static readonly Color SuccessText = new Color(0.55f, 0.82f, 0.55f, 1f);
@@ -185,6 +186,7 @@ namespace TerrainLab
         private TerrainHydrologyOverlayMode _pendingHydrologyOverlay;
         private TerrainErosionOverlayMode _pendingErosionOverlay;
         private string _pendingOverlayJobId;
+        private float _nextLiveModuleRefreshTime;
         private bool _initialized;
 
         public void Initialize(ModDeclare declaration, TerrainLabEditor editor)
@@ -2159,6 +2161,14 @@ namespace TerrainLab
                     ? WarningText
                     : enabled ? SuccessText : NeutralText,
                 42f);
+            CreateInfoText(
+                string.Format(
+                    LM.Get("terrain_lab_water_dynamics_balance_format"),
+                    water?.GeyserPulseCount ?? 0L,
+                    water?.TotalInjectedVolume ?? 0L,
+                    water?.TotalConsumedVolume ?? 0L),
+                NeutralText,
+                28f);
 
             if (!string.IsNullOrWhiteSpace(service?.LastError))
             {
@@ -4816,6 +4826,16 @@ namespace TerrainLab
 
             if (_initialized && _window != null && _window.gameObject.activeInHierarchy)
             {
+                TerrainWaterDynamicsService waterService =
+                    TerrainLabRuntime.Instance?.WaterDynamics;
+                if (waterService?.Enabled == true &&
+                    Time.unscaledTime < _nextLiveModuleRefreshTime)
+                {
+                    return;
+                }
+
+                _nextLiveModuleRefreshTime =
+                    Time.unscaledTime + LiveModuleRefreshIntervalSeconds;
                 RebuildModuleContent();
             }
         }

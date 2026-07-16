@@ -32,14 +32,15 @@ under `Code` when the game starts.
   including a dedicated ruggedness map layer;
 - Priority-Flood, deterministic D8, UInt32 accumulation, stream extraction,
   stable watershed IDs, and Strahler stream order;
-- bounded live-water routing with finite painted sources, native geyser pulse
-  replenishment, selectable D8/D-infinity/MFD channel routing, local depression
-  filling, absolute 0/-5/-150-metre water classes, persistent UInt8 storage,
+- bounded live-water routing with finite painted sources, auto-starting native
+  geyser replenishment, selectable D8/D-infinity/MFD channel routing, local
+  depression filling, absolute 0/-5/-150-metre water classes, persistent UInt8 storage,
   evaporation/recharge, gameplay-safe dry-surface restoration, and a
   non-bypassable 50-percent valid-cell ceiling;
 - persistent river/waterbody semantics at any elevation, compact UInt8
-  moisture, erodibility, local slope/aspect, material resistance and retention,
-  soil-to-sand-to-clay evolution, and bounded local DEM channel incision;
+  moisture, full-grid erodibility and local slope/aspect, material resistance
+  and retention, soil-to-sand-to-clay evolution, and bounded local DEM channel
+  incision;
 - live managed-water, storage, hydro-feature, moisture, erodibility, local
   slope, and local aspect overlays that update during growth, recharge, drying,
   erosion, and evaporation;

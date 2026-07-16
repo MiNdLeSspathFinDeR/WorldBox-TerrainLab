@@ -4,6 +4,7 @@ using System.Diagnostics;
 using System.IO;
 using System.IO.Compression;
 using System.Linq;
+using System.Reflection;
 using System.Runtime.Serialization;
 using System.Security.Cryptography;
 using System.Text;
@@ -50,6 +51,7 @@ internal static class Program
         try
         {
             ValidateMapBudget();
+            ValidateGamePatchTargets();
             ValidateDigitizingRaster();
             ValidateEarthElevationModel();
             ValidateElevationPalette();
@@ -87,6 +89,24 @@ internal static class Program
                 Directory.Delete(testRoot, true);
             }
         }
+    }
+
+    private static void ValidateGamePatchTargets()
+    {
+        Type patchType = typeof(TerrainLabMod).Assembly.GetType(
+            "TerrainLab.TerrainLabGeyserPulsePatch",
+            true);
+        MethodInfo resolver = patchType.GetMethod(
+            "TargetMethod",
+            BindingFlags.NonPublic | BindingFlags.Static);
+        MethodBase target = (MethodBase)resolver?.Invoke(null, null);
+        Assert(
+            target != null &&
+            target.DeclaringType == typeof(Building) &&
+            target.Name == "spawnBurstSpecial" &&
+            target.GetParameters().Length == 1 &&
+            target.GetParameters()[0].ParameterType == typeof(int),
+            "The geyser Harmony patch no longer targets Building.spawnBurstSpecial(int).");
     }
 
     private static void ValidateReliefAlgorithm()
@@ -646,6 +666,14 @@ internal static class Program
         GC.Collect();
         long beforeBytes = GC.GetTotalMemory(true);
         Stopwatch stopwatch = Stopwatch.StartNew();
+        Stopwatch waterAttributesWatch = Stopwatch.StartNew();
+        TerrainWaterState waterState = state.EnsureWaterDynamics();
+        waterAttributesWatch.Stop();
+        Assert(
+            waterState.Erodibility[generatedPeak] != 0 &&
+            waterState.LocalSlope[generatedPeak] !=
+                TerrainRiverValleyModel.NoDirection,
+            "Maximum-grid river terrain attributes were not initialized.");
         RunRelief(state);
         TerrainHydrologyModule hydrology = new TerrainHydrologyModule();
         RunHydrology(
@@ -695,6 +723,10 @@ internal static class Program
             "Maximum-grid DEM regularization: {0:N0} cells, {1:0.00}s.",
             count,
             regularizationWatch.Elapsed.TotalSeconds);
+        Console.WriteLine(
+            "Maximum-grid river attributes: {0:N0} cells, {1:0.00}s.",
+            count,
+            waterAttributesWatch.Elapsed.TotalSeconds);
         Console.WriteLine(
             "Maximum-grid stress: {0:N0} cells, {1:0.00}s, retained managed delta " +
             "{2:N1} MiB, process peak {3:N1} MiB.",
@@ -1580,6 +1612,14 @@ internal static class Program
             100d);
         TerrainWaterState water = state.EnsureWaterDynamics();
         int channel = height / 2 * width + 2;
+        Assert(
+            water.Erodibility[channel] ==
+                TerrainRiverValleyModel.GetBaseErodibility(
+                    state.Material[channel],
+                    state.Landform[channel]) &&
+            water.LocalSlope[channel] != TerrainRiverValleyModel.NoDirection &&
+            water.LocalAspect[channel] != TerrainRiverValleyModel.NoDirection,
+            "Static river terrain attributes were not initialized for the DEM.");
         TerrainHydroFeature channelFeature = TerrainRiverValleyModel.ActivateCell(
             state,
             water,
@@ -1604,6 +1644,11 @@ internal static class Program
             Enumerable.Repeat((byte)TerrainLandform.Plain, 9).ToArray(),
             Enumerable.Repeat((byte)TerrainMaterial.Soil, 9).ToArray());
         TerrainWaterState flatWater = flatState.EnsureWaterDynamics();
+        Assert(
+            flatWater.Erodibility[4] != 0 &&
+            flatWater.LocalSlope[4] == 0 &&
+            flatWater.LocalAspect[4] == TerrainRiverValleyModel.NoDirection,
+            "Flat valid terrain was confused with an uninitialized water layer.");
         Assert(
             TerrainRiverValleyModel.ActivateCell(flatState, flatWater, 4, 3) ==
             TerrainHydroFeature.Waterbody,
@@ -1639,12 +1684,13 @@ internal static class Program
             evolution.IncisionElevations[incisionOffset] < elevation[channel],
             "River incision did not lower the bed elevation.");
 
-        TerrainRiverValleyModel.ClearCell(water, channel);
+        TerrainRiverValleyModel.ClearCell(state, water, channel);
         Assert(
             water.HydroFeature[channel] == (byte)TerrainHydroFeature.None &&
             water.Moisture[channel] == 0 &&
-            water.LocalSlope[channel] == TerrainRiverValleyModel.NoDirection,
-            "Explicit river-valley clearing left stale dynamic attributes.");
+            water.Erodibility[channel] != 0 &&
+            water.LocalSlope[channel] != TerrainRiverValleyModel.NoDirection,
+            "Drying a river removed intrinsic terrain attributes.");
     }
 
     private static void ValidateWaterRoutingAlgorithms()

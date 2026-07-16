@@ -1807,7 +1807,7 @@ namespace TerrainLab
 
         public string Id => "hydrology.water_dynamics";
 
-        public string SchemaVersion => "1.4.0";
+        public string SchemaVersion => "1.5.0";
 
         public bool IsRequired => false;
 
@@ -1977,7 +1977,8 @@ namespace TerrainLab
                 {
                     if (water.HydroFeature[index] >
                             (byte)TerrainHydroFeature.Waterbody ||
-                        water.Erodibility[index] == byte.MaxValue)
+                        water.Erodibility[index] == byte.MaxValue &&
+                        state.Elevation[index] != TerrainElevationEncoding.NoData)
                     {
                         throw new InvalidDataException(
                             "River-valley layers contain an invalid value.");
@@ -2035,7 +2036,9 @@ namespace TerrainLab
                     "Water dynamics managed-cell count is inconsistent.");
             }
 
-            water.IsDirty = false;
+            bool terrainAttributesMigrated =
+                TerrainRiverValleyModel.EnsureTerrainAttributes(state, water);
+            water.IsDirty = terrainAttributesMigrated;
             state.WaterDynamics = water;
         }
 

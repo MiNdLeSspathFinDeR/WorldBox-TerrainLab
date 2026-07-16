@@ -134,10 +134,12 @@ bounded DEM process without replacing WorldBox's own ocean behavior:
    material/feature/moisture resistance term. Clay and an established channel
    pass flow farther than dry soil, organic cover, rock, or artificial material.
    An ordinary contact still has a finite configurable volume.
-5. A Harmony postfix observes the native `geyser` building's actual `rain`
-   submission to `DropManager.spawnParabolicDrop`. Every real drop adds
-   configurable volume at the lowest safe adjacent cell, so a live geyser
-   behaves as a continuing river source without replacing its building tile.
+5. A Harmony postfix observes the native `geyser` building's own
+   `Building.spawnBurstSpecial(int)` call. Its first pulse starts a pristine
+   routing state automatically; every burst adds configurable volume at the
+   lowest safe outlet on the nearest available ring, searching up to four cells
+   outside the building footprint. A live geyser therefore behaves as a
+   continuing river source without replacing itself.
 6. TerrainLab-created water may occupy at most the configured 1-50 percent of
    valid DEM cells. Fifty percent is a non-bypassable hard maximum. Existing
    ocean cells do not consume that budget, and hazardous/non-copyable surfaces
@@ -154,9 +156,11 @@ bounded DEM process without replacing WorldBox's own ocean behavior:
    The mask and store export as `managed_water.tif` and `water_storage.tif`.
 9. Five additional one-byte fields describe river-valley state: persistent
    hydro feature, moisture, nonlinear erodibility, local Horn slope, and local
-   downslope aspect. Slope maps `0..254` to `0..pi/2` radians; aspect maps the
-   same range to `0..2*pi`; `255` means undefined. This costs five bytes per map
-   cell and avoids persistent floating-point derivative grids.
+   downslope aspect. Erodibility and the metric terrain derivatives are ready
+   for every valid DEM cell before water arrives. Slope maps `0..254` to
+   `0..pi/2` radians; aspect maps the same range to `0..2*pi`; `255` means
+   undefined. This costs five bytes per map cell and avoids floating-point
+   derivative grids.
 10. Every 30-second climate pass updates moisture and erodibility only for wet,
     hydro-feature, or still-moist cells. Saturated soil/organic material may
     degrade to sand; saturated convergent alluvium may become gameplay-safe
@@ -165,6 +169,8 @@ bounded DEM process without replacing WorldBox's own ocean behavior:
     Routing is rebuilt on the changed DEM while active source volume is retained.
 11. Managed mask, store, hydro feature, moisture, erodibility, local slope, and
     local aspect are visible as live overlays and export as UInt8 GeoTIFFs.
+    A valid all-zero layer remains active and starts drawing incrementally when
+    its first non-zero water cell appears.
 
 The selector affects only live channel creation. Stored watershed,
 flow-accumulation, Strahler, and erosion products retain their deterministic D8

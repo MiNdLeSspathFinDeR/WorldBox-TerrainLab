@@ -178,7 +178,7 @@ WorldBox writes `map.wbox` first; TerrainLab then writes
 same vanilla map plus core GIS arrays and optional hydrology, live-water, and
 erosion modules.
 Live-water configuration and all eight state rasters use optional
-`hydrology.water_dynamics` schema `1.4.0`. The managed mask, store,
+`hydrology.water_dynamics` schema `1.5.0`. The managed mask, store,
 river/waterbody class, moisture, erodibility, local slope, and local aspect also
 export to GeoTIFF; restore-surface codes remain package-internal.
 Unknown optional module data survives load/save. Invalid optional data is

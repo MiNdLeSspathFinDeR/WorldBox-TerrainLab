@@ -14,6 +14,7 @@ namespace TerrainLab
         private const int MaximumRecentPaintCells = 8192;
         private const int ContactBucketColumns = 16;
         private const int ContactBucketRows = 8;
+        private const string TerrainLabWindowId = "terrain_lab_window";
 
         private readonly Queue<WorldTile> _paintedWater = new Queue<WorldTile>();
         private readonly HashSet<int> _queuedPaintIndices = new HashSet<int>();
@@ -31,6 +32,7 @@ namespace TerrainLab
         private long _routingRevision = -1;
         private float _nextTickTime;
         private float _nextClimateTime;
+        private bool _pausedByUser;
 
         public event Action<IReadOnlyList<int>> CellsChanged;
 
@@ -62,10 +64,11 @@ namespace TerrainLab
 
             try
             {
-                if (state.WaterDynamics?.Enabled == true)
+                TerrainWaterState water = state.WaterDynamics ??
+                    state.EnsureWaterDynamics();
+                if (water.Enabled)
                 {
-                    // Re-seeding every load would turn a finite source into an
-                    // implicit infinite one.
+                    // Existing oceans are classifications, not live sources.
                     BuildSimulation(seedExistingContacts: false);
                 }
                 else
@@ -140,28 +143,26 @@ namespace TerrainLab
 
             try
             {
-                if (state.WaterDynamics == null)
-                {
-                    state.WaterDynamics = TerrainWaterState.Create(state.CellCount);
-                }
-
-                state.WaterDynamics.ValidateAndRecount(state.CellCount);
-                state.WaterDynamics.Enabled = enabled;
-                state.WaterDynamics.IsDirty = true;
+                TerrainWaterState water = state.WaterDynamics ??
+                    state.EnsureWaterDynamics();
+                water.Enabled = enabled;
+                water.IsDirty = true;
                 _state = state;
                 LastError = null;
                 if (enabled)
                 {
                     bool firstActivation =
-                        state.WaterDynamics.TotalInjectedVolume == 0L &&
-                        state.WaterDynamics.ManagedCellCount == 0 &&
-                        state.WaterDynamics.GeyserPulseCount == 0L;
+                        water.TotalInjectedVolume == 0L &&
+                        water.ManagedCellCount == 0 &&
+                        water.GeyserPulseCount == 0L;
                     BuildSimulation(seedExistingContacts: firstActivation);
                 }
                 else
                 {
                     ResetRuntime(keepState: true);
                 }
+
+                _pausedByUser = !enabled;
 
                 NotifyCellsChanged(null);
 
@@ -195,14 +196,11 @@ namespace TerrainLab
                 return false;
             }
 
-            if (state.WaterDynamics == null)
-            {
-                state.WaterDynamics = TerrainWaterState.Create(state.CellCount);
-            }
-
+            TerrainWaterState water = state.WaterDynamics ??
+                state.EnsureWaterDynamics();
             TerrainWaterParameters normalized = parameters.Normalize();
-            state.WaterDynamics.Parameters = normalized;
-            state.WaterDynamics.IsDirty = true;
+            water.Parameters = normalized;
+            water.IsDirty = true;
             if (ReferenceEquals(state, _state))
             {
                 _simulation?.UpdateParameters(normalized);
@@ -213,22 +211,37 @@ namespace TerrainLab
 
         public void NotifyGeyserPulse(WorldTile tile, int pulseCount)
         {
-            if (!Enabled || tile == null || pulseCount <= 0)
+            if (tile == null || pulseCount <= 0)
             {
                 return;
             }
 
             try
             {
-                EnsureSimulation();
-                int geyserIndex = GetTileIndex(tile);
-                if (geyserIndex < 0 ||
-                    !TryGetGeyserOutlet(geyserIndex, out int origin))
+                if (!TryAutoStartForGeyser())
                 {
                     return;
                 }
 
+                EnsureSimulation();
                 TerrainWaterState water = _state.WaterDynamics;
+                int geyserIndex = GetTileIndex(tile);
+                if (geyserIndex < 0)
+                {
+                    LastError = "Geyser pulse tile is outside the active TerrainLab grid.";
+                    return;
+                }
+
+                water.GeyserPulseCount = SaturatingAdd(
+                    water.GeyserPulseCount,
+                    pulseCount);
+                water.IsDirty = true;
+                if (!TryGetGeyserOutlet(geyserIndex, out int origin))
+                {
+                    LastError = "Geyser has no gameplay-safe outlet within four cells.";
+                    return;
+                }
+
                 long volume = SaturatingMultiply(
                     pulseCount,
                     water.Parameters.GeyserPulseVolume);
@@ -242,16 +255,46 @@ namespace TerrainLab
                     water.TotalInjectedVolume = SaturatingAdd(
                         water.TotalInjectedVolume,
                         volume);
-                    water.GeyserPulseCount = SaturatingAdd(
-                        water.GeyserPulseCount,
-                        pulseCount);
-                    water.IsDirty = true;
+                    LastError = null;
+                }
+                else
+                {
+                    LastError = "Geyser source registry is full.";
                 }
             }
             catch (Exception exception)
             {
                 DisableAfterError(exception);
             }
+        }
+
+        private bool TryAutoStartForGeyser()
+        {
+            if (Enabled)
+            {
+                return true;
+            }
+
+            if (_pausedByUser || _state == null || !_state.MatchesCurrentWorld())
+            {
+                return false;
+            }
+
+            TerrainWaterState water = _state.WaterDynamics ??
+                _state.EnsureWaterDynamics();
+            bool pristine = water.ManagedCellCount == 0 &&
+                            water.TotalInjectedVolume == 0L &&
+                            water.GeyserPulseCount == 0L;
+            if (!pristine)
+            {
+                return false;
+            }
+
+            water.Enabled = true;
+            water.IsDirty = true;
+            BuildSimulation(seedExistingContacts: false);
+            NotifyCellsChanged(null);
+            return true;
         }
 
         private bool TryGetGeyserOutlet(int geyserIndex, out int outlet)
@@ -262,39 +305,67 @@ namespace TerrainLab
                 return true;
             }
 
-            int selectedOutlet = -1;
-            _routing.ForEachNeighbor(geyserIndex, delegate(int neighbor)
+            int centerX = geyserIndex % _state.Width;
+            int centerY = geyserIndex / _state.Width;
+            for (int radius = 1; radius <= 4; radius++)
             {
-                if (!IsUsableGeyserOutlet(neighbor))
+                int selectedOutlet = -1;
+                for (int offsetY = -radius; offsetY <= radius; offsetY++)
                 {
-                    return;
+                    int y = centerY + offsetY;
+                    if (y < 0 || y >= _state.Height)
+                    {
+                        continue;
+                    }
+
+                    for (int offsetX = -radius; offsetX <= radius; offsetX++)
+                    {
+                        if (Math.Max(Math.Abs(offsetX), Math.Abs(offsetY)) != radius)
+                        {
+                            continue;
+                        }
+
+                        int x = centerX + offsetX;
+                        if (x < 0 || x >= _state.Width)
+                        {
+                            continue;
+                        }
+
+                        int candidate = y * _state.Width + x;
+                        if (!IsUsableGeyserOutlet(candidate) ||
+                            selectedOutlet >= 0 &&
+                            !IsBetterGeyserOutlet(candidate, selectedOutlet))
+                        {
+                            continue;
+                        }
+
+                        selectedOutlet = candidate;
+                    }
                 }
 
-                if (selectedOutlet < 0 ||
-                    _routing.FilledElevation[neighbor] <
-                    _routing.FilledElevation[selectedOutlet] ||
-                    _routing.FilledElevation[neighbor] ==
-                    _routing.FilledElevation[selectedOutlet] &&
-                    (_routing.Elevation[neighbor] <
-                     _routing.Elevation[selectedOutlet] ||
-                     _routing.Elevation[neighbor] ==
-                     _routing.Elevation[selectedOutlet] &&
-                     neighbor < selectedOutlet))
+                if (selectedOutlet >= 0)
                 {
-                    selectedOutlet = neighbor;
+                    outlet = selectedOutlet;
+                    _geyserOutlets[geyserIndex] = outlet;
+                    return true;
                 }
-            });
-
-            if (selectedOutlet < 0)
-            {
-                outlet = -1;
-                _geyserOutlets.Remove(geyserIndex);
-                return false;
             }
 
-            outlet = selectedOutlet;
-            _geyserOutlets[geyserIndex] = outlet;
-            return true;
+            outlet = -1;
+            _geyserOutlets.Remove(geyserIndex);
+            return false;
+        }
+
+        private bool IsBetterGeyserOutlet(int candidate, int current)
+        {
+            return _routing.FilledElevation[candidate] <
+                   _routing.FilledElevation[current] ||
+                   _routing.FilledElevation[candidate] ==
+                   _routing.FilledElevation[current] &&
+                   (_routing.Elevation[candidate] <
+                    _routing.Elevation[current] ||
+                    _routing.Elevation[candidate] ==
+                    _routing.Elevation[current] && candidate < current);
         }
 
         private bool IsUsableGeyserOutlet(int index)
@@ -345,8 +416,7 @@ namespace TerrainLab
                 TerrainWaterState water = _state.WaterDynamics;
                 if (water == null)
                 {
-                    water = TerrainWaterState.Create(_state.CellCount);
-                    _state.WaterDynamics = water;
+                    water = _state.EnsureWaterDynamics();
                 }
 
                 TerrainHydroFeature existingFeature =
@@ -444,7 +514,7 @@ namespace TerrainLab
                     changed |= TerrainRiverValleyModel.NormalizeFeature(
                         water.HydroFeature[index]) != TerrainHydroFeature.None;
                     water.ClearManagedStorage(index);
-                    TerrainRiverValleyModel.ClearCell(water, index);
+                    TerrainRiverValleyModel.ClearCell(_state, water, index);
                     water.ManagedCellCount = _simulation?.ManagedCellCount ??
                                              water.ManagedCellCount;
                     water.IsDirty |= changed;
@@ -489,7 +559,10 @@ namespace TerrainLab
                 return false;
             }
 
-            if (analysisRunning || Config.paused || ScrollWindow.isWindowActive())
+            bool blockingWindow = ScrollWindow.isWindowActive() &&
+                                  !ScrollWindow.isCurrentWindow(
+                                      TerrainLabWindowId);
+            if (analysisRunning || Config.paused || blockingWindow)
             {
                 return false;
             }
@@ -609,9 +682,7 @@ namespace TerrainLab
             }
 
             TerrainWaterState water = _state.WaterDynamics ??
-                TerrainWaterState.Create(_state.CellCount);
-            _state.WaterDynamics = water;
-            water.ValidateAndRecount(_state.CellCount);
+                _state.EnsureWaterDynamics();
 
             _routing = TerrainWaterRouting.Build(
                 _state.Width,
@@ -1456,6 +1527,7 @@ namespace TerrainLab
             LastError = null;
             if (!keepState)
             {
+                _pausedByUser = false;
                 _autoDriedSurfaces.Clear();
                 _state = null;
             }

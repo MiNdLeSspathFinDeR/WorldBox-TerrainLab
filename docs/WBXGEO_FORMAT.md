@@ -241,7 +241,7 @@ one module; it does not invalidate the core project.
 
 ### Live water module
 
-TerrainLab implements optional module `hydrology.water_dynamics` schema `1.4.0`.
+TerrainLab implements optional module `hydrology.water_dynamics` schema `1.5.0`.
 `state.json` stores whether routing is enabled, normalized integer parameters,
 managed-cell count, injected/consumed volume counters, and observed native
 geyser pulse count. Parameter `routing_algorithm` is one of `d8`, `dinf`, or
@@ -254,9 +254,9 @@ geyser pulse count. Parameter `routing_algorithm` is one of `d8`, `dinf`, or
 | `hydrology.water_dynamics.restore_surface` | UInt8 | none | One-based index into the saved pre-water surface palette; `0` is fallback |
 | `hydrology.water_dynamics.hydro_feature` | UInt8 | `255` | Persistent `0` none, `1` river, `2` waterbody class, including dry channels |
 | `hydrology.water_dynamics.moisture` | UInt8 | none | Dynamic substrate moisture from dry `0` to saturated `255` |
-| `hydrology.water_dynamics.erodibility` | UInt8 | `255` | Dynamic detachment coefficient; `0` is not initialized and valid values end at `254` |
-| `hydrology.water_dynamics.local_slope` | UInt8 | `255` | Metric Horn slope: `0..254` maps to `0..pi/2` radians |
-| `hydrology.water_dynamics.local_aspect` | UInt8 | `255` | Downslope aspect: `0..254` maps to `0..2*pi` radians |
+| `hydrology.water_dynamics.erodibility` | UInt8 | `255` | Base material detachment coefficient for every valid cell, modified dynamically by water; values end at `254` |
+| `hydrology.water_dynamics.local_slope` | UInt8 | `255` | Full-grid metric Horn slope: `0..254` maps to `0..pi/2` radians |
+| `hydrology.water_dynamics.local_aspect` | UInt8 | `255` | Full-grid downslope aspect: `0..254` maps to `0..2*pi` radians; flat cells are undefined |
 
 The loader requires exact project ID, dimensions, layer length, SHA-256, binary
 mask and hydro-feature values, mutually consistent storage/restore rasters, and
@@ -267,7 +267,9 @@ pre-water surface but does not inject another ordinary source budget. Valid
 `1.0.x` and `1.1.x` payloads migrate with shallow default storage and safe
 river/waterbody values; `1.2.x` adds those values to its existing water balance.
 Schema `1.3.x` local slope and aspect values are recalculated with the core
-metric cell size during load.
+metric cell size during load. Schema `1.5.x` expands erodibility, local slope,
+and local aspect from active valleys to every valid DEM cell; older payloads
+receive those values deterministically during load.
 Later native geyser pulses can continue replenishing a source. The configured
 flood percentage is normalized to `1..50`, and runtime
 code always enforces the same hard 50-percent ceiling over valid DEM cells.
