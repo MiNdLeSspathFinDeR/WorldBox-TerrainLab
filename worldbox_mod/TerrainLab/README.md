@@ -15,6 +15,10 @@ under `Code` when the game starts.
 
 - signed Int16 elevation in `-20000..9000 m`, sea level `0`, and reserved
   `NODATA=9999`, independent from vanilla terrain morphotypes;
+- Earth-like initial DEM inference from vanilla worlds, preserving raw relief
+  order while keeping ordinary land predominantly below `2000 m`, placing the
+  mountain/summit median at `5000 m`, and limiting `7000 m` elevation or depth
+  extremes to at most five percent of their semantic group;
 - a direct translucent DEM overlay with one pixel per world cell and a fixed
   blue/cyan and yellow/red Turbo scale around zero, with incremental
   refresh during edit, undo, and redo;

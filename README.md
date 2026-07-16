@@ -24,7 +24,7 @@ project layer for WorldBox.
 4. Auto sizing: if only one size parameter is set, the other is calculated from the image ratio.
 5. Configurable: the legacy direct-palette algorithm and custom tile sets remain available.
 6. In-game GIS: editable `-20000..9000 m` Int16 DEM, fixed-scale translucent
-   Turbo height display,
+   Turbo height display, Earth-like morphotype-aware initial elevations,
    relief derivatives, Priority-Flood/D8, watersheds, Strahler order,
    selectable D8/D-infinity/MFD live-water channels, absolute 0/-5/-150 m water
    classes,

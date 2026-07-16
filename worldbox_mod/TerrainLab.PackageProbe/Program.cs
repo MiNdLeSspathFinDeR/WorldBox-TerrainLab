@@ -51,6 +51,7 @@ internal static class Program
         {
             ValidateMapBudget();
             ValidateDigitizingRaster();
+            ValidateEarthElevationModel();
             ValidateElevationPalette();
             ValidateReliefAlgorithm();
             ValidateHydrologyAlgorithm();
@@ -196,6 +197,165 @@ internal static class Program
                 TerrainElevationEncoding.NoData
             }),
             "Legacy WorldBox height-cache values were not migrated to metre DEM.");
+    }
+
+    private static void ValidateEarthElevationModel()
+    {
+        const int count = 1001;
+        short[] mountains = Enumerable.Range(0, count)
+            .Select(index => TerrainEarthElevationModel.GetRankedElevation(
+                TerrainEarthElevationProfile.Mountain,
+                index,
+                count))
+            .ToArray();
+        Assert(
+            Math.Abs(mountains[count / 2] - 5000) <= 5,
+            "Earth-like mountain median is not 5000 metres.");
+        Assert(
+            mountains.Count(value => value >= 7000) <= count / 20,
+            "More than five percent of inferred mountains reach 7000 metres.");
+        Assert(
+            TerrainEarthElevationModel.GetElevation(
+                TerrainEarthElevationProfile.Mountain,
+                0.5d) == 5000 &&
+            TerrainEarthElevationModel.GetElevation(
+                TerrainEarthElevationProfile.Mountain,
+                0.95d) == 7000,
+            "Mountain profile anchors changed.");
+        Assert(
+            TerrainEarthElevationModel.GetBinnedElevation(
+                TerrainEarthElevationProfile.Mountain,
+                0,
+                count,
+                count) == 5000,
+            "A uniform mountain height was split into artificial noise.");
+
+        short[] lowlands = Enumerable.Range(0, count)
+            .Select(index => TerrainEarthElevationModel.GetRankedElevation(
+                TerrainEarthElevationProfile.Lowland,
+                index,
+                count))
+            .ToArray();
+        Assert(
+            lowlands.All(value => value >= 0 && value < 2000),
+            "The priority lowland profile is not below 2000 metres.");
+        foreach (TerrainEarthElevationProfile profile in new[]
+        {
+            TerrainEarthElevationProfile.Upland,
+            TerrainEarthElevationProfile.Hill
+        })
+        {
+            int belowTwoKilometres = Enumerable.Range(0, count).Count(index =>
+                TerrainEarthElevationModel.GetRankedElevation(
+                    profile,
+                    index,
+                    count) < 2000);
+            Assert(
+                belowTwoKilometres > count / 2,
+                "A non-mountain land profile is not concentrated below 2000 metres.");
+        }
+
+        short[] deepOcean = Enumerable.Range(0, count)
+            .Select(index => TerrainEarthElevationModel.GetRankedElevation(
+                TerrainEarthElevationProfile.DeepOcean,
+                index,
+                count))
+            .ToArray();
+        Assert(
+            Math.Abs(deepOcean[count / 2] + 5000) <= 5,
+            "Earth-like deep-ocean median is not 5000 metres below datum.");
+        Assert(
+            deepOcean.Count(value => value <= -7000) <= count / 20,
+            "More than five percent of inferred deep ocean exceeds 7000 metres depth.");
+        Assert(
+            TerrainEarthElevationModel.GetElevation(
+                TerrainEarthElevationProfile.DeepOcean,
+                0.5d) == -5000 &&
+            TerrainEarthElevationModel.GetElevation(
+                TerrainEarthElevationProfile.DeepOcean,
+                0.95d) == -7000,
+            "Deep-ocean profile anchors changed.");
+        Assert(
+            TerrainEarthElevationModel.GetBinnedElevation(
+                TerrainEarthElevationProfile.DeepOcean,
+                0,
+                count,
+                count) == -5000,
+            "A uniform ocean depth was split into artificial noise.");
+        Assert(
+            deepOcean.All(value => value >= -11000 && value <= -150),
+            "Natural ocean inference crossed the Earth-like -11000..-150 metre range.");
+
+        short[] shelf = Enumerable.Range(0, count)
+            .Select(index => TerrainEarthElevationModel.GetRankedElevation(
+                TerrainEarthElevationProfile.Shelf,
+                index,
+                count))
+            .ToArray();
+        short[] shallow = Enumerable.Range(0, count)
+            .Select(index => TerrainEarthElevationModel.GetRankedElevation(
+                TerrainEarthElevationProfile.ShallowWater,
+                index,
+                count))
+            .ToArray();
+        Assert(
+            shelf.All(value => value >= -149 && value <= -6),
+            "Inferred shelf left the -6..-149 metre class.");
+        Assert(
+            shallow.All(value => value >= -5 && value <= 0),
+            "Inferred shallow water left the 0..-5 metre class.");
+
+        for (int sampleCount = 1; sampleCount <= 200; sampleCount++)
+        {
+            int mountainExtremes = 0;
+            int oceanExtremes = 0;
+            for (int rank = 0; rank < sampleCount; rank++)
+            {
+                if (TerrainEarthElevationModel.GetRankedElevation(
+                    TerrainEarthElevationProfile.Mountain,
+                    rank,
+                    sampleCount) >= 7000)
+                {
+                    mountainExtremes++;
+                }
+
+                if (TerrainEarthElevationModel.GetRankedElevation(
+                    TerrainEarthElevationProfile.DeepOcean,
+                    rank,
+                    sampleCount) <= -7000)
+                {
+                    oceanExtremes++;
+                }
+            }
+
+            Assert(
+                mountainExtremes <= sampleCount / 20 &&
+                oceanExtremes <= sampleCount / 20,
+                "Discrete extreme budget exceeded five percent.");
+        }
+
+        Assert(
+            TerrainEarthElevationModel.GetBinnedElevation(
+                TerrainEarthElevationProfile.Mountain,
+                95,
+                5,
+                100) >= 7000 &&
+            TerrainEarthElevationModel.GetBinnedElevation(
+                TerrainEarthElevationProfile.Mountain,
+                94,
+                6,
+                100) < 7000 &&
+            TerrainEarthElevationModel.GetBinnedElevation(
+                TerrainEarthElevationProfile.DeepOcean,
+                0,
+                5,
+                100) <= -7000 &&
+            TerrainEarthElevationModel.GetBinnedElevation(
+                TerrainEarthElevationProfile.DeepOcean,
+                0,
+                6,
+                100) > -7000,
+            "A tied raw-height bin crossed the five-percent extreme budget.");
     }
 
     private static void ValidateDigitizingRaster()

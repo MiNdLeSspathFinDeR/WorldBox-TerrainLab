@@ -25,6 +25,31 @@ inspected, replaced, or controlled independently.
    lava, grey goo, corruption, tumors, biomass, cyber tiles, and other disruptive
    materials are excluded unless the full palette is explicitly requested.
 
+## Implemented Earth-like initial DEM
+
+When no WBXGEO project exists, TerrainLab infers the first metric DEM from the
+vanilla WorldBox height cache and the categorical surface morphotypes. Raw
+height order is preserved inside each morphotype, but empirical ranks are
+projected onto nonlinear Earth-like profiles instead of stretching every land
+cell across the complete Int16 domain.
+
+| Profile | Median | 95th-percentile boundary | Natural inferred range |
+| --- | ---: | ---: | ---: |
+| Lowland | `350 m` | `1200 m` | `0..1800 m` |
+| Upland | `900 m` | `1800 m` | `300..2400 m` |
+| Hill | `1600 m` | `2800 m` | `600..3800 m` |
+| Mountain and summit | `5000 m` | `7000 m` | `2200..9000 m` |
+| Shallow water | n/a | n/a | `-5..0 m` |
+| Shelf | n/a | n/a | `-149..-6 m` |
+| Deep ocean | `-5000 m` | `-7000 m` | `-11000..-150 m` |
+
+The mountain and deep-ocean extreme budgets use integer cell counts, so no
+more than five percent of either group can reach `7000 m` elevation or depth.
+The natural deep-ocean floor approximates terrestrial bathymetry; the full
+`-20000..9000 m` storage domain remains available to imported GeoTIFFs, manual
+editing, and non-Earth projects. Existing WBXGEO and imported metric DEM values
+are never rank-normalized.
+
 ## Implemented runtime relief
 
 TerrainLab 1.0 derives four rasters from the authoritative Int16 DEM with a Horn

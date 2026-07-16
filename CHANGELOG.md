@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+- Replaced linear vanilla-height expansion with an Earth-like, morphotype-aware
+  initial DEM. Ordinary terrain is concentrated below `2000 m`, combined
+  mountain/summit cells have a `5000 m` median, and at most five percent reach
+  `7000 m` or higher. Deep ocean uses the analogous `5000 m` median and
+  five-percent extreme-depth tail, while shallow water and shelf remain inside
+  `0..-5 m` and `-6..-149 m`.
 - Fixed native geyser injection at the real rain-drop event and moved its
   source to a safe adjacent cell; exhausted routes now restart and refill dried
   channels.

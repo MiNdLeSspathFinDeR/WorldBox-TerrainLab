@@ -213,10 +213,16 @@ namespace TerrainLab
             for (int index = 0; index < tiles.Length; index++)
             {
                 WorldTile tile = tiles[index];
-                state.Elevation[index] = TerrainElevationEncoding.FromWorldHeight(
-                    tile.Height);
                 state.ClassifyTile(index, tile);
+                state.Elevation[index] = (short)Math.Max(
+                    TerrainElevationEncoding.WorldBoxMinimum,
+                    Math.Min(TerrainElevationEncoding.WorldBoxMaximum, tile.Height));
             }
+
+            TerrainEarthElevationModel.InferWorldElevations(
+                tiles,
+                state.Landform,
+                state.Elevation);
 
             return state;
         }
