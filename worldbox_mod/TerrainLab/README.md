@@ -13,10 +13,10 @@ under `Code` when the game starts.
 
 ## Implemented 1.0 surface
 
-- signed Int16 elevation with reserved `NODATA=9999`, independent from vanilla
-  terrain morphotypes;
-- a direct translucent DEM overlay with one pixel per world cell, split
-  blue/cyan and yellow/red Turbo scaling around sea level, and incremental
+- signed Int16 elevation in `-20000..9000 m`, sea level `0`, and reserved
+  `NODATA=9999`, independent from vanilla terrain morphotypes;
+- a direct translucent DEM overlay with one pixel per world cell and a fixed
+  blue/cyan and yellow/red Turbo scale around zero, with incremental
   refresh during edit, undo, and redo;
 - inspect, set, raise, lower, smooth, brush radius, and 32-operation undo/redo;
 - gameplay-safe surface sampling, four-connected fill, line, polygon,
@@ -26,7 +26,7 @@ under `Code` when the game starts.
   stable watershed IDs, and Strahler stream order;
 - bounded live-water routing with finite painted sources, native geyser pulse
   replenishment, selectable D8/D-infinity/MFD channel routing, local depression
-  filling, 5/150-metre depth classes, persistent UInt8 water storage,
+  filling, absolute 0/-5/-150-metre water classes, persistent UInt8 storage,
   evaporation/recharge, gameplay-safe dry-surface restoration, and a
   non-bypassable 50-percent valid-cell ceiling;
 - deterministic integer hydraulic/thermal transport with exact mass balance,
@@ -38,6 +38,8 @@ under `Code` when the game starts.
   incoming history, and `changes.jsonl`;
 - a total map budget of 1,884,160 cells with unrestricted aspect ratio;
 - one background scientific job at a time and `256 x 256` overlay chunks;
+- derivative buttons that automatically calculate missing relief, hydrology,
+  and erosion prerequisites before showing the requested world-layer overlay;
 - a two-level adaptive GIS toolbar with red critical actions, gray chapter
   selectors, contextual functional tools, balanced wrapping, colored semantic
   separators, native WorldBox on/off lamps, repeat-click deselection,

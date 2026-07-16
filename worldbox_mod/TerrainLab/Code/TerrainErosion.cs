@@ -373,11 +373,10 @@ namespace TerrainLab
                     continue;
                 }
 
-                if (work[index] < short.MinValue || work[index] > short.MaxValue ||
-                    work[index] == TerrainElevationEncoding.NoData)
+                if (!TerrainElevationEncoding.IsDataValue(work[index]))
                 {
                     throw new InvalidOperationException(
-                        "Erosion produced an invalid Int16 elevation.");
+                        "Erosion produced an elevation outside -20000..9000 metres.");
                 }
 
                 resultElevation[index] = (short)work[index];
@@ -532,10 +531,8 @@ namespace TerrainLab
 
             long nextHigh = (long)elevation[high] - amount;
             long nextLow = (long)elevation[low] + amount;
-            if (nextHigh < short.MinValue || nextHigh > short.MaxValue ||
-                nextLow < short.MinValue || nextLow > short.MaxValue ||
-                nextHigh == TerrainElevationEncoding.NoData ||
-                nextLow == TerrainElevationEncoding.NoData)
+            if (!TerrainElevationEncoding.IsDataValue(nextHigh) ||
+                !TerrainElevationEncoding.IsDataValue(nextLow))
             {
                 return false;
             }
@@ -876,7 +873,7 @@ namespace TerrainLab
                 }
 
                 valid++;
-                if (result[index] == TerrainElevationEncoding.NoData ||
+                if (!TerrainElevationEncoding.IsDataValue(result[index]) ||
                     netChange[index] != result[index] - source[index])
                 {
                     throw new InvalidDataException("Erosion net-change layer is inconsistent.");

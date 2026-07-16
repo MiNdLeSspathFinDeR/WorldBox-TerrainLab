@@ -38,6 +38,14 @@ namespace TerrainLab
             Settings
         }
 
+        private enum PendingOverlayKind
+        {
+            None,
+            Relief,
+            Hydrology,
+            Erosion
+        }
+
         private enum ToolbarSection
         {
             Primary,
@@ -171,6 +179,11 @@ namespace TerrainLab
         private bool _usesGameIndicatorSprites;
         private bool _advanceWorkspaceAfterWindowClose;
         private bool _suppressWindowHideAdvance;
+        private PendingOverlayKind _pendingOverlayKind;
+        private TerrainReliefOverlayMode _pendingReliefOverlay;
+        private TerrainHydrologyOverlayMode _pendingHydrologyOverlay;
+        private TerrainErosionOverlayMode _pendingErosionOverlay;
+        private string _pendingOverlayJobId;
         private bool _initialized;
 
         public void Initialize(ModDeclare declaration, TerrainLabEditor editor)
@@ -1171,7 +1184,10 @@ namespace TerrainLab
                 string error = GetLastJobError(_runningJobId);
                 if (string.IsNullOrWhiteSpace(error))
                 {
-                    SetStatus(LM.Get("terrain_lab_status_ready"), false, true);
+                    if (string.IsNullOrEmpty(GetActiveToolbarOverlay()))
+                    {
+                        SetStatus(LM.Get("terrain_lab_status_ready"), false, true);
+                    }
                 }
                 else
                 {
@@ -1377,13 +1393,7 @@ namespace TerrainLab
             string activeOverlay = GetActiveToolbarOverlay();
             foreach (KeyValuePair<string, SimpleButton> pair in _toolbarOverlayButtons)
             {
-                bool enabled = pair.Key == "dem_elevation"
-                    ? hasState
-                    : pair.Key.StartsWith("relief_", StringComparison.Ordinal)
-                        ? reliefCurrent
-                        : pair.Key.StartsWith("hydrology_", StringComparison.Ordinal)
-                            ? hydrologyCurrent
-                            : erosionCurrent;
+                bool enabled = hasState;
                 pair.Value.Button.interactable = enabled;
                 pair.Value.Background.color = enabled ? Color.white : InactiveButton;
                 SetToolbarActivity(
@@ -1437,6 +1447,16 @@ namespace TerrainLab
 
         private string GetActiveToolbarOverlay()
         {
+            switch (_pendingOverlayKind)
+            {
+                case PendingOverlayKind.Relief:
+                    return GetReliefOverlayToolbarId(_pendingReliefOverlay);
+                case PendingOverlayKind.Hydrology:
+                    return GetHydrologyOverlayToolbarId(_pendingHydrologyOverlay);
+                case PendingOverlayKind.Erosion:
+                    return GetErosionOverlayToolbarId(_pendingErosionOverlay);
+            }
+
             if (_elevationOverlay != null && _elevationOverlay.IsVisible)
             {
                 return "dem_elevation";
@@ -1490,6 +1510,62 @@ namespace TerrainLab
             }
 
             return null;
+        }
+
+        private static string GetReliefOverlayToolbarId(
+            TerrainReliefOverlayMode mode)
+        {
+            switch (mode)
+            {
+                case TerrainReliefOverlayMode.Hypsometry:
+                    return "relief_hypsometry";
+                case TerrainReliefOverlayMode.Slope:
+                    return "relief_slope";
+                case TerrainReliefOverlayMode.Aspect:
+                    return "relief_aspect";
+                case TerrainReliefOverlayMode.Hillshade:
+                    return "relief_hillshade";
+                default:
+                    return null;
+            }
+        }
+
+        private static string GetHydrologyOverlayToolbarId(
+            TerrainHydrologyOverlayMode mode)
+        {
+            switch (mode)
+            {
+                case TerrainHydrologyOverlayMode.Streams:
+                    return "hydrology_streams";
+                case TerrainHydrologyOverlayMode.Accumulation:
+                    return "hydrology_accumulation";
+                case TerrainHydrologyOverlayMode.FillDepth:
+                    return "hydrology_fill";
+                case TerrainHydrologyOverlayMode.Watersheds:
+                    return "hydrology_watersheds";
+                case TerrainHydrologyOverlayMode.StreamOrder:
+                    return "hydrology_order";
+                default:
+                    return null;
+            }
+        }
+
+        private static string GetErosionOverlayToolbarId(
+            TerrainErosionOverlayMode mode)
+        {
+            switch (mode)
+            {
+                case TerrainErosionOverlayMode.NetChange:
+                    return "erosion_net";
+                case TerrainErosionOverlayMode.Erosion:
+                    return "erosion_cut";
+                case TerrainErosionOverlayMode.Deposition:
+                    return "erosion_fill";
+                case TerrainErosionOverlayMode.ResultElevation:
+                    return "erosion_result";
+                default:
+                    return null;
+            }
         }
 
         private void CreateModuleButton(Transform parent, string moduleId, string labelKey)
@@ -2121,11 +2197,6 @@ namespace TerrainLab
                     ? "terrain_lab_relief_recompute"
                     : "terrain_lab_relief_run",
                 "terrain_lab_relief_run_description");
-            if (!resultCurrent)
-            {
-                return;
-            }
-
             CreateSectionHeading(_moduleContent, "terrain_lab_relief_overlays_heading");
             Transform firstRow = CreateActionRow(
                 _moduleContent,
@@ -2183,6 +2254,12 @@ namespace TerrainLab
 
         private void RunRelief()
         {
+            ClearPendingOverlayRequest();
+            StartReliefAnalysis();
+        }
+
+        private bool StartReliefAnalysis()
+        {
             TerrainLabRuntime runtime = TerrainLabRuntime.Instance;
             string error = null;
             if (runtime != null && runtime.TryStartReliefAnalysis(out error))
@@ -2192,10 +2269,11 @@ namespace TerrainLab
                 HideAllOverlays();
                 RebuildModuleContent();
                 SetStatus(LM.Get("terrain_lab_relief_started"), false, true);
-                return;
+                return true;
             }
 
             SetError(error ?? LM.Get("terrain_lab_runtime_unavailable"));
+            return false;
         }
 
         private void ToggleReliefAnalysis()
@@ -2218,6 +2296,7 @@ namespace TerrainLab
 
         private void ShowElevationOverlay()
         {
+            ClearPendingOverlayRequest();
             if (_elevationOverlay != null && _elevationOverlay.IsVisible)
             {
                 _elevationOverlay.Clear();
@@ -2252,7 +2331,9 @@ namespace TerrainLab
 
         private void ShowReliefOverlay(TerrainReliefOverlayMode mode)
         {
-            if (_reliefOverlay != null && _reliefOverlay.Mode == mode)
+            if ((_reliefOverlay != null && _reliefOverlay.Mode == mode) ||
+                (_pendingOverlayKind == PendingOverlayKind.Relief &&
+                 _pendingReliefOverlay == mode))
             {
                 HideReliefOverlay();
                 return;
@@ -2260,12 +2341,27 @@ namespace TerrainLab
 
             TerrainWorldState state = TerrainLabRuntime.Instance?.State;
             TerrainReliefResult result = state?.Relief;
-            if (_reliefOverlay == null || result == null || !result.IsCurrent(state))
+            if (_reliefOverlay == null || state == null)
             {
-                SetError(LM.Get("terrain_lab_relief_stale"));
+                SetError(LM.Get("terrain_lab_no_project_state"));
                 return;
             }
 
+            if (result == null || !result.IsCurrent(state))
+            {
+                QueueReliefOverlay(mode);
+                return;
+            }
+
+            ClearPendingOverlayRequest();
+            DisplayReliefOverlay(mode, state, result);
+        }
+
+        private void DisplayReliefOverlay(
+            TerrainReliefOverlayMode mode,
+            TerrainWorldState state,
+            TerrainReliefResult result)
+        {
             _elevationOverlay?.Clear();
             _hydrologyOverlay?.Clear();
             _erosionOverlay?.Clear();
@@ -2280,6 +2376,11 @@ namespace TerrainLab
 
         private void HideReliefOverlay()
         {
+            if (_pendingOverlayKind == PendingOverlayKind.Relief)
+            {
+                ClearPendingOverlayRequest();
+            }
+
             _reliefOverlay?.Clear();
             SetStatus(LM.Get("terrain_lab_relief_overlay_hidden"), false);
         }
@@ -2516,11 +2617,6 @@ namespace TerrainLab
                     : "terrain_lab_hydrology_run",
                 "terrain_lab_hydrology_run_description");
 
-            if (!resultCurrent)
-            {
-                return;
-            }
-
             CreateSectionHeading(_moduleContent, "terrain_lab_hydrology_overlays_heading");
             Transform firstOverlayRow = CreateActionRow(
                 _moduleContent,
@@ -2591,12 +2687,18 @@ namespace TerrainLab
 
         private void RunHydrology()
         {
+            ClearPendingOverlayRequest();
+            StartHydrologyAnalysis();
+        }
+
+        private bool StartHydrologyAnalysis()
+        {
             TerrainLabRuntime runtime = TerrainLabRuntime.Instance;
             TerrainWorldState state = runtime?.State;
             if (state == null)
             {
                 SetError(LM.Get("terrain_lab_no_project_state"));
-                return;
+                return false;
             }
 
             EnsureHydrologyThreshold(state);
@@ -2610,10 +2712,11 @@ namespace TerrainLab
                 HideAllOverlays();
                 RebuildModuleContent();
                 SetStatus(LM.Get("terrain_lab_hydrology_started"), false, true);
-                return;
+                return true;
             }
 
             SetError(error ?? LM.Get("terrain_lab_runtime_unavailable"));
+            return false;
         }
 
         private void ToggleHydrologyAnalysis()
@@ -2900,7 +3003,9 @@ namespace TerrainLab
 
         private void ShowHydrologyOverlay(TerrainHydrologyOverlayMode mode)
         {
-            if (_hydrologyOverlay != null && _hydrologyOverlay.Mode == mode)
+            if ((_hydrologyOverlay != null && _hydrologyOverlay.Mode == mode) ||
+                (_pendingOverlayKind == PendingOverlayKind.Hydrology &&
+                 _pendingHydrologyOverlay == mode))
             {
                 HideHydrologyOverlay();
                 return;
@@ -2908,12 +3013,27 @@ namespace TerrainLab
 
             TerrainWorldState state = TerrainLabRuntime.Instance?.State;
             TerrainHydrologyResult result = state?.Hydrology;
-            if (_hydrologyOverlay == null || result == null || !result.IsCurrent(state))
+            if (_hydrologyOverlay == null || state == null)
             {
-                SetError(LM.Get("terrain_lab_hydrology_stale"));
+                SetError(LM.Get("terrain_lab_no_project_state"));
                 return;
             }
 
+            if (result == null || !result.IsCurrent(state))
+            {
+                QueueHydrologyOverlay(mode);
+                return;
+            }
+
+            ClearPendingOverlayRequest();
+            DisplayHydrologyOverlay(mode, state, result);
+        }
+
+        private void DisplayHydrologyOverlay(
+            TerrainHydrologyOverlayMode mode,
+            TerrainWorldState state,
+            TerrainHydrologyResult result)
+        {
             _elevationOverlay?.Clear();
             _reliefOverlay?.Clear();
             _erosionOverlay?.Clear();
@@ -2928,6 +3048,11 @@ namespace TerrainLab
 
         private void HideHydrologyOverlay()
         {
+            if (_pendingOverlayKind == PendingOverlayKind.Hydrology)
+            {
+                ClearPendingOverlayRequest();
+            }
+
             _hydrologyOverlay?.Clear();
             SetStatus(LM.Get("terrain_lab_hydrology_overlay_hidden"), false);
         }
@@ -3058,11 +3183,6 @@ namespace TerrainLab
                     : "terrain_lab_erosion_run",
                 "terrain_lab_erosion_run_description");
 
-            if (!resultCurrent)
-            {
-                return;
-            }
-
             CreateSectionHeading(_moduleContent, "terrain_lab_erosion_overlays_heading");
             Transform firstRow = CreateActionRow(
                 _moduleContent,
@@ -3110,7 +3230,7 @@ namespace TerrainLab
             Transform actionRow = CreateActionRow(
                 _moduleContent,
                 "TerrainLabErosionResultActions");
-            CreateActionButton(
+            SimpleButton applyButton = CreateActionButton(
                 actionRow,
                 LM.Get("terrain_lab_erosion_apply"),
                 ApplyErosion,
@@ -3119,6 +3239,9 @@ namespace TerrainLab
                 "project_validate",
                 "terrain_lab_erosion_apply",
                 "terrain_lab_erosion_apply_description");
+            bool canApply = resultCurrent && result.Statistics.MassBalance == 0;
+            applyButton.Button.interactable = canApply;
+            applyButton.Background.color = canApply ? Color.white : InactiveButton;
             CreateActionButton(
                 actionRow,
                 LM.Get("terrain_lab_erosion_overlay_hide"),
@@ -3132,12 +3255,18 @@ namespace TerrainLab
 
         private void RunErosion()
         {
+            ClearPendingOverlayRequest();
+            StartErosionAnalysis();
+        }
+
+        private bool StartErosionAnalysis()
+        {
             TerrainLabRuntime runtime = TerrainLabRuntime.Instance;
             TerrainWorldState state = runtime?.State;
             if (state == null)
             {
                 SetError(LM.Get("terrain_lab_no_project_state"));
-                return;
+                return false;
             }
 
             EnsureErosionParameters(state);
@@ -3156,10 +3285,11 @@ namespace TerrainLab
                 HideAllOverlays();
                 RebuildModuleContent();
                 SetStatus(LM.Get("terrain_lab_erosion_started"), false, true);
-                return;
+                return true;
             }
 
             SetError(error ?? LM.Get("terrain_lab_runtime_unavailable"));
+            return false;
         }
 
         private void ToggleErosionAnalysis()
@@ -3229,7 +3359,9 @@ namespace TerrainLab
 
         private void ShowErosionOverlay(TerrainErosionOverlayMode mode)
         {
-            if (_erosionOverlay != null && _erosionOverlay.Mode == mode)
+            if ((_erosionOverlay != null && _erosionOverlay.Mode == mode) ||
+                (_pendingOverlayKind == PendingOverlayKind.Erosion &&
+                 _pendingErosionOverlay == mode))
             {
                 HideErosionOverlay();
                 return;
@@ -3237,12 +3369,27 @@ namespace TerrainLab
 
             TerrainWorldState state = TerrainLabRuntime.Instance?.State;
             TerrainErosionResult result = state?.Erosion;
-            if (_erosionOverlay == null || result == null || !result.IsCurrent(state))
+            if (_erosionOverlay == null || state == null)
             {
-                SetError(LM.Get("terrain_lab_erosion_stale"));
+                SetError(LM.Get("terrain_lab_no_project_state"));
                 return;
             }
 
+            if (result == null || !result.IsCurrent(state))
+            {
+                QueueErosionOverlay(mode);
+                return;
+            }
+
+            ClearPendingOverlayRequest();
+            DisplayErosionOverlay(mode, state, result);
+        }
+
+        private void DisplayErosionOverlay(
+            TerrainErosionOverlayMode mode,
+            TerrainWorldState state,
+            TerrainErosionResult result)
+        {
             _elevationOverlay?.Clear();
             _reliefOverlay?.Clear();
             _hydrologyOverlay?.Clear();
@@ -3257,6 +3404,11 @@ namespace TerrainLab
 
         private void HideErosionOverlay()
         {
+            if (_pendingOverlayKind == PendingOverlayKind.Erosion)
+            {
+                ClearPendingOverlayRequest();
+            }
+
             _erosionOverlay?.Clear();
             SetStatus(LM.Get("terrain_lab_erosion_overlay_hidden"), false);
         }
@@ -3530,8 +3682,17 @@ namespace TerrainLab
 
         private void HandleElevationChanged(TerrainElevationEdit edit)
         {
-            TerrainWorldState state = TerrainLabRuntime.Instance?.State;
+            TerrainLabRuntime runtime = TerrainLabRuntime.Instance;
+            TerrainWorldState state = runtime?.State;
             _elevationOverlay?.UpdateCells(state, edit);
+            if (runtime?.WaterDynamics != null && state != null && edit != null &&
+                !runtime.WaterDynamics.TryReconcileWaterSurface(
+                    state,
+                    edit.Indices,
+                    out string error))
+            {
+                SetError(error);
+            }
         }
 
         private void HandleSurfaceSampled(TerrainSurfaceStamp stamp)
@@ -3701,6 +3862,199 @@ namespace TerrainLab
             }
         }
 
+        private void QueueReliefOverlay(TerrainReliefOverlayMode mode)
+        {
+            ClearPendingOverlayRequest();
+            _pendingOverlayKind = PendingOverlayKind.Relief;
+            _pendingReliefOverlay = mode;
+            TryResolvePendingOverlay();
+        }
+
+        private void QueueHydrologyOverlay(TerrainHydrologyOverlayMode mode)
+        {
+            ClearPendingOverlayRequest();
+            _pendingOverlayKind = PendingOverlayKind.Hydrology;
+            _pendingHydrologyOverlay = mode;
+            TryResolvePendingOverlay();
+        }
+
+        private void QueueErosionOverlay(TerrainErosionOverlayMode mode)
+        {
+            ClearPendingOverlayRequest();
+            _pendingOverlayKind = PendingOverlayKind.Erosion;
+            _pendingErosionOverlay = mode;
+            TryResolvePendingOverlay();
+        }
+
+        private void TryResolvePendingOverlay()
+        {
+            if (_pendingOverlayKind == PendingOverlayKind.None)
+            {
+                return;
+            }
+
+            TerrainLabRuntime runtime = TerrainLabRuntime.Instance;
+            TerrainWorldState state = runtime?.State;
+            if (runtime == null || state == null)
+            {
+                ClearPendingOverlayRequest();
+                SetError(LM.Get("terrain_lab_no_project_state"));
+                return;
+            }
+
+            if (!string.IsNullOrEmpty(_pendingOverlayJobId))
+            {
+                if (IsJobRunning(_pendingOverlayJobId))
+                {
+                    return;
+                }
+
+                if (!HasCurrentJobResult(_pendingOverlayJobId, state))
+                {
+                    string jobId = _pendingOverlayJobId;
+                    string error = GetLastJobError(jobId);
+                    ClearPendingOverlayRequest();
+                    SetError(string.IsNullOrWhiteSpace(error)
+                        ? GetStaleResultMessage(jobId)
+                        : error);
+                    return;
+                }
+
+                _pendingOverlayJobId = null;
+            }
+
+            if (IsAnalysisRunning())
+            {
+                return;
+            }
+
+            switch (_pendingOverlayKind)
+            {
+                case PendingOverlayKind.Relief:
+                    if (state.Relief != null && state.Relief.IsCurrent(state))
+                    {
+                        TerrainReliefOverlayMode mode = _pendingReliefOverlay;
+                        ClearPendingOverlayRequest();
+                        DisplayReliefOverlay(mode, state, state.Relief);
+                    }
+                    else if (StartReliefAnalysis())
+                    {
+                        _pendingOverlayJobId = "relief";
+                    }
+                    else
+                    {
+                        ClearPendingOverlayRequest();
+                    }
+
+                    break;
+                case PendingOverlayKind.Hydrology:
+                    if (state.Hydrology != null && state.Hydrology.IsCurrent(state))
+                    {
+                        TerrainHydrologyOverlayMode mode = _pendingHydrologyOverlay;
+                        ClearPendingOverlayRequest();
+                        DisplayHydrologyOverlay(mode, state, state.Hydrology);
+                    }
+                    else if (StartHydrologyAnalysis())
+                    {
+                        _pendingOverlayJobId = "hydrology";
+                    }
+                    else
+                    {
+                        ClearPendingOverlayRequest();
+                    }
+
+                    break;
+                case PendingOverlayKind.Erosion:
+                    if (state.Erosion != null && state.Erosion.IsCurrent(state))
+                    {
+                        TerrainErosionOverlayMode mode = _pendingErosionOverlay;
+                        ClearPendingOverlayRequest();
+                        DisplayErosionOverlay(mode, state, state.Erosion);
+                    }
+                    else if (state.Hydrology == null ||
+                             !state.Hydrology.IsCurrent(state))
+                    {
+                        if (StartHydrologyAnalysis())
+                        {
+                            _pendingOverlayJobId = "hydrology";
+                        }
+                        else
+                        {
+                            ClearPendingOverlayRequest();
+                        }
+                    }
+                    else if (StartErosionAnalysis())
+                    {
+                        _pendingOverlayJobId = "erosion";
+                    }
+                    else
+                    {
+                        ClearPendingOverlayRequest();
+                    }
+
+                    break;
+            }
+
+            UpdateToolbarState();
+        }
+
+        private bool IsJobRunning(string jobId)
+        {
+            TerrainLabRuntime runtime = TerrainLabRuntime.Instance;
+            switch (jobId)
+            {
+                case "relief":
+                    return runtime?.Relief?.IsRunning == true;
+                case "hydrology":
+                    return runtime?.Hydrology?.IsRunning == true;
+                case "erosion":
+                    return runtime?.Erosion?.IsRunning == true;
+                default:
+                    return false;
+            }
+        }
+
+        private static bool HasCurrentJobResult(
+            string jobId,
+            TerrainWorldState state)
+        {
+            switch (jobId)
+            {
+                case "relief":
+                    return state.Relief != null && state.Relief.IsCurrent(state);
+                case "hydrology":
+                    return state.Hydrology != null && state.Hydrology.IsCurrent(state);
+                case "erosion":
+                    return state.Erosion != null && state.Erosion.IsCurrent(state);
+                default:
+                    return false;
+            }
+        }
+
+        private static string GetStaleResultMessage(string jobId)
+        {
+            switch (jobId)
+            {
+                case "relief":
+                    return LM.Get("terrain_lab_relief_stale");
+                case "hydrology":
+                    return LM.Get("terrain_lab_hydrology_stale");
+                case "erosion":
+                    return LM.Get("terrain_lab_erosion_stale");
+                default:
+                    return LM.Get("terrain_lab_runtime_unavailable");
+            }
+        }
+
+        private void ClearPendingOverlayRequest()
+        {
+            _pendingOverlayKind = PendingOverlayKind.None;
+            _pendingReliefOverlay = TerrainReliefOverlayMode.None;
+            _pendingHydrologyOverlay = TerrainHydrologyOverlayMode.None;
+            _pendingErosionOverlay = TerrainErosionOverlayMode.None;
+            _pendingOverlayJobId = null;
+        }
+
         private void HideAllOverlays()
         {
             _elevationOverlay?.Clear();
@@ -3711,6 +4065,7 @@ namespace TerrainLab
 
         private void HideAllOverlaysWithStatus()
         {
+            ClearPendingOverlayRequest();
             HideAllOverlays();
             SetStatus(LM.Get("terrain_lab_toolbar_overlays_hidden"), false);
         }
@@ -4055,6 +4410,8 @@ namespace TerrainLab
             {
                 _erosionOverlay.Clear();
             }
+
+            TryResolvePendingOverlay();
 
             if (_initialized && _window != null && _window.gameObject.activeInHierarchy)
             {

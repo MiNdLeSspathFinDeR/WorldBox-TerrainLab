@@ -41,12 +41,10 @@ texture pixel per WorldBox cell and fixed alpha `156/255`. `NODATA=9999` is full
 transparent.
 
 The color mapping uses the polynomial Turbo palette over two semantic ranges.
-Values below the project's sea level occupy the blue-to-cyan interval, while
-sea level and positive relief occupy the yellow-to-red interval. Each side is
-normalized against its own observed minimum or maximum. This preserves both
-bathymetric and terrestrial contrast on strongly asymmetric DEMs. Incremental
-DEM edits rewrite only affected chunks; a new out-of-range value triggers one
-full rescale.
+Values from `-20000` to sea level `0` occupy the blue-to-cyan interval, while
+values from `0` to `9000` occupy the yellow-to-red interval. The fixed scale
+makes a color comparable between projects instead of rescaling it to each
+map's observed extrema. Incremental DEM edits rewrite only affected chunks.
 
 ## Implemented runtime hydrology
 
@@ -85,7 +83,7 @@ bounded DEM process without replacing WorldBox's own ocean behavior:
    triangular facets and divides flow between at most two adjacent cells; MFD
    distributes flow among every strict downslope neighbor with Freeman's slope
    exponent `1.1`. Flats fall back to the Priority-Flood receiver.
-3. The selected routing front first cuts shallow channels, then interleaves
+3. The selected routing front first creates managed shallow channels, then interleaves
    local filling only among cells in the same positive-depth depression and at
    the same spill elevation. It does not run an unrestricted flood fill over a
    tilted plane. D-infinity and MFD fronts are capped at 512 queued branches per
@@ -101,11 +99,13 @@ bounded DEM process without replacing WorldBox's own ocean behavior:
    valid DEM cells. Fifty percent is a non-bypassable hard maximum. Existing
    ocean cells do not consume that budget, and hazardous/non-copyable surfaces
    or non-geyser buildings are never converted.
-7. Depth is measured in DEM metres from bed to the applicable water surface:
-   `0..5` is shallow, `6..150` is shelf, and `>150` is deep ocean. Marine water
-   must be connected through existing water to an edge/NODATA boundary and uses
-   sea level. Inland water uses its local Priority-Flood spill surface. Dry
-   below-zero continental depressions remain dry until reached by a source.
+7. Marine class follows absolute bed elevation on the zero datum: `0..-5 m` is
+   shallow, `-6..-149 m` is shelf, and `-150 m` or lower is deep ocean.
+   Ordinary painted/existing water above zero is restored to land. Water made
+   by the bounded routing process may cross positive terrain only as managed
+   shallow freshwater, preserving inland and geyser-fed rivers without creating
+   a positive-elevation shelf or ocean. Dry negative depressions remain dry
+   until reached by a source.
 8. Managed water stores one UInt8 depth/reserve value and one UInt8 palette code
    for the pre-water surface. Uniform configurable evaporation runs every 30
    seconds; routed flow recharges cells, and a zero store restores that surface.
@@ -154,14 +154,15 @@ optional WBXGEO module and export to GeoTIFF.
 
 All ready core and derived rasters export as uncompressed single-band GeoTIFF.
 Files use conventional north-first row order, while WBXGEO remains south-first.
-Elevation import is restricted to signed Int16, exact project dimensions, and
-`NODATA=9999`. File sync adds a source SHA-256 baseline, conflict policies,
-branches, incoming history, and an append-only JSONL log.
+Elevation import is restricted to signed Int16 values in `-20000..9000`, exact
+project dimensions, and `NODATA=9999`. File sync adds a source SHA-256 baseline,
+conflict policies, branches, incoming history, and an append-only JSONL log.
 
 ## Next scientific modules
 
-The runtime and WBXGEO elevation layer uses signed Int16 values, with `9999`
-reserved as `NODATA`, rather than operating directly on WorldBox tile IDs.
+The runtime and WBXGEO elevation layer uses signed Int16 values from `-20000`
+to `9000` metres, with sea level `0` and `9999` reserved as `NODATA`, rather
+than operating directly on WorldBox tile IDs.
 Scientific modules may promote one working chunk to floating point while they
 calculate, then quantize it back to the authoritative integer grid:
 

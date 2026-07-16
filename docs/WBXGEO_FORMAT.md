@@ -72,12 +72,13 @@ row zero is the north/top row.
 | `core.landform` | UInt8 | Plain, hill, mountain, channel, and related form |
 | `core.material` | UInt8 | Soil, sand, rock, ice, lava, and related material |
 
-Elevation value `9999` is reserved globally as `NODATA`. It is never a valid
+Valid elevation is `-20000..9000` metres on a zero-metre sea-level datum.
+Elevation value `9999` is reserved globally as `NODATA`; it is never a valid
 height and must be masked out of rendering, statistics, interpolation,
 hydrology, and erosion. A GeoTIFF export writes the same value as the band
 NoData value. Signed Int16 keeps negative bathymetry and uses half the memory of
-Float32 or Int32. New projects declare the vertical unit as `metre`; readers
-continue accepting legacy `worldbox-height` packages.
+Float32 or Int32. Readers migrate legacy packages with a nonzero declared sea
+level by shifting valid samples onto the zero datum.
 
 `WorldTile.Height` is only a normalized runtime cache. It is not the
 authoritative elevation representation, and `NODATA` cells are not copied into

@@ -37,6 +37,7 @@ The elevation exchange raster is:
 - classic little-endian TIFF;
 - one uncompressed band;
 - signed Int16 samples;
+- every data sample in `-20000..9000` metres;
 - exact project width and height;
 - GDAL NODATA tag `9999`;
 - pixel-is-area, one WorldBox tile per pixel;
@@ -48,10 +49,10 @@ TerrainLab's in-memory and WBXGEO row order starts at the south-west. Export and
 import reverse rows exactly once. Landform and material do not change when an
 external elevation grid is applied.
 
-The protected importer rejects a missing/wrong NODATA tag, another sample type,
-compression, extra bands, inconsistent strips, unexpected dimensions, and any
-offset outside the file. The source file is copied to a private staging file and
-must remain unchanged during that copy.
+The protected importer rejects a missing/wrong NODATA tag, samples outside the
+DEM domain, another sample type, compression, extra bands, inconsistent strips,
+unexpected dimensions, and any offset outside the file. The source file is
+copied to a private staging file and must remain unchanged during that copy.
 
 ## Baseline and conflicts
 

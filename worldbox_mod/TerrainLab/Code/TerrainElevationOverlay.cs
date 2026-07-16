@@ -245,23 +245,17 @@ namespace TerrainLab
             out short minimum,
             out short maximum)
         {
-            minimum = short.MaxValue;
-            maximum = short.MinValue;
-            bool found = false;
+            minimum = TerrainElevationEncoding.Minimum;
+            maximum = TerrainElevationEncoding.Maximum;
             for (int index = 0; index < state.Elevation.Length; index++)
             {
-                short elevation = state.Elevation[index];
-                if (elevation == TerrainElevationEncoding.NoData)
+                if (TerrainElevationEncoding.IsDataValue(state.Elevation[index]))
                 {
-                    continue;
+                    return true;
                 }
-
-                minimum = Math.Min(minimum, elevation);
-                maximum = Math.Max(maximum, elevation);
-                found = true;
             }
 
-            return found;
+            return false;
         }
 
         private void CreateChunk(
@@ -328,21 +322,10 @@ namespace TerrainLab
                 -1f);
             SpriteRenderer renderer = chunkObject.GetComponent<SpriteRenderer>();
             renderer.sprite = sprite;
-            WorldTilemap worldTilemap = World.world?
-                .GetComponentInChildren<WorldTilemap>(true);
-            Renderer worldRenderer = worldTilemap?
-                .GetComponentInChildren<Renderer>(true);
-            if (worldRenderer != null)
-            {
-                chunkObject.layer = worldRenderer.gameObject.layer;
-                renderer.sortingLayerID = worldRenderer.sortingLayerID;
-            }
-            else if (worldTilemap != null)
-            {
-                chunkObject.layer = worldTilemap.gameObject.layer;
-            }
-
-            renderer.sortingOrder = SortingOrder;
+            TerrainOverlayRendering.Configure(
+                chunkObject,
+                renderer,
+                SortingOrder);
 
             int chunkX = startX / ChunkSize;
             int chunkY = startY / ChunkSize;

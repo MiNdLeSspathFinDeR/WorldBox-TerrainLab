@@ -135,7 +135,7 @@ namespace TerrainLab
             chunk.transform.position = new Vector3(startX - 0.5f, startY - 0.5f, -1f);
             SpriteRenderer renderer = chunk.GetComponent<SpriteRenderer>();
             renderer.sprite = sprite;
-            renderer.sortingOrder = SortingOrder;
+            TerrainOverlayRendering.Configure(chunk, renderer, SortingOrder);
             _textures.Add(texture);
             _sprites.Add(sprite);
             _chunks.Add(chunk);

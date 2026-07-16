@@ -7,7 +7,57 @@ namespace TerrainLab
 {
     public static class TerrainElevationEncoding
     {
+        public const short Minimum = -20000;
+        public const short Maximum = 9000;
         public const short NoData = 9999;
+        public const int WorldBoxMinimum = 0;
+        public const int WorldBoxSeaLevel = 98;
+        public const int WorldBoxMaximum = 255;
+
+        public static bool IsDataValue(long value)
+        {
+            return value >= Minimum && value <= Maximum;
+        }
+
+        public static bool IsStoredValue(short value)
+        {
+            return value == NoData || IsDataValue(value);
+        }
+
+        public static short FromWorldHeight(int worldHeight)
+        {
+            int height = Math.Max(
+                WorldBoxMinimum,
+                Math.Min(WorldBoxMaximum, worldHeight));
+            if (height <= WorldBoxSeaLevel)
+            {
+                double ratio = height / (double)WorldBoxSeaLevel;
+                return (short)Math.Round(Minimum + ratio * -Minimum);
+            }
+
+            double landRatio = (height - WorldBoxSeaLevel) /
+                               (double)(WorldBoxMaximum - WorldBoxSeaLevel);
+            return (short)Math.Round(landRatio * Maximum);
+        }
+
+        public static int ToWorldHeight(short elevation)
+        {
+            if (!IsDataValue(elevation))
+            {
+                throw new ArgumentOutOfRangeException(nameof(elevation));
+            }
+
+            if (elevation <= 0)
+            {
+                double ratio = (elevation - (double)Minimum) / -Minimum;
+                return (int)Math.Round(WorldBoxMinimum +
+                    ratio * (WorldBoxSeaLevel - WorldBoxMinimum));
+            }
+
+            double landRatio = elevation / (double)Maximum;
+            return (int)Math.Round(WorldBoxSeaLevel +
+                landRatio * (WorldBoxMaximum - WorldBoxSeaLevel));
+        }
     }
 
     public enum TerrainLandform : byte
@@ -100,7 +150,7 @@ namespace TerrainLab
 
         public int Height { get; private set; }
 
-        public short SeaLevel { get; set; }
+        public short SeaLevel { get; private set; }
 
         public short[] Elevation { get; private set; }
 
@@ -158,12 +208,13 @@ namespace TerrainLab
                 DateTime.UtcNow,
                 width,
                 height,
-                98);
+                0);
 
             for (int index = 0; index < tiles.Length; index++)
             {
                 WorldTile tile = tiles[index];
-                state.Elevation[index] = (short)tile.Height;
+                state.Elevation[index] = TerrainElevationEncoding.FromWorldHeight(
+                    tile.Height);
                 state.ClassifyTile(index, tile);
             }
 
@@ -185,9 +236,10 @@ namespace TerrainLab
                 throw new InvalidOperationException(error);
             }
 
-            if (seaLevel == TerrainElevationEncoding.NoData)
+            if (!TerrainElevationEncoding.IsDataValue(seaLevel))
             {
-                throw new InvalidOperationException("Sea level may not use the reserved NODATA value.");
+                throw new InvalidOperationException(
+                    "Sea level must be between -20000 and 9000 metres.");
             }
 
             int expected = checked(width * height);
@@ -198,6 +250,65 @@ namespace TerrainLab
                 throw new InvalidOperationException("WBXGEO core layers have inconsistent dimensions.");
             }
 
+            short[] normalizedElevation = (short[])elevation.Clone();
+            bool legacyWorldHeightCache = seaLevel ==
+                TerrainElevationEncoding.WorldBoxSeaLevel;
+            if (legacyWorldHeightCache)
+            {
+                for (int index = 0; index < normalizedElevation.Length; index++)
+                {
+                    short value = normalizedElevation[index];
+                    if (value != TerrainElevationEncoding.NoData &&
+                        (value < TerrainElevationEncoding.WorldBoxMinimum ||
+                         value > TerrainElevationEncoding.WorldBoxMaximum))
+                    {
+                        legacyWorldHeightCache = false;
+                        break;
+                    }
+                }
+            }
+
+            if (legacyWorldHeightCache)
+            {
+                for (int index = 0; index < normalizedElevation.Length; index++)
+                {
+                    if (normalizedElevation[index] != TerrainElevationEncoding.NoData)
+                    {
+                        normalizedElevation[index] =
+                            TerrainElevationEncoding.FromWorldHeight(
+                                normalizedElevation[index]);
+                    }
+                }
+            }
+            else if (seaLevel != 0)
+            {
+                for (int index = 0; index < normalizedElevation.Length; index++)
+                {
+                    if (normalizedElevation[index] == TerrainElevationEncoding.NoData)
+                    {
+                        continue;
+                    }
+
+                    long shifted = (long)normalizedElevation[index] - seaLevel;
+                    if (!TerrainElevationEncoding.IsDataValue(shifted))
+                    {
+                        throw new InvalidOperationException(
+                            "Elevation shifted to the zero sea-level datum is outside -20000..9000 metres.");
+                    }
+
+                    normalizedElevation[index] = (short)shifted;
+                }
+            }
+
+            for (int index = 0; index < normalizedElevation.Length; index++)
+            {
+                if (!TerrainElevationEncoding.IsStoredValue(normalizedElevation[index]))
+                {
+                    throw new InvalidOperationException(
+                        "Elevation must be NODATA or between -20000 and 9000 metres.");
+                }
+            }
+
             return new TerrainWorldState
             {
                 ProjectId = string.IsNullOrWhiteSpace(projectId)
@@ -206,8 +317,8 @@ namespace TerrainLab
                 CreatedUtc = createdUtc == default(DateTime) ? DateTime.UtcNow : createdUtc,
                 Width = width,
                 Height = height,
-                SeaLevel = seaLevel,
-                Elevation = elevation,
+                SeaLevel = 0,
+                Elevation = normalizedElevation,
                 Landform = landform,
                 Material = material
             };
@@ -237,7 +348,7 @@ namespace TerrainLab
                     continue;
                 }
 
-                tiles[index].Height = value;
+                tiles[index].Height = TerrainElevationEncoding.ToWorldHeight(value);
             }
         }
 
@@ -271,9 +382,10 @@ namespace TerrainLab
                 throw new ArgumentOutOfRangeException(nameof(radius));
             }
 
-            if (targetElevation == TerrainElevationEncoding.NoData)
+            if (!TerrainElevationEncoding.IsDataValue(targetElevation))
             {
-                throw new ArgumentException("Elevation 9999 is reserved for NODATA.");
+                throw new ArgumentException(
+                    "Elevation must be between -20000 and 9000 metres.");
             }
 
             if (step <= 0)
@@ -302,10 +414,10 @@ namespace TerrainLab
                         after = targetElevation;
                         break;
                     case TerrainElevationOperation.Raise:
-                        after = ClampElevation((long)before + step, true);
+                        after = ClampElevation((long)before + step);
                         break;
                     case TerrainElevationOperation.Lower:
-                        after = ClampElevation((long)before - step, false);
+                        after = ClampElevation((long)before - step);
                         break;
                     case TerrainElevationOperation.Smooth:
                         after = CalculateSmoothedElevation(index, before);
@@ -341,6 +453,16 @@ namespace TerrainLab
                 throw new ArgumentException(
                     "Replacement elevation grid does not match the project.",
                     nameof(values));
+            }
+
+            for (int index = 0; index < values.Length; index++)
+            {
+                if (!TerrainElevationEncoding.IsStoredValue(values[index]))
+                {
+                    throw new ArgumentException(
+                        "Replacement elevation must be NODATA or between -20000 and 9000 metres.",
+                        nameof(values));
+                }
             }
 
             int changedCount = 0;
@@ -741,18 +863,14 @@ namespace TerrainLab
 
             return count == 0
                 ? fallback
-                : ClampElevation((long)Math.Round(sum / (double)count), false);
+                : ClampElevation((long)Math.Round(sum / (double)count));
         }
 
-        private static short ClampElevation(long value, bool increasing)
+        private static short ClampElevation(long value)
         {
-            long clamped = Math.Max(short.MinValue, Math.Min(short.MaxValue, value));
-            if (clamped == TerrainElevationEncoding.NoData)
-            {
-                clamped += increasing ? 1 : -1;
-            }
-
-            return (short)clamped;
+            return (short)Math.Max(
+                TerrainElevationEncoding.Minimum,
+                Math.Min(TerrainElevationEncoding.Maximum, value));
         }
 
         private int[] CaptureWorldCache(IList<int> indices)
@@ -787,7 +905,8 @@ namespace TerrainLab
                 short value = values[offset];
                 if (value != TerrainElevationEncoding.NoData)
                 {
-                    tiles[edit.Indices[offset]].Height = value;
+                    tiles[edit.Indices[offset]].Height =
+                        TerrainElevationEncoding.ToWorldHeight(value);
                 }
                 else if (edit.WorldCacheBefore != null)
                 {

@@ -54,9 +54,9 @@ silent conflict overwrite in the 1.0 UI. See [file sync](FILE_SYNC.md).
 ### Relief
 
 The layer page exposes the authoritative elevation, landform, material, and
-vanilla layers. Toolbar tools inspect, set, raise, lower, and smooth signed Int16
-elevation. Target, step, and radius live in Parameters; 32-operation undo/redo
-stays directly on the toolbar.
+vanilla layers. Toolbar tools inspect, set, raise, lower, and smooth the
+`-20000..9000 m` signed Int16 DEM. Target, step, and radius live in Parameters;
+32-operation undo/redo stays directly on the toolbar.
 
 `9999` cannot be painted because it is reserved for `NODATA`.
 
@@ -71,7 +71,8 @@ both DEM and surface edits through one history capped at 32 entries and 64 MiB.
 The existing WorldBox terrain morphotype stays independent, so a mountain tile
 can carry any analytical height. Horn `3 x 3` analysis derives slope, aspect,
 hillshade, and ruggedness in a cancellable background job. Hypsometry and all
-three display derivatives can be drawn over the game map.
+three display derivatives can be drawn over the game map. Selecting a missing
+or stale derivative starts its calculation and opens it when ready.
 
 ### Hydrology
 
@@ -90,13 +91,13 @@ water-layer contact receives a finite integer budget and follows the dedicated
 Priority-Flood drainage rank. The Parameters page offers D8, D-infinity, and
 MFD channel routing: respectively one receiver, at most two triangular-facet
 receivers, or every strict downslope neighbor. Flats use the stable
-Priority-Flood receiver. The route is drawn with shallow channel cells;
-positive-depth depressions fill against the lower of source head and local
-spill elevation. Depth `0..5 m` is shallow water, `6..150 m` is shelf water,
-and depth above `150 m` is deep ocean. Existing water connected through water
-cells to a canvas edge or NODATA boundary uses sea level; an isolated inland
-water body uses its local spill level. A dry negative DEM cell is never made
-water merely because its absolute elevation is below zero. The simulation
+Priority-Flood receiver. Water type is determined by absolute bed elevation on
+the zero-metre datum: `0..-5 m` is shallow water, `-6..-149 m` is shelf, and
+`-150 m` or lower is deep ocean. Ordinary water above zero is restored to land;
+only bounded process-created freshwater may cross positive terrain, and it is
+always represented as shallow water. A dry negative DEM cell is never made
+water merely because its absolute elevation is below zero; it must be reached
+by an active source. The simulation
 cannot convert more than the configured 1-50 percent of valid DEM cells, never
 overwrites hazardous surfaces or ordinary buildings, pauses with WorldBox and
 modal windows, and does not count the pre-existing ocean against its limit. The
@@ -115,7 +116,7 @@ evaporation baseline. Flow traversal and geyser pulses recharge cells. At zero,
 TerrainLab restores the compactly saved pre-water surface. This is a water
 budget extension point for later precipitation, PET, infiltration, and climate
 rasters, not a calibrated climate model. Disabling the toggle stops routing and
-climate updates but leaves the current WorldBox water visible.
+climate updates but leaves valid current WorldBox water visible.
 
 ### Erosion
 

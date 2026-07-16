@@ -5,14 +5,20 @@
 - Fixed native geyser injection at the real rain-drop event and moved its
   source to a safe adjacent cell; exhausted routes now restart and refill dried
   channels.
-- Added metre-based `5/150` water-depth classes, marine connectivity versus
-  local inland spill levels, and explicit protection for dry negative DEM
-  depressions.
+- Fixed the authoritative DEM domain at `-20000..9000 m` with sea level `0`,
+  retaining signed Int16 storage and reserved `NODATA=9999`.
+- Bound water types to absolute bed elevation: shallow `0..-5 m`, shelf
+  `-6..-149 m`, and deep ocean at `-150 m` and below. Ordinary positive-DEM
+  water is restored to land; managed freshwater channels remain shallow so
+  inland and geyser-fed rivers still work.
 - Added persistent UInt8 water storage, 30-second evaporation/recharge steps,
   exact pre-water surface restoration, WBXGEO schema 1.2 migration, and a
   `water_storage.tif` GIS layer.
 - Bound the translucent DEM chunks to the gameplay tilemap layer and sorting
   layer so the enabled elevation overlay remains visible above the world.
+- Bound every relief, hydrology, and erosion chunk to the gameplay tilemap and
+  made derivative buttons calculate stale prerequisites before opening the
+  requested overlay.
 - Added selectable D8, Tarboton D-infinity, and Freeman MFD live channel
   routing with conservative receiver weights, acyclic Priority-Flood ranks,
   bounded branching, localized segmented controls, and WBXGEO persistence.

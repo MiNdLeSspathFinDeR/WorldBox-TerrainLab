@@ -23,9 +23,11 @@ project layer for WorldBox.
 3. Direct WorldBox saves: complete `saveN` folders can be created in the game's save directory.
 4. Auto sizing: if only one size parameter is set, the other is calculated from the image ratio.
 5. Configurable: the legacy direct-palette algorithm and custom tile sets remain available.
-6. In-game GIS: editable Int16 DEM, direct translucent Turbo height display,
+6. In-game GIS: editable `-20000..9000 m` Int16 DEM, fixed-scale translucent
+   Turbo height display,
    relief derivatives, Priority-Flood/D8, watersheds, Strahler order,
-   selectable D8/D-infinity/MFD live-water channels, metre-based water depth,
+   selectable D8/D-infinity/MFD live-water channels, absolute 0/-5/-150 m water
+   classes,
    geyser-fed recharge and evaporation, deterministic erosion, and chunked
    overlays.
 7. GIS exchange: strict GeoTIFF export/import with baseline hashes, conflict

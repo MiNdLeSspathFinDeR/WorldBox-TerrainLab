@@ -15,8 +15,10 @@ namespace TerrainLab
 
     public static class TerrainWaterDepthModel
     {
-        public const int ShallowMaximumMetres = 5;
-        public const int ShelfMaximumMetres = 150;
+        public const int ShallowMinimumElevation = -5;
+        public const int ShelfMinimumElevation = -150;
+        public const byte ShallowStorageUnits = 5;
+        public const byte ShelfStorageUnits = 150;
         public const byte MaximumStoredDepth = byte.MaxValue;
 
         public static int GetDepthMetres(int bedElevation, int waterSurfaceElevation)
@@ -24,17 +26,46 @@ namespace TerrainLab
             return Math.Max(0, waterSurfaceElevation - bedElevation);
         }
 
-        public static TerrainWaterDepthClass Classify(int depthMetres)
+        public static bool TryClassifyElevation(
+            int bedElevation,
+            int seaLevel,
+            out TerrainWaterDepthClass depthClass)
         {
-            int depth = Math.Max(0, depthMetres);
-            if (depth <= ShallowMaximumMetres)
+            int relativeElevation = bedElevation - seaLevel;
+            if (relativeElevation > 0)
             {
-                return TerrainWaterDepthClass.Shallow;
+                depthClass = default(TerrainWaterDepthClass);
+                return false;
             }
 
-            return depth <= ShelfMaximumMetres
-                ? TerrainWaterDepthClass.Shelf
-                : TerrainWaterDepthClass.Deep;
+            if (relativeElevation >= ShallowMinimumElevation)
+            {
+                depthClass = TerrainWaterDepthClass.Shallow;
+            }
+            else if (relativeElevation > ShelfMinimumElevation)
+            {
+                depthClass = TerrainWaterDepthClass.Shelf;
+            }
+            else
+            {
+                depthClass = TerrainWaterDepthClass.Deep;
+            }
+
+            return true;
+        }
+
+        public static TerrainWaterDepthClass ClassifyElevation(
+            int bedElevation,
+            int seaLevel)
+        {
+            if (!TryClassifyElevation(bedElevation, seaLevel, out TerrainWaterDepthClass result))
+            {
+                throw new ArgumentOutOfRangeException(
+                    nameof(bedElevation),
+                    "Water cannot be classified above sea level.");
+            }
+
+            return result;
         }
 
         public static byte GetStorage(int depthMetres)
@@ -51,116 +82,10 @@ namespace TerrainLab
                 case TerrainWaterDepthClass.Deep:
                     return MaximumStoredDepth;
                 case TerrainWaterDepthClass.Shelf:
-                    return ShelfMaximumMetres;
+                    return ShelfStorageUnits;
                 default:
-                    return ShallowMaximumMetres;
+                    return ShallowStorageUnits;
             }
-        }
-    }
-
-    public static class TerrainWaterConnectivity
-    {
-        public static byte[] BuildMarineMask(
-            int width,
-            int height,
-            short[] elevation,
-            byte[] waterMask)
-        {
-            int cellCount = checked(width * height);
-            if (width <= 0 || height <= 0 || elevation == null ||
-                elevation.Length != cellCount || waterMask == null ||
-                waterMask.Length != cellCount)
-            {
-                throw new ArgumentException(
-                    "Marine connectivity layers do not match the canvas.");
-            }
-
-            byte[] marine = new byte[cellCount];
-            Queue<int> queue = new Queue<int>();
-            for (int index = 0; index < cellCount; index++)
-            {
-                if (waterMask[index] == 0)
-                {
-                    continue;
-                }
-
-                int x = index % width;
-                int y = index / width;
-                if (x == 0 || x == width - 1 || y == 0 || y == height - 1 ||
-                    HasNoDataNeighbor(x, y, width, height, elevation))
-                {
-                    marine[index] = 1;
-                    queue.Enqueue(index);
-                }
-            }
-
-            while (queue.Count > 0)
-            {
-                int current = queue.Dequeue();
-                int centerX = current % width;
-                int centerY = current / width;
-                for (int offsetY = -1; offsetY <= 1; offsetY++)
-                {
-                    int y = centerY + offsetY;
-                    if (y < 0 || y >= height)
-                    {
-                        continue;
-                    }
-
-                    for (int offsetX = -1; offsetX <= 1; offsetX++)
-                    {
-                        int x = centerX + offsetX;
-                        if ((offsetX == 0 && offsetY == 0) || x < 0 || x >= width)
-                        {
-                            continue;
-                        }
-
-                        int neighbor = y * width + x;
-                        if (waterMask[neighbor] == 0 || marine[neighbor] != 0)
-                        {
-                            continue;
-                        }
-
-                        marine[neighbor] = 1;
-                        queue.Enqueue(neighbor);
-                    }
-                }
-            }
-
-            return marine;
-        }
-
-        private static bool HasNoDataNeighbor(
-            int centerX,
-            int centerY,
-            int width,
-            int height,
-            short[] elevation)
-        {
-            for (int offsetY = -1; offsetY <= 1; offsetY++)
-            {
-                int y = centerY + offsetY;
-                if (y < 0 || y >= height)
-                {
-                    continue;
-                }
-
-                for (int offsetX = -1; offsetX <= 1; offsetX++)
-                {
-                    int x = centerX + offsetX;
-                    if ((offsetX == 0 && offsetY == 0) || x < 0 || x >= width)
-                    {
-                        continue;
-                    }
-
-                    if (elevation[y * width + x] == TerrainElevationEncoding.NoData)
-                    {
-                        return true;
-                    }
-                }
-            }
-
-            return false;
         }
     }
 
@@ -1013,6 +938,7 @@ namespace TerrainLab
             new TerrainWaterReceiver[8];
         private readonly List<int> _rechargedCells = new List<int>();
         private readonly HashSet<int> _rechargedCellSet = new HashSet<int>();
+        private readonly int _seaLevel;
         private TerrainWaterParameters _parameters;
         private int _managedCellCount;
         private int _nextSource;
@@ -1021,7 +947,8 @@ namespace TerrainLab
             TerrainWaterRouting routing,
             byte[] waterMask,
             byte[] managedMask,
-            TerrainWaterParameters parameters)
+            TerrainWaterParameters parameters,
+            int seaLevel = 0)
         {
             _routing = routing ?? throw new ArgumentNullException(nameof(routing));
             if (waterMask == null || waterMask.Length != routing.CellCount ||
@@ -1032,6 +959,7 @@ namespace TerrainLab
 
             _waterMask = waterMask;
             _managedMask = managedMask;
+            _seaLevel = seaLevel;
             _parameters = (parameters ?? new TerrainWaterParameters()).Normalize();
             for (int index = 0; index < managedMask.Length; index++)
             {
@@ -1276,12 +1204,7 @@ namespace TerrainLab
                 EnqueueBasin(source, candidate);
                 EnqueueReceivers(source, candidate, front.Priority);
                 source.ChannelCellsSinceBasin++;
-                return new TerrainWaterCellChange(
-                    candidate,
-                    TerrainWaterDepthClass.Shallow,
-                    TerrainWaterDepthModel.ShallowMaximumMetres,
-                    cost,
-                    source.Origin);
+                return CreateChange(candidate, cost, source.Origin);
             }
 
             return null;
@@ -1321,13 +1244,7 @@ namespace TerrainLab
                 MarkManagedWater(candidate);
                 EnqueueBasin(source, candidate);
                 source.ChannelCellsSinceBasin = 0;
-                int depthMetres = GetLocalDepth(candidate, source.HeadElevation);
-                return new TerrainWaterCellChange(
-                    candidate,
-                    TerrainWaterDepthModel.Classify(depthMetres),
-                    depthMetres,
-                    cost,
-                    source.Origin);
+                return CreateChange(candidate, cost, source.Origin);
             }
 
             return null;
@@ -1452,14 +1369,25 @@ namespace TerrainLab
             return 1 + Math.Min(63, depthUnits);
         }
 
-        private int GetLocalDepth(int index, int sourceHeadElevation)
+        private TerrainWaterCellChange CreateChange(
+            int index,
+            int cost,
+            int sourceIndex)
         {
-            int localSurface = Math.Min(
-                sourceHeadElevation,
-                _routing.FilledElevation[index]);
-            return TerrainWaterDepthModel.GetDepthMetres(
-                _routing.Elevation[index],
-                localSurface);
+            int elevation = _routing.Elevation[index];
+            bool marine = TerrainWaterDepthModel.TryClassifyElevation(
+                elevation,
+                _seaLevel,
+                out TerrainWaterDepthClass depthClass);
+            int depthMetres = marine
+                ? TerrainWaterDepthModel.GetDepthMetres(elevation, _seaLevel)
+                : TerrainWaterDepthModel.ShallowStorageUnits;
+            return new TerrainWaterCellChange(
+                index,
+                marine ? depthClass : TerrainWaterDepthClass.Shallow,
+                depthMetres,
+                cost,
+                sourceIndex);
         }
 
         private void MarkManagedWater(int index)

@@ -219,9 +219,17 @@ namespace TerrainLab
                 throw new InvalidOperationException(limitError);
             }
 
-            if (state.SeaLevel == TerrainElevationEncoding.NoData)
+            if (state.SeaLevel != 0)
             {
-                throw new InvalidOperationException("Sea level may not use the reserved NODATA value.");
+                throw new InvalidOperationException(
+                    "WBXGEO sea level must use the zero-metre datum.");
+            }
+
+            if (state.Elevation == null ||
+                state.Elevation.Any(value => !TerrainElevationEncoding.IsStoredValue(value)))
+            {
+                throw new InvalidOperationException(
+                    "WBXGEO elevation must be NODATA or between -20000 and 9000 metres.");
             }
 
             string normalizedDirectory = NormalizeDirectory(directory);
@@ -588,10 +596,11 @@ namespace TerrainLab
 
             if (manifest.VerticalReference.StorageType != "int16" ||
                 manifest.VerticalReference.NoData != TerrainElevationEncoding.NoData ||
-                manifest.VerticalReference.SeaLevel == TerrainElevationEncoding.NoData)
+                !TerrainElevationEncoding.IsDataValue(
+                    manifest.VerticalReference.SeaLevel))
             {
                 throw new InvalidDataException(
-                    "WBXGEO vertical reference must use Int16 with NODATA 9999.");
+                    "WBXGEO vertical reference must use Int16, NODATA 9999, and a valid sea-level datum.");
             }
 
             if (!TerrainMapLimits.TryValidate(

@@ -153,6 +153,49 @@ internal static class Program
             belowSea.a == shallow.a && shallow.a == seaLevel.a &&
             seaLevel.a == high.a,
             "Elevation overlay alpha is not consistently translucent.");
+        Assert(
+            TerrainElevationEncoding.FromWorldHeight(
+                TerrainElevationEncoding.WorldBoxMinimum) ==
+                TerrainElevationEncoding.Minimum &&
+            TerrainElevationEncoding.FromWorldHeight(
+                TerrainElevationEncoding.WorldBoxSeaLevel) == 0 &&
+            TerrainElevationEncoding.FromWorldHeight(
+                TerrainElevationEncoding.WorldBoxMaximum) ==
+                TerrainElevationEncoding.Maximum &&
+            TerrainElevationEncoding.ToWorldHeight(
+                TerrainElevationEncoding.Minimum) ==
+                TerrainElevationEncoding.WorldBoxMinimum &&
+            TerrainElevationEncoding.ToWorldHeight(0) ==
+                TerrainElevationEncoding.WorldBoxSeaLevel &&
+            TerrainElevationEncoding.ToWorldHeight(
+                TerrainElevationEncoding.Maximum) ==
+                TerrainElevationEncoding.WorldBoxMaximum,
+            "WorldBox height conversion does not preserve DEM endpoints and sea level.");
+        TerrainWorldState migrated = TerrainWorldState.CreateFromLayers(
+            "legacy-height-probe",
+            DateTime.UtcNow,
+            4,
+            1,
+            TerrainElevationEncoding.WorldBoxSeaLevel,
+            new short[]
+            {
+                TerrainElevationEncoding.WorldBoxMinimum,
+                TerrainElevationEncoding.WorldBoxSeaLevel,
+                TerrainElevationEncoding.WorldBoxMaximum,
+                TerrainElevationEncoding.NoData
+            },
+            new byte[4],
+            new byte[4]);
+        Assert(
+            migrated.SeaLevel == 0 &&
+            migrated.Elevation.SequenceEqual(new short[]
+            {
+                TerrainElevationEncoding.Minimum,
+                0,
+                TerrainElevationEncoding.Maximum,
+                TerrainElevationEncoding.NoData
+            }),
+            "Legacy WorldBox height-cache values were not migrated to metre DEM.");
     }
 
     private static void ValidateDigitizingRaster()
@@ -719,7 +762,7 @@ internal static class Program
             migrated.WaterDynamics.WaterStorage
                 .Where((_, index) => expectedMask[index] != 0)
                 .All(value =>
-                    value == TerrainWaterDepthModel.ShallowMaximumMetres) &&
+                    value == TerrainWaterDepthModel.ShallowStorageUnits) &&
             migrated.WaterDynamics.RestoreSurfaceCodes.All(value => value == 0) &&
             migrated.WaterDynamics.Parameters.EvaporationPerClimateStep == 1,
             "Water schema 1.1 did not receive safe 1.2 defaults.");
@@ -826,7 +869,7 @@ internal static class Program
             for (int x = 0; x < width; x++)
             {
                 elevation[y * width + x] =
-                    (short)(200 - x * 10 + Math.Abs(y - 5) * 3);
+                    (short)(-20 - x * 10 + Math.Abs(y - 5) * 3);
             }
         }
 
@@ -936,14 +979,10 @@ internal static class Program
             basinChanges.All(change =>
                 change.Cost == 51 &&
                 basinElevation[change.Index] == 0) &&
-            basinChanges.Any(change =>
-                change.DepthClass == TerrainWaterDepthClass.Shallow) &&
-            basinChanges.Any(change =>
-                change.DepthClass == TerrainWaterDepthClass.Shelf &&
-                change.DepthMetres == 50) &&
             basinChanges.All(change =>
-                change.DepthClass != TerrainWaterDepthClass.Deep),
-            "Depression fill did not consume depth-weighted volume locally: " +
+                change.DepthClass == TerrainWaterDepthClass.Shallow &&
+                change.DepthMetres == 0),
+            "Depression fill did not keep water class tied to absolute DEM: " +
             string.Join(", ", basinChanges.Select(change => string.Format(
                 "{0}/{1}/{2}",
                 change.Index,
@@ -1007,35 +1046,38 @@ internal static class Program
     private static void ValidateWaterDepthAndBalance()
     {
         Assert(
-            TerrainWaterDepthModel.Classify(5) ==
+            TerrainWaterDepthModel.ClassifyElevation(0, 0) ==
             TerrainWaterDepthClass.Shallow &&
-            TerrainWaterDepthModel.Classify(6) ==
+            TerrainWaterDepthModel.ClassifyElevation(-5, 0) ==
+            TerrainWaterDepthClass.Shallow &&
+            TerrainWaterDepthModel.ClassifyElevation(-6, 0) ==
             TerrainWaterDepthClass.Shelf &&
-            TerrainWaterDepthModel.Classify(150) ==
+            TerrainWaterDepthModel.ClassifyElevation(-149, 0) ==
             TerrainWaterDepthClass.Shelf &&
-            TerrainWaterDepthModel.Classify(151) ==
+            TerrainWaterDepthModel.ClassifyElevation(-150, 0) ==
             TerrainWaterDepthClass.Deep,
-            "Water depth thresholds are not 5/150 metres.");
+            "Water classes are not tied to DEM levels 0/-5/-150 metres.");
+        Assert(
+            !TerrainWaterDepthModel.TryClassifyElevation(
+                1,
+                0,
+                out _),
+            "Positive DEM was accepted as a marine water class.");
+        TerrainWaterSimulation freshwater = new TerrainWaterSimulation(
+            TerrainWaterRouting.Build(2, 1, new short[] { 10, 9 }),
+            new byte[2],
+            new byte[2],
+            new TerrainWaterParameters());
+        freshwater.AddSource(0, 10, 1);
+        TerrainWaterCellChange freshwaterChange = freshwater
+            .Step(1, _ => true)
+            .Single();
+        Assert(
+            freshwaterChange.DepthClass == TerrainWaterDepthClass.Shallow,
+            "Managed positive-elevation freshwater was not kept shallow.");
         Assert(
             TerrainWaterDepthModel.GetStorage(300) == byte.MaxValue,
             "Dynamic-water storage did not saturate to UInt8.");
-
-        const int width = 5;
-        const int height = 5;
-        short[] elevation = Enumerable.Repeat((short)20, width * height).ToArray();
-        elevation[12] = -200;
-        byte[] water = new byte[width * height];
-        water[0] = 1;
-        water[6] = 1;
-        water[18] = 1;
-        byte[] marine = TerrainWaterConnectivity.BuildMarineMask(
-            width,
-            height,
-            elevation,
-            water);
-        Assert(marine[0] == 1 && marine[6] == 1 && marine[18] == 0 &&
-               marine[12] == 0,
-            "Marine connectivity treated an isolated or dry negative DEM cell as sea.");
 
         byte[] managed = { 1, 1, 0 };
         byte[] storage = { 5, 150, 200 };
@@ -1060,7 +1102,7 @@ internal static class Program
         {
             for (int x = 0; x < width; x++)
             {
-                elevation[y * width + x] = (short)(500 - x * 20 - y * 7);
+                elevation[y * width + x] = (short)(-500 - x * 20 - y * 7);
             }
         }
 
@@ -1533,9 +1575,42 @@ internal static class Program
 
         Assert(noDataRejected, "Reserved NODATA was accepted as an elevation value.");
 
-        state.ApplyElevationBrush(0, 0, 0, TerrainElevationOperation.Set, 9998, 1);
+        bool rangeRejected = false;
+        try
+        {
+            short[] invalid = (short[])state.Elevation.Clone();
+            invalid[0] = 9001;
+            state.ApplyElevationGrid(invalid);
+        }
+        catch (ArgumentException)
+        {
+            rangeRejected = true;
+        }
+
+        Assert(rangeRejected, "Elevation grid accepted a value above 9000 metres.");
+
+        state.ApplyElevationBrush(
+            0,
+            0,
+            0,
+            TerrainElevationOperation.Set,
+            TerrainElevationEncoding.Maximum,
+            1);
         state.ApplyElevationBrush(0, 0, 0, TerrainElevationOperation.Raise, 0, 1);
-        Assert(state.Elevation[0] == 10000, "Raise operation produced reserved NODATA.");
+        Assert(
+            state.Elevation[0] == TerrainElevationEncoding.Maximum,
+            "Raise operation crossed the 9000-metre DEM ceiling.");
+        state.ApplyElevationBrush(
+            0,
+            0,
+            0,
+            TerrainElevationOperation.Set,
+            TerrainElevationEncoding.Minimum,
+            1);
+        state.ApplyElevationBrush(0, 0, 0, TerrainElevationOperation.Lower, 0, 1);
+        Assert(
+            state.Elevation[0] == TerrainElevationEncoding.Minimum,
+            "Lower operation crossed the -20000-metre DEM floor.");
     }
 
     private static void ValidateArchive(string packagePath, int expectedCells)

@@ -139,19 +139,14 @@ namespace TerrainLab
         public bool TrySetTargetElevation(string value, out string error)
         {
             error = null;
-            if (!short.TryParse(value, out short parsed))
+            if (!int.TryParse(value, out int parsed) ||
+                !TerrainElevationEncoding.IsDataValue(parsed))
             {
-                error = "Elevation must be a signed Int16 value.";
+                error = "Elevation must be between -20000 and 9000 metres.";
                 return false;
             }
 
-            if (parsed == TerrainElevationEncoding.NoData)
-            {
-                error = "Elevation 9999 is reserved for NODATA.";
-                return false;
-            }
-
-            TargetElevation = parsed;
+            TargetElevation = (short)parsed;
             return true;
         }
 

@@ -5,7 +5,13 @@ import numpy as np
 from PIL import Image, ImageDraw
 
 from imagetomap import convert, validate_map_size
-from imagetomap.consts import ELEVATION_NODATA, SAFE_TILES_TUPLE, UNPLAYABLE_TILES
+from imagetomap.consts import (
+    ELEVATION_MAXIMUM,
+    ELEVATION_MINIMUM,
+    ELEVATION_NODATA,
+    SAFE_TILES_TUPLE,
+    UNPLAYABLE_TILES,
+)
 from imagetomap.terrain import fill_small_land_regions
 from imagetomap.utils import json_loads
 
@@ -16,6 +22,7 @@ WATER_TILES = {"deep_ocean", "close_ocean", "shallow_waters"}
 class TerrainConversionTests(unittest.TestCase):
     def test_elevation_nodata_is_reserved(self) -> None:
         self.assertEqual(ELEVATION_NODATA, 9999)
+        self.assertEqual((ELEVATION_MINIMUM, ELEVATION_MAXIMUM), (-20000, 9000))
 
     def test_map_budget_allows_extreme_aspect_ratios(self) -> None:
         validate_map_size(40, 10)
