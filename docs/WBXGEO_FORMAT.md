@@ -76,7 +76,8 @@ Elevation value `9999` is reserved globally as `NODATA`. It is never a valid
 height and must be masked out of rendering, statistics, interpolation,
 hydrology, and erosion. A GeoTIFF export writes the same value as the band
 NoData value. Signed Int16 keeps negative bathymetry and uses half the memory of
-Float32 or Int32.
+Float32 or Int32. New projects declare the vertical unit as `metre`; readers
+continue accepting legacy `worldbox-height` packages.
 
 `WorldTile.Height` is only a normalized runtime cache. It is not the
 authoritative elevation representation, and `NODATA` cells are not copied into
@@ -144,7 +145,7 @@ boundaries; readers may accept newer minor versions and preserve unknown data.
   },
   "vertical_reference": {
     "datum": "worldbox-local",
-    "unit": "worldbox-height",
+    "unit": "metre",
     "sea_level": 98,
     "storage_type": "int16",
     "nodata": 9999
@@ -236,7 +237,7 @@ one module; it does not invalidate the core project.
 
 ### Live water module
 
-TerrainLab implements optional module `hydrology.water_dynamics` schema `1.1.0`.
+TerrainLab implements optional module `hydrology.water_dynamics` schema `1.2.0`.
 `state.json` stores whether routing is enabled, normalized integer parameters,
 managed-cell count, injected/consumed volume counters, and observed native
 geyser pulse count. Parameter `routing_algorithm` is one of `d8`, `dinf`, or
@@ -245,13 +246,17 @@ geyser pulse count. Parameter `routing_algorithm` is one of `d8`, `dinf`, or
 | Layer | Storage | NODATA | Meaning |
 |---|---|---:|---|
 | `hydrology.water_dynamics.managed_mask` | UInt8 | `255` | `1` for water cells created and budgeted by TerrainLab, `0` otherwise |
+| `hydrology.water_dynamics.water_storage` | UInt8 | none | Saturating local water depth/reserve; `0` is dry |
+| `hydrology.water_dynamics.restore_surface` | UInt8 | none | One-based index into the saved pre-water surface palette; `0` is fallback |
 
 The loader requires exact project ID, dimensions, layer length, SHA-256, binary
-mask values, and a managed-cell count matching the raster. Invalid data drops
-only this optional module. Source queues and remaining finite volume are not
-serialized: loading restores the managed mask but does not inject another
-ordinary-source budget. Later native geyser pulses can continue replenishing a
-source. The configured flood percentage is normalized to `1..50`, and runtime
+mask values, mutually consistent storage/restore rasters, and a managed-cell
+count matching the raster. Invalid data drops only this optional module. Source
+queues and remaining finite volume are not serialized: loading restores managed
+water, storage, and its pre-water surface but does not inject another ordinary
+source budget. Valid `1.0.x` and `1.1.x` payloads migrate with shallow default
+storage and a safe fallback dry surface. Later native geyser pulses can continue
+replenishing a source. The configured flood percentage is normalized to `1..50`, and runtime
 code always enforces the same hard 50-percent ceiling over valid DEM cells.
 The algorithm choice controls only new live-water channel fronts; analytical
 hydrology and erosion remain on their independently versioned D8 graphs.

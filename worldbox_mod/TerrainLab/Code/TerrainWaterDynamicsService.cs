@@ -8,6 +8,7 @@ namespace TerrainLab
     public sealed class TerrainWaterDynamicsService
     {
         private const float TickIntervalSeconds = 0.2f;
+        private const float ClimateIntervalSeconds = 30f;
         private const float RepaintDebounceSeconds = 0.75f;
         private const int MaximumInitialContacts = 96;
         private const int MaximumRecentPaintCells = 8192;
@@ -18,12 +19,16 @@ namespace TerrainLab
         private readonly HashSet<int> _queuedPaintIndices = new HashSet<int>();
         private readonly Dictionary<int, float> _recentPaintTimes =
             new Dictionary<int, float>();
+        private readonly Dictionary<int, int> _geyserOutlets =
+            new Dictionary<int, int>();
+        private readonly List<int> _driedCells = new List<int>();
         private TerrainWorldState _state;
         private TerrainWaterRouting _routing;
         private TerrainWaterSimulation _simulation;
         private WorldTile[] _tiles;
         private long _routingRevision = -1;
         private float _nextTickTime;
+        private float _nextClimateTime;
 
         public string LastError { get; private set; }
 
@@ -163,8 +168,9 @@ namespace TerrainLab
             try
             {
                 EnsureSimulation();
-                int origin = GetTileIndex(tile);
-                if (origin < 0)
+                int geyserIndex = GetTileIndex(tile);
+                if (geyserIndex < 0 ||
+                    !TryGetGeyserOutlet(geyserIndex, out int origin))
                 {
                     return;
                 }
@@ -174,8 +180,10 @@ namespace TerrainLab
                     pulseCount,
                     water.Parameters.GeyserPulseVolume);
                 int head = Math.Max(
-                    _state.Elevation[origin],
-                    _routing.FilledElevation[origin]);
+                    Math.Max(
+                        _state.Elevation[geyserIndex],
+                        _routing.FilledElevation[geyserIndex]),
+                    _state.Elevation[origin]);
                 if (_simulation.AddSource(origin, head, volume))
                 {
                     water.TotalInjectedVolume = SaturatingAdd(
@@ -191,6 +199,71 @@ namespace TerrainLab
             {
                 DisableAfterError(exception);
             }
+        }
+
+        private bool TryGetGeyserOutlet(int geyserIndex, out int outlet)
+        {
+            if (_geyserOutlets.TryGetValue(geyserIndex, out outlet) &&
+                IsUsableGeyserOutlet(outlet))
+            {
+                return true;
+            }
+
+            int selectedOutlet = -1;
+            _routing.ForEachNeighbor(geyserIndex, delegate(int neighbor)
+            {
+                if (!IsUsableGeyserOutlet(neighbor))
+                {
+                    return;
+                }
+
+                if (selectedOutlet < 0 ||
+                    _routing.FilledElevation[neighbor] <
+                    _routing.FilledElevation[selectedOutlet] ||
+                    _routing.FilledElevation[neighbor] ==
+                    _routing.FilledElevation[selectedOutlet] &&
+                    (_routing.Elevation[neighbor] <
+                     _routing.Elevation[selectedOutlet] ||
+                     _routing.Elevation[neighbor] ==
+                     _routing.Elevation[selectedOutlet] &&
+                     neighbor < selectedOutlet))
+                {
+                    selectedOutlet = neighbor;
+                }
+            });
+
+            if (selectedOutlet < 0)
+            {
+                outlet = -1;
+                _geyserOutlets.Remove(geyserIndex);
+                return false;
+            }
+
+            outlet = selectedOutlet;
+            _geyserOutlets[geyserIndex] = outlet;
+            return true;
+        }
+
+        private bool IsUsableGeyserOutlet(int index)
+        {
+            if (index < 0 || index >= _tiles.Length ||
+                _state.Elevation[index] == TerrainElevationEncoding.NoData)
+            {
+                return false;
+            }
+
+            WorldTile candidate = _tiles[index];
+            if (candidate == null || candidate.building != null)
+            {
+                return false;
+            }
+
+            if (_simulation.IsWater(index))
+            {
+                return _state.WaterDynamics.ManagedMask[index] != 0;
+            }
+
+            return TerrainSurfaceStamp.TryCaptureSafe(candidate, out _, out _);
         }
 
         public void NotifySurfaceLayerPainted(WorldTile tile, bool waterLayer)
@@ -214,6 +287,7 @@ namespace TerrainLab
                 }
                 else if (_simulation.MarkExternalDry(index))
                 {
+                    _state.WaterDynamics.ClearManagedStorage(index);
                     _state.WaterDynamics.ManagedCellCount =
                         _simulation.ManagedCellCount;
                     _state.WaterDynamics.IsDirty = true;
@@ -258,18 +332,20 @@ namespace TerrainLab
             {
                 EnsureSimulation();
                 ProcessPaintedWater();
+                bool changed = ProcessClimate();
                 if (Time.unscaledTime < _nextTickTime || _simulation.LimitReached)
                 {
-                    return false;
+                    return changed;
                 }
 
                 _nextTickTime = Time.unscaledTime + TickIntervalSeconds;
                 IReadOnlyList<TerrainWaterCellChange> changes = _simulation.Step(
                     state.WaterDynamics.Parameters.CellsPerTick,
                     CanFloodCell);
+                changed |= ApplyRecharge(_simulation.RechargedCells);
                 if (changes.Count == 0)
                 {
-                    return false;
+                    return changed;
                 }
 
                 ApplyChanges(changes);
@@ -330,6 +406,7 @@ namespace TerrainLab
                 else if (water.ManagedMask[index] != 0)
                 {
                     water.ManagedMask[index] = 0;
+                    water.ClearManagedStorage(index);
                     managedMaskChanged = true;
                 }
             }
@@ -345,9 +422,11 @@ namespace TerrainLab
                 currentWater,
                 water.ManagedMask,
                 water.Parameters);
+            ReclassifyExistingWater(currentWater);
             water.ManagedCellCount = _simulation.ManagedCellCount;
             _routingRevision = _state.Revision;
             _nextTickTime = Time.unscaledTime;
+            _nextClimateTime = Time.unscaledTime + ClimateIntervalSeconds;
             _paintedWater.Clear();
             LastError = null;
 
@@ -495,6 +574,16 @@ namespace TerrainLab
         private void ApplyChanges(IReadOnlyList<TerrainWaterCellChange> changes)
         {
             long consumed = 0L;
+            TerrainWaterState water = _state.WaterDynamics;
+            foreach (TerrainWaterCellChange change in changes)
+            {
+                water.CaptureRestoreSurface(
+                    change.Index,
+                    TerrainSurfaceStamp.Capture(_tiles[change.Index]));
+                water.WaterStorage[change.Index] = TerrainWaterDepthModel.GetStorage(
+                    change.DepthMetres);
+            }
+
             foreach (IGrouping<TerrainWaterDepthClass, TerrainWaterCellChange> group in
                      changes.GroupBy(item => item.DepthClass))
             {
@@ -504,7 +593,7 @@ namespace TerrainLab
                     case TerrainWaterDepthClass.Deep:
                         tileTypeId = "deep_ocean";
                         break;
-                    case TerrainWaterDepthClass.Coastal:
+                    case TerrainWaterDepthClass.Shelf:
                         tileTypeId = "close_ocean";
                         break;
                     default:
@@ -519,13 +608,237 @@ namespace TerrainLab
                 consumed = SaturatingAdd(consumed, group.Sum(item => (long)item.Cost));
             }
 
-            TerrainWaterState water = _state.WaterDynamics;
             water.ManagedCellCount = _simulation.ManagedCellCount;
             water.TotalConsumedVolume = SaturatingAdd(
                 water.TotalConsumedVolume,
                 consumed);
             water.IsDirty = true;
             _routingRevision = _state.Revision;
+        }
+
+        private bool ApplyRecharge(IReadOnlyList<int> rechargedCells)
+        {
+            if (rechargedCells == null || rechargedCells.Count == 0)
+            {
+                return false;
+            }
+
+            TerrainWaterState water = _state.WaterDynamics;
+            bool changed = false;
+            for (int offset = 0; offset < rechargedCells.Count; offset++)
+            {
+                int index = rechargedCells[offset];
+                if (index < 0 || index >= _tiles.Length ||
+                    water.ManagedMask[index] == 0)
+                {
+                    continue;
+                }
+
+                byte target = TerrainWaterDepthModel.GetStorage(
+                    GetDepthClass(_tiles[index]));
+                if (water.WaterStorage[index] < target)
+                {
+                    water.WaterStorage[index] = target;
+                    changed = true;
+                }
+            }
+
+            water.IsDirty |= changed;
+            return changed;
+        }
+
+        private bool ProcessClimate()
+        {
+            if (Time.unscaledTime < _nextClimateTime)
+            {
+                return false;
+            }
+
+            _nextClimateTime = Time.unscaledTime + ClimateIntervalSeconds;
+            TerrainWaterState water = _state.WaterDynamics;
+            int evaporation = water.Parameters.EvaporationPerClimateStep;
+            if (evaporation <= 0 || water.ManagedCellCount == 0)
+            {
+                return false;
+            }
+
+            _driedCells.Clear();
+            TerrainWaterBalance.ApplyEvaporation(
+                water.ManagedMask,
+                water.WaterStorage,
+                evaporation,
+                _driedCells);
+            if (_driedCells.Count == 0)
+            {
+                water.IsDirty = true;
+                return true;
+            }
+
+            Dictionary<TerrainSurfaceStamp, List<int>> restoreGroups =
+                new Dictionary<TerrainSurfaceStamp, List<int>>();
+            List<int> clearedCells = new List<int>(_driedCells.Count);
+            foreach (int index in _driedCells)
+            {
+                if (index < 0 || index >= _tiles.Length ||
+                    water.ManagedMask[index] == 0)
+                {
+                    continue;
+                }
+
+                WorldTile tile = _tiles[index];
+                if (tile?.building != null)
+                {
+                    water.WaterStorage[index] =
+                        TerrainWaterDepthModel.ShallowMaximumMetres;
+                    continue;
+                }
+
+                if (!IsWater(tile))
+                {
+                    clearedCells.Add(index);
+                    continue;
+                }
+
+                TerrainSurfaceStamp restore = GetRestoreSurface(water, index);
+                if (!restoreGroups.TryGetValue(restore, out List<int> indices))
+                {
+                    indices = new List<int>();
+                    restoreGroups.Add(restore, indices);
+                }
+
+                indices.Add(index);
+                clearedCells.Add(index);
+            }
+
+            foreach (KeyValuePair<TerrainSurfaceStamp, List<int>> group in restoreGroups)
+            {
+                _state.ApplySurfaceCells(group.Value.ToArray(), group.Key);
+            }
+
+            foreach (int index in clearedCells)
+            {
+                _simulation.MarkExternalDry(index);
+                water.ClearManagedStorage(index);
+            }
+
+            water.ManagedCellCount = _simulation.ManagedCellCount;
+            water.IsDirty = true;
+            _routingRevision = _state.Revision;
+            return true;
+        }
+
+        private TerrainSurfaceStamp GetRestoreSurface(
+            TerrainWaterState water,
+            int index)
+        {
+            if (water.TryGetRestoreSurface(index, out TerrainSurfaceStamp restore) &&
+                restore.TryResolve(out _, out _, out _))
+            {
+                return restore;
+            }
+
+            return new TerrainSurfaceStamp("soil_low", string.Empty, false);
+        }
+
+        private void ReclassifyExistingWater(byte[] currentWater)
+        {
+            byte[] marine = TerrainWaterConnectivity.BuildMarineMask(
+                _state.Width,
+                _state.Height,
+                _state.Elevation,
+                currentWater);
+            Dictionary<TerrainSurfaceStamp, List<int>> groups =
+                new Dictionary<TerrainSurfaceStamp, List<int>>();
+            for (int index = 0; index < currentWater.Length; index++)
+            {
+                WorldTile tile = _tiles[index];
+                if (currentWater[index] == 0 || tile == null ||
+                    tile.building != null ||
+                    _state.Elevation[index] == TerrainElevationEncoding.NoData)
+                {
+                    continue;
+                }
+
+                int surface = marine[index] != 0
+                    ? _state.SeaLevel
+                    : _routing.FilledElevation[index];
+                int depth = TerrainWaterDepthModel.GetDepthMetres(
+                    _state.Elevation[index],
+                    surface);
+                string targetId = GetTileTypeId(
+                    TerrainWaterDepthModel.Classify(depth),
+                    (tile.main_type?.id ?? string.Empty).StartsWith(
+                        "pit_",
+                        StringComparison.Ordinal));
+                if (string.Equals(
+                    tile.main_type?.id,
+                    targetId,
+                    StringComparison.Ordinal))
+                {
+                    continue;
+                }
+
+                TerrainSurfaceStamp target = new TerrainSurfaceStamp(
+                    targetId,
+                    string.Empty,
+                    tile.data != null && tile.data.frozen);
+                if (!target.TryResolve(out _, out _, out _))
+                {
+                    target = new TerrainSurfaceStamp(
+                        GetTileTypeId(
+                            TerrainWaterDepthModel.Classify(depth),
+                            false),
+                        string.Empty,
+                        tile.data != null && tile.data.frozen);
+                }
+
+                if (!groups.TryGetValue(target, out List<int> indices))
+                {
+                    indices = new List<int>();
+                    groups.Add(target, indices);
+                }
+
+                indices.Add(index);
+            }
+
+            foreach (KeyValuePair<TerrainSurfaceStamp, List<int>> group in groups)
+            {
+                _state.ApplySurfaceCells(group.Value.ToArray(), group.Key);
+            }
+        }
+
+        private static TerrainWaterDepthClass GetDepthClass(WorldTile tile)
+        {
+            string id = tile?.main_type?.id ?? string.Empty;
+            if (id.Contains("deep_ocean"))
+            {
+                return TerrainWaterDepthClass.Deep;
+            }
+
+            return id.Contains("close_ocean")
+                ? TerrainWaterDepthClass.Shelf
+                : TerrainWaterDepthClass.Shallow;
+        }
+
+        private static string GetTileTypeId(
+            TerrainWaterDepthClass depthClass,
+            bool pit)
+        {
+            string id;
+            switch (depthClass)
+            {
+                case TerrainWaterDepthClass.Deep:
+                    id = "deep_ocean";
+                    break;
+                case TerrainWaterDepthClass.Shelf:
+                    id = "close_ocean";
+                    break;
+                default:
+                    id = "shallow_waters";
+                    break;
+            }
+
+            return pit ? "pit_" + id : id;
         }
 
         private int GetTileIndex(WorldTile tile)
@@ -572,9 +885,12 @@ namespace TerrainLab
             _tiles = null;
             _routingRevision = -1;
             _nextTickTime = 0f;
+            _nextClimateTime = 0f;
             _paintedWater.Clear();
             _queuedPaintIndices.Clear();
             _recentPaintTimes.Clear();
+            _geyserOutlets.Clear();
+            _driedCells.Clear();
             LastError = null;
             if (!keepState)
             {

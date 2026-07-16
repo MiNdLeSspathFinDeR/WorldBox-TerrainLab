@@ -93,29 +93,41 @@ bounded DEM process without replacing WorldBox's own ocean behavior:
 4. Source volume is integer. A channel cell costs one unit; filling a depression
    costs more in proportion to its Priority-Flood depth. An ordinary contact has
    a finite configurable volume.
-5. A Harmony postfix observes the native `geyser` building's actual
-   `spawnBurstSpecial` call. Every real pulse adds configurable volume, so a live
-   geyser behaves as a continuing river source while still respecting native
-   pause, disable, destruction, and spawn timing.
+5. A Harmony postfix observes the native `geyser` building's actual `rain`
+   submission to `DropManager.spawnParabolicDrop`. Every real drop adds
+   configurable volume at the lowest safe adjacent cell, so a live geyser
+   behaves as a continuing river source without replacing its building tile.
 6. TerrainLab-created water may occupy at most the configured 1-50 percent of
    valid DEM cells. Fifty percent is a non-bypassable hard maximum. Existing
    ocean cells do not consume that budget, and hazardous/non-copyable surfaces
    or non-geyser buildings are never converted.
-7. Shallow channel cells and depth-classified coastal/deep depression cells are
-   written as normal WorldBox terrain. The managed UInt8 mask persists in
-   WBXGEO and exports as `managed_water.tif`; the vanilla map therefore retains
-   the visible river even without the mod.
+7. Depth is measured in DEM metres from bed to the applicable water surface:
+   `0..5` is shallow, `6..150` is shelf, and `>150` is deep ocean. Marine water
+   must be connected through existing water to an edge/NODATA boundary and uses
+   sea level. Inland water uses its local Priority-Flood spill surface. Dry
+   below-zero continental depressions remain dry until reached by a source.
+8. Managed water stores one UInt8 depth/reserve value and one UInt8 palette code
+   for the pre-water surface. Uniform configurable evaporation runs every 30
+   seconds; routed flow recharges cells, and a zero store restores that surface.
+   The mask and store export as `managed_water.tif` and `water_storage.tif`.
 
 The selector affects only live channel creation. Stored watershed,
 flow-accumulation, Strahler, and erosion products retain their deterministic D8
 contracts.
 
 Finite source queues are intentionally runtime-only and are not replenished on
-reload. The managed mask is restored, while native geysers resume through later
-real pulses. This prevents save/reload from turning one finite placement into
-an infinite source. The current model is a gameplay drainage model, not a
-calibrated shallow-water solver: it does not yet model velocity, evaporation,
-infiltration, or continuous water depth.
+reload. Managed mask, water store, and dry-surface palette survive reload,
+while native geysers resume through later real pulses. This prevents save/load
+from turning one finite placement into an infinite source. The current model is
+a gameplay drainage and uniform-loss water budget, not a calibrated
+shallow-water or climate solver: it does not yet model velocity, infiltration,
+spatial precipitation, or potential evapotranspiration.
+
+Connected filling follows the seed-and-target-level contract described by
+[GRASS `r.lake`](https://grass.osgeo.org/grass-stable/manuals/r.lake.html).
+The climate extension point follows the standard precipitation/inflow versus
+ET/outflow/storage accounting summarized by the
+[USGS water-budget framework](https://pubs.usgs.gov/circ/2007/1308/pdf/C1308_508.pdf).
 
 The design follows the same separation used by SAGA's
 [Wang & Liu depression filling](https://saga-gis.sourceforge.io/saga_tool_doc/7.8.1/ta_preprocessor_4.html)

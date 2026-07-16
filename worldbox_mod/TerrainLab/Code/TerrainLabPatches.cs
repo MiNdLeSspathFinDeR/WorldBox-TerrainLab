@@ -75,20 +75,30 @@ namespace TerrainLab
         private static MethodBase TargetMethod()
         {
             return AccessTools.Method(
-                typeof(Building),
-                "spawnBurstSpecial",
-                new[] { typeof(int) });
+                typeof(DropManager),
+                nameof(DropManager.spawnParabolicDrop),
+                new[]
+                {
+                    typeof(WorldTile),
+                    typeof(string),
+                    typeof(float),
+                    typeof(float),
+                    typeof(float),
+                    typeof(float),
+                    typeof(float),
+                    typeof(float)
+                });
         }
 
-        private static void Postfix(Building __instance, int pAmount)
+        private static void Postfix(WorldTile pTile, string pDropID)
         {
-            BuildingData data = __instance?.getData() as BuildingData;
-            if (pAmount > 0 &&
+            BuildingData data = pTile?.building?.getData() as BuildingData;
+            if (string.Equals(pDropID, "rain", StringComparison.Ordinal) &&
                 string.Equals(data?.asset_id, "geyser", StringComparison.Ordinal))
             {
                 TerrainLabRuntime.Instance?.WaterDynamics.NotifyGeyserPulse(
-                    __instance.current_tile,
-                    pAmount);
+                    pTile,
+                    1);
             }
         }
     }

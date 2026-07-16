@@ -502,7 +502,7 @@ namespace TerrainLab
                 VerticalReference = new WbxGeoVerticalReference
                 {
                     Datum = "worldbox-local",
-                    Unit = "worldbox-height",
+                    Unit = "metre",
                     SeaLevel = state.SeaLevel,
                     StorageType = "int16",
                     NoData = TerrainElevationEncoding.NoData

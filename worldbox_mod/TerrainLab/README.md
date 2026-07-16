@@ -26,8 +26,9 @@ under `Code` when the game starts.
   stable watershed IDs, and Strahler stream order;
 - bounded live-water routing with finite painted sources, native geyser pulse
   replenishment, selectable D8/D-infinity/MFD channel routing, local depression
-  filling, gameplay-safe conversion, and a non-bypassable 50-percent valid-cell
-  ceiling;
+  filling, 5/150-metre depth classes, persistent UInt8 water storage,
+  evaporation/recharge, gameplay-safe dry-surface restoration, and a
+  non-bypassable 50-percent valid-cell ceiling;
 - deterministic integer hydraulic/thermal transport with exact mass balance,
   preview overlays, apply, and undo;
 - optional hydrology, live-water, and erosion payloads in WBXGEO, each protected

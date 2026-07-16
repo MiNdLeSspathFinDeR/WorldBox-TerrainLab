@@ -9,8 +9,159 @@ namespace TerrainLab
     public enum TerrainWaterDepthClass : byte
     {
         Shallow = 0,
-        Coastal = 1,
+        Shelf = 1,
         Deep = 2
+    }
+
+    public static class TerrainWaterDepthModel
+    {
+        public const int ShallowMaximumMetres = 5;
+        public const int ShelfMaximumMetres = 150;
+        public const byte MaximumStoredDepth = byte.MaxValue;
+
+        public static int GetDepthMetres(int bedElevation, int waterSurfaceElevation)
+        {
+            return Math.Max(0, waterSurfaceElevation - bedElevation);
+        }
+
+        public static TerrainWaterDepthClass Classify(int depthMetres)
+        {
+            int depth = Math.Max(0, depthMetres);
+            if (depth <= ShallowMaximumMetres)
+            {
+                return TerrainWaterDepthClass.Shallow;
+            }
+
+            return depth <= ShelfMaximumMetres
+                ? TerrainWaterDepthClass.Shelf
+                : TerrainWaterDepthClass.Deep;
+        }
+
+        public static byte GetStorage(int depthMetres)
+        {
+            return (byte)Math.Max(
+                1,
+                Math.Min(MaximumStoredDepth, depthMetres));
+        }
+
+        public static byte GetStorage(TerrainWaterDepthClass depthClass)
+        {
+            switch (depthClass)
+            {
+                case TerrainWaterDepthClass.Deep:
+                    return MaximumStoredDepth;
+                case TerrainWaterDepthClass.Shelf:
+                    return ShelfMaximumMetres;
+                default:
+                    return ShallowMaximumMetres;
+            }
+        }
+    }
+
+    public static class TerrainWaterConnectivity
+    {
+        public static byte[] BuildMarineMask(
+            int width,
+            int height,
+            short[] elevation,
+            byte[] waterMask)
+        {
+            int cellCount = checked(width * height);
+            if (width <= 0 || height <= 0 || elevation == null ||
+                elevation.Length != cellCount || waterMask == null ||
+                waterMask.Length != cellCount)
+            {
+                throw new ArgumentException(
+                    "Marine connectivity layers do not match the canvas.");
+            }
+
+            byte[] marine = new byte[cellCount];
+            Queue<int> queue = new Queue<int>();
+            for (int index = 0; index < cellCount; index++)
+            {
+                if (waterMask[index] == 0)
+                {
+                    continue;
+                }
+
+                int x = index % width;
+                int y = index / width;
+                if (x == 0 || x == width - 1 || y == 0 || y == height - 1 ||
+                    HasNoDataNeighbor(x, y, width, height, elevation))
+                {
+                    marine[index] = 1;
+                    queue.Enqueue(index);
+                }
+            }
+
+            while (queue.Count > 0)
+            {
+                int current = queue.Dequeue();
+                int centerX = current % width;
+                int centerY = current / width;
+                for (int offsetY = -1; offsetY <= 1; offsetY++)
+                {
+                    int y = centerY + offsetY;
+                    if (y < 0 || y >= height)
+                    {
+                        continue;
+                    }
+
+                    for (int offsetX = -1; offsetX <= 1; offsetX++)
+                    {
+                        int x = centerX + offsetX;
+                        if ((offsetX == 0 && offsetY == 0) || x < 0 || x >= width)
+                        {
+                            continue;
+                        }
+
+                        int neighbor = y * width + x;
+                        if (waterMask[neighbor] == 0 || marine[neighbor] != 0)
+                        {
+                            continue;
+                        }
+
+                        marine[neighbor] = 1;
+                        queue.Enqueue(neighbor);
+                    }
+                }
+            }
+
+            return marine;
+        }
+
+        private static bool HasNoDataNeighbor(
+            int centerX,
+            int centerY,
+            int width,
+            int height,
+            short[] elevation)
+        {
+            for (int offsetY = -1; offsetY <= 1; offsetY++)
+            {
+                int y = centerY + offsetY;
+                if (y < 0 || y >= height)
+                {
+                    continue;
+                }
+
+                for (int offsetX = -1; offsetX <= 1; offsetX++)
+                {
+                    int x = centerX + offsetX;
+                    if ((offsetX == 0 && offsetY == 0) || x < 0 || x >= width)
+                    {
+                        continue;
+                    }
+
+                    if (elevation[y * width + x] == TerrainElevationEncoding.NoData)
+                    {
+                        return true;
+                    }
+                }
+            }
+
+            return false;
+        }
     }
 
     public enum TerrainWaterRoutingAlgorithm : byte
@@ -81,6 +232,9 @@ namespace TerrainLab
         [JsonProperty("cells_per_tick")]
         public int CellsPerTick { get; set; } = 48;
 
+        [JsonProperty("evaporation_per_climate_step")]
+        public int EvaporationPerClimateStep { get; set; } = 1;
+
         [JsonIgnore]
         public TerrainWaterRoutingAlgorithm RoutingAlgorithm { get; set; } =
             TerrainWaterRoutingAlgorithm.D8;
@@ -103,6 +257,9 @@ namespace TerrainLab
                 InitialSourceVolume = Math.Max(1, Math.Min(4096, InitialSourceVolume)),
                 GeyserPulseVolume = Math.Max(1, Math.Min(1024, GeyserPulseVolume)),
                 CellsPerTick = Math.Max(1, Math.Min(512, CellsPerTick)),
+                EvaporationPerClimateStep = Math.Max(
+                    0,
+                    Math.Min(16, EvaporationPerClimateStep)),
                 RoutingAlgorithm = TerrainWaterRoutingAlgorithms.Normalize(
                     RoutingAlgorithm)
             };
@@ -117,6 +274,13 @@ namespace TerrainLab
             new TerrainWaterParameters();
 
         public byte[] ManagedMask { get; internal set; }
+
+        public byte[] WaterStorage { get; internal set; }
+
+        public byte[] RestoreSurfaceCodes { get; internal set; }
+
+        public List<TerrainSurfaceStamp> RestoreSurfacePalette { get; internal set; } =
+            new List<TerrainSurfaceStamp>();
 
         public int ManagedCellCount { get; internal set; }
 
@@ -137,7 +301,9 @@ namespace TerrainLab
 
             return new TerrainWaterState
             {
-                ManagedMask = new byte[cellCount]
+                ManagedMask = new byte[cellCount],
+                WaterStorage = new byte[cellCount],
+                RestoreSurfaceCodes = new byte[cellCount]
             };
         }
 
@@ -148,20 +314,150 @@ namespace TerrainLab
                 ManagedMask = new byte[cellCount];
             }
 
+            if (WaterStorage == null || WaterStorage.Length != cellCount)
+            {
+                WaterStorage = new byte[cellCount];
+            }
+
+            if (RestoreSurfaceCodes == null || RestoreSurfaceCodes.Length != cellCount)
+            {
+                RestoreSurfaceCodes = new byte[cellCount];
+            }
+
+            RestoreSurfacePalette = RestoreSurfacePalette ??
+                new List<TerrainSurfaceStamp>();
+            if (RestoreSurfacePalette.Count > byte.MaxValue)
+            {
+                RestoreSurfacePalette.RemoveRange(
+                    byte.MaxValue,
+                    RestoreSurfacePalette.Count - byte.MaxValue);
+            }
+
             int count = 0;
             for (int index = 0; index < ManagedMask.Length; index++)
             {
                 if (ManagedMask[index] == 0)
                 {
+                    WaterStorage[index] = 0;
+                    RestoreSurfaceCodes[index] = 0;
                     continue;
                 }
 
                 ManagedMask[index] = 1;
+                if (WaterStorage[index] == 0)
+                {
+                    WaterStorage[index] = TerrainWaterDepthModel.GetStorage(
+                        TerrainWaterDepthClass.Shallow);
+                }
+
+                if (RestoreSurfaceCodes[index] > RestoreSurfacePalette.Count)
+                {
+                    RestoreSurfaceCodes[index] = 0;
+                }
+
                 count++;
             }
 
             ManagedCellCount = count;
             Parameters = (Parameters ?? new TerrainWaterParameters()).Normalize();
+        }
+
+        internal void CaptureRestoreSurface(int index, TerrainSurfaceStamp stamp)
+        {
+            if (index < 0 || index >= RestoreSurfaceCodes.Length ||
+                RestoreSurfaceCodes[index] != 0 ||
+                string.IsNullOrWhiteSpace(stamp.MainTypeId))
+            {
+                return;
+            }
+
+            int paletteIndex = RestoreSurfacePalette.IndexOf(stamp);
+            if (paletteIndex < 0)
+            {
+                if (RestoreSurfacePalette.Count >= byte.MaxValue)
+                {
+                    return;
+                }
+
+                paletteIndex = RestoreSurfacePalette.Count;
+                RestoreSurfacePalette.Add(stamp);
+            }
+
+            RestoreSurfaceCodes[index] = checked((byte)(paletteIndex + 1));
+        }
+
+        internal bool TryGetRestoreSurface(int index, out TerrainSurfaceStamp stamp)
+        {
+            stamp = default(TerrainSurfaceStamp);
+            if (index < 0 || index >= RestoreSurfaceCodes.Length)
+            {
+                return false;
+            }
+
+            int paletteIndex = RestoreSurfaceCodes[index] - 1;
+            if (paletteIndex < 0 || paletteIndex >= RestoreSurfacePalette.Count)
+            {
+                return false;
+            }
+
+            stamp = RestoreSurfacePalette[paletteIndex];
+            return !string.IsNullOrWhiteSpace(stamp.MainTypeId);
+        }
+
+        internal void ClearManagedStorage(int index)
+        {
+            if (index < 0 || index >= ManagedMask.Length)
+            {
+                return;
+            }
+
+            WaterStorage[index] = 0;
+            RestoreSurfaceCodes[index] = 0;
+        }
+    }
+
+    public static class TerrainWaterBalance
+    {
+        public static int ApplyEvaporation(
+            byte[] managedMask,
+            byte[] waterStorage,
+            int evaporation,
+            ICollection<int> driedCells)
+        {
+            if (managedMask == null || waterStorage == null ||
+                managedMask.Length != waterStorage.Length)
+            {
+                throw new ArgumentException("Water balance layers have different sizes.");
+            }
+
+            int loss = Math.Max(0, Math.Min(byte.MaxValue, evaporation));
+            if (loss == 0)
+            {
+                return 0;
+            }
+
+            int dried = 0;
+            for (int index = 0; index < managedMask.Length; index++)
+            {
+                if (managedMask[index] == 0)
+                {
+                    waterStorage[index] = 0;
+                    continue;
+                }
+
+                int remaining = waterStorage[index] - loss;
+                if (remaining > 0)
+                {
+                    waterStorage[index] = (byte)remaining;
+                    continue;
+                }
+
+                waterStorage[index] = 0;
+                driedCells?.Add(index);
+                dried++;
+            }
+
+            return dried;
         }
     }
 
@@ -678,11 +974,13 @@ namespace TerrainLab
         public TerrainWaterCellChange(
             int index,
             TerrainWaterDepthClass depthClass,
+            int depthMetres,
             int cost,
             int sourceIndex)
         {
             Index = index;
             DepthClass = depthClass;
+            DepthMetres = Math.Max(0, depthMetres);
             Cost = cost;
             SourceIndex = sourceIndex;
         }
@@ -690,6 +988,8 @@ namespace TerrainLab
         public int Index { get; }
 
         public TerrainWaterDepthClass DepthClass { get; }
+
+        public int DepthMetres { get; }
 
         public int Cost { get; }
 
@@ -711,6 +1011,8 @@ namespace TerrainLab
         private readonly List<WaterSource> _sources = new List<WaterSource>();
         private readonly TerrainWaterReceiver[] _receiverBuffer =
             new TerrainWaterReceiver[8];
+        private readonly List<int> _rechargedCells = new List<int>();
+        private readonly HashSet<int> _rechargedCellSet = new HashSet<int>();
         private TerrainWaterParameters _parameters;
         private int _managedCellCount;
         private int _nextSource;
@@ -755,6 +1057,8 @@ namespace TerrainLab
         public long PendingVolume => _sources
             .Where(source => source.CanAdvance)
             .Sum(source => source.Budget);
+
+        public IReadOnlyList<int> RechargedCells => _rechargedCells;
 
         public void UpdateParameters(TerrainWaterParameters parameters)
         {
@@ -819,10 +1123,12 @@ namespace TerrainLab
                 existing.HeadElevation = Math.Max(
                     existing.HeadElevation,
                     _routing.FilledElevation[origin]);
-                if (existing.CanReceive)
+                if (!existing.CanReceive || existing.Budget <= 0)
                 {
-                    existing.Budget = SaturatingAdd(existing.Budget, volume);
+                    existing.ResetChannel();
                 }
+
+                existing.Budget = SaturatingAdd(existing.Budget, volume);
 
                 return true;
             }
@@ -850,6 +1156,8 @@ namespace TerrainLab
             int maximumChanges,
             Func<int, bool> canFlood)
         {
+            _rechargedCells.Clear();
+            _rechargedCellSet.Clear();
             if (maximumChanges <= 0)
             {
                 return Array.Empty<TerrainWaterCellChange>();
@@ -932,6 +1240,7 @@ namespace TerrainLab
                         continue;
                     }
 
+                    RecordRecharge(candidate);
                     EnqueueBasin(source, candidate);
                     EnqueueReceivers(source, candidate, front.Priority);
                     continue;
@@ -970,6 +1279,7 @@ namespace TerrainLab
                 return new TerrainWaterCellChange(
                     candidate,
                     TerrainWaterDepthClass.Shallow,
+                    TerrainWaterDepthModel.ShallowMaximumMetres,
                     cost,
                     source.Origin);
             }
@@ -984,8 +1294,13 @@ namespace TerrainLab
             while (source.Basin.Count > 0)
             {
                 int candidate = source.Basin.Pop();
-                if (_waterMask[candidate] != 0 ||
-                    _routing.Elevation[candidate] > source.HeadElevation)
+                if (_waterMask[candidate] != 0)
+                {
+                    RecordRecharge(candidate);
+                    continue;
+                }
+
+                if (_routing.Elevation[candidate] > source.HeadElevation)
                 {
                     continue;
                 }
@@ -1006,9 +1321,11 @@ namespace TerrainLab
                 MarkManagedWater(candidate);
                 EnqueueBasin(source, candidate);
                 source.ChannelCellsSinceBasin = 0;
+                int depthMetres = GetLocalDepth(candidate, source.HeadElevation);
                 return new TerrainWaterCellChange(
                     candidate,
-                    GetDepthClass(candidate),
+                    TerrainWaterDepthModel.Classify(depthMetres),
+                    depthMetres,
                     cost,
                     source.Origin);
             }
@@ -1135,17 +1452,14 @@ namespace TerrainLab
             return 1 + Math.Min(63, depthUnits);
         }
 
-        private TerrainWaterDepthClass GetDepthClass(int index)
+        private int GetLocalDepth(int index, int sourceHeadElevation)
         {
-            int depthUnits = _routing.GetFillDepth(index) / _routing.VerticalUnit;
-            if (depthUnits >= 4)
-            {
-                return TerrainWaterDepthClass.Deep;
-            }
-
-            return depthUnits >= 2
-                ? TerrainWaterDepthClass.Coastal
-                : TerrainWaterDepthClass.Shallow;
+            int localSurface = Math.Min(
+                sourceHeadElevation,
+                _routing.FilledElevation[index]);
+            return TerrainWaterDepthModel.GetDepthMetres(
+                _routing.Elevation[index],
+                localSurface);
         }
 
         private void MarkManagedWater(int index)
@@ -1155,6 +1469,15 @@ namespace TerrainLab
             {
                 _managedMask[index] = 1;
                 _managedCellCount++;
+            }
+        }
+
+        private void RecordRecharge(int index)
+        {
+            if (index >= 0 && index < _managedMask.Length &&
+                _managedMask[index] != 0 && _rechargedCellSet.Add(index))
+            {
+                _rechargedCells.Add(index);
             }
         }
 
@@ -1201,7 +1524,6 @@ namespace TerrainLab
                 HeadElevation = headElevation;
                 Budget = budget;
                 Basin = new IndexMinHeap(elevation);
-                BasinSeen.Add(origin);
                 ResetChannel();
             }
 
@@ -1222,6 +1544,9 @@ namespace TerrainLab
                 ChannelSeen.Clear();
                 ChannelSeen.Add(Origin);
                 Channel.Push(Origin, 1.0);
+                Basin.Clear();
+                BasinSeen.Clear();
+                BasinSeen.Add(Origin);
                 ChannelCellsSinceBasin = 0;
             }
         }
@@ -1352,6 +1677,11 @@ namespace TerrainLab
 
             public int Count { get; private set; }
 
+            public void Clear()
+            {
+                Count = 0;
+            }
+
             public void Push(int value)
             {
                 if (Count == _items.Length)
@@ -1422,16 +1752,23 @@ namespace TerrainLab
     {
         private const string MetadataPath = "state.json";
         private const string ManagedMaskPath = "managed_water.u8";
+        private const string WaterStoragePath = "water_storage.u8";
+        private const string RestoreSurfacePath = "restore_surface.u8";
 
         public string Id => "hydrology.water_dynamics";
 
-        public string SchemaVersion => "1.1.0";
+        public string SchemaVersion => "1.2.0";
 
         public bool IsRequired => false;
 
         public void WritePackage(TerrainModuleWriteContext context, TerrainWorldState state)
         {
             TerrainWaterState water = state?.WaterDynamics;
+            if (water != null && state != null)
+            {
+                water.ValidateAndRecount(state.CellCount);
+            }
+
             TerrainWaterMetadata metadata = TerrainWaterMetadata.FromState(state, water);
             context.WriteJson(MetadataPath, metadata);
             if (water?.ManagedMask == null || water.ManagedMask.Length != state.CellCount)
@@ -1446,6 +1783,18 @@ namespace TerrainLab
                 "uint8",
                 water.ManagedMask,
                 byte.MaxValue);
+            context.WriteLayerBytes(
+                "hydrology.water_dynamics.water_storage",
+                "hydrology.dynamic_water_storage",
+                WaterStoragePath,
+                "uint8",
+                water.WaterStorage);
+            context.WriteLayerBytes(
+                "hydrology.water_dynamics.restore_surface",
+                "hydrology.dynamic_water_restore_surface",
+                RestoreSurfacePath,
+                "uint8",
+                water.RestoreSurfaceCodes);
         }
 
         public void ReadPackage(
@@ -1491,6 +1840,32 @@ namespace TerrainLab
             water.Enabled = metadata.Enabled;
             water.Parameters = (metadata.Parameters ?? new TerrainWaterParameters()).Normalize();
             water.ManagedMask = mask;
+            if (version.Minor >= 2)
+            {
+                water.WaterStorage = ReadLayer(
+                    context,
+                    "hydrology.water_dynamics.water_storage",
+                    state.CellCount);
+                water.RestoreSurfaceCodes = ReadLayer(
+                    context,
+                    "hydrology.water_dynamics.restore_surface",
+                    state.CellCount);
+                water.RestoreSurfacePalette = ReadRestoreSurfacePalette(
+                    metadata.RestoreSurfacePalette);
+                for (int index = 0; index < state.CellCount; index++)
+                {
+                    if (water.RestoreSurfaceCodes[index] >
+                        water.RestoreSurfacePalette.Count ||
+                        mask[index] == 0 &&
+                        (water.WaterStorage[index] != 0 ||
+                         water.RestoreSurfaceCodes[index] != 0) ||
+                        mask[index] != 0 && water.WaterStorage[index] == 0)
+                    {
+                        throw new InvalidDataException(
+                            "Water balance layers contain inconsistent values.");
+                    }
+                }
+            }
             water.TotalInjectedVolume = Math.Max(0, metadata.TotalInjectedVolume);
             water.TotalConsumedVolume = Math.Max(0, metadata.TotalConsumedVolume);
             water.GeyserPulseCount = Math.Max(0, metadata.GeyserPulseCount);
@@ -1503,6 +1878,39 @@ namespace TerrainLab
 
             water.IsDirty = false;
             state.WaterDynamics = water;
+        }
+
+        private static List<TerrainSurfaceStamp> ReadRestoreSurfacePalette(
+            IList<TerrainWaterSurfaceMetadata> metadata)
+        {
+            if (metadata == null)
+            {
+                return new List<TerrainSurfaceStamp>();
+            }
+
+            if (metadata.Count > byte.MaxValue)
+            {
+                throw new InvalidDataException(
+                    "Water restore-surface palette is too large.");
+            }
+
+            List<TerrainSurfaceStamp> palette =
+                new List<TerrainSurfaceStamp>(metadata.Count);
+            foreach (TerrainWaterSurfaceMetadata item in metadata)
+            {
+                if (item == null || string.IsNullOrWhiteSpace(item.MainTypeId))
+                {
+                    throw new InvalidDataException(
+                        "Water restore-surface palette contains an invalid item.");
+                }
+
+                palette.Add(new TerrainSurfaceStamp(
+                    item.MainTypeId,
+                    item.TopTypeId,
+                    item.Frozen));
+            }
+
+            return palette;
         }
 
         public void MarkSaved(TerrainWorldState state)
@@ -1601,6 +2009,9 @@ namespace TerrainLab
             [JsonProperty("geyser_pulse_count")]
             public long GeyserPulseCount { get; set; }
 
+            [JsonProperty("restore_surface_palette", NullValueHandling = NullValueHandling.Ignore)]
+            public List<TerrainWaterSurfaceMetadata> RestoreSurfacePalette { get; set; }
+
             public static TerrainWaterMetadata FromState(
                 TerrainWorldState state,
                 TerrainWaterState water)
@@ -1619,7 +2030,33 @@ namespace TerrainLab
                     ManagedCellCount = water?.ManagedCellCount ?? 0,
                     TotalInjectedVolume = water?.TotalInjectedVolume ?? 0,
                     TotalConsumedVolume = water?.TotalConsumedVolume ?? 0,
-                    GeyserPulseCount = water?.GeyserPulseCount ?? 0
+                    GeyserPulseCount = water?.GeyserPulseCount ?? 0,
+                    RestoreSurfacePalette = water?.RestoreSurfacePalette?
+                        .Select(TerrainWaterSurfaceMetadata.FromStamp)
+                        .ToList()
+                };
+            }
+        }
+
+        private sealed class TerrainWaterSurfaceMetadata
+        {
+            [JsonProperty("main_type_id")]
+            public string MainTypeId { get; set; }
+
+            [JsonProperty("top_type_id")]
+            public string TopTypeId { get; set; }
+
+            [JsonProperty("frozen")]
+            public bool Frozen { get; set; }
+
+            public static TerrainWaterSurfaceMetadata FromStamp(
+                TerrainSurfaceStamp stamp)
+            {
+                return new TerrainWaterSurfaceMetadata
+                {
+                    MainTypeId = stamp.MainTypeId,
+                    TopTypeId = stamp.TopTypeId,
+                    Frozen = stamp.Frozen
                 };
             }
         }

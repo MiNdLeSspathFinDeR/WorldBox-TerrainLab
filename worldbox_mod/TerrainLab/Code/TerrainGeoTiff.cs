@@ -740,6 +740,12 @@ namespace TerrainLab
         [JsonProperty("crs_wkt")]
         public string CrsWkt { get; set; }
 
+        [JsonProperty("vertical_unit")]
+        public string VerticalUnit { get; set; }
+
+        [JsonProperty("sea_level")]
+        public short SeaLevel { get; set; }
+
         [JsonProperty("layers")]
         public List<TerrainGisLayerManifest> Layers { get; set; }
     }
@@ -832,6 +838,19 @@ namespace TerrainLab
                         TerrainTiffSampleKind.UInt8,
                         "255",
                         "uint8");
+                    if (state.WaterDynamics.WaterStorage?.Length == state.CellCount)
+                    {
+                        WriteLayer(
+                            stagingDirectory,
+                            state,
+                            layers,
+                            "hydrology.water_dynamics.water_storage",
+                            "water_storage.tif",
+                            state.WaterDynamics.WaterStorage,
+                            TerrainTiffSampleKind.UInt8,
+                            "0",
+                            "uint8");
+                    }
                 }
 
                 if (state.Erosion != null && state.Erosion.IsCurrent(state))
@@ -860,6 +879,8 @@ namespace TerrainLab
                     Width = state.Width,
                     Height = state.Height,
                     CrsWkt = TerrainGeoTiff.GetCrsWkt(state.ProjectId),
+                    VerticalUnit = "metre",
+                    SeaLevel = state.SeaLevel,
                     Layers = layers
                 };
                 File.WriteAllText(

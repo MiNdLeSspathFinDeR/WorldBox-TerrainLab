@@ -19,7 +19,7 @@ namespace TerrainLab
         }
 
         private const int ChunkSize = 256;
-        private const int SortingOrder = 32590;
+        private const int SortingOrder = 32600;
         private const byte OverlayAlpha = 156;
         private const float NegativeRampStart = 0.08f;
         private const float NegativeRampEnd = 0.30f;
@@ -328,6 +328,20 @@ namespace TerrainLab
                 -1f);
             SpriteRenderer renderer = chunkObject.GetComponent<SpriteRenderer>();
             renderer.sprite = sprite;
+            WorldTilemap worldTilemap = World.world?
+                .GetComponentInChildren<WorldTilemap>(true);
+            Renderer worldRenderer = worldTilemap?
+                .GetComponentInChildren<Renderer>(true);
+            if (worldRenderer != null)
+            {
+                chunkObject.layer = worldRenderer.gameObject.layer;
+                renderer.sortingLayerID = worldRenderer.sortingLayerID;
+            }
+            else if (worldTilemap != null)
+            {
+                chunkObject.layer = worldTilemap.gameObject.layer;
+            }
+
             renderer.sortingOrder = SortingOrder;
 
             int chunkX = startX / ChunkSize;

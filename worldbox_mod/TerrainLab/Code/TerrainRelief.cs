@@ -167,6 +167,15 @@ namespace TerrainLab
                     ? TerrainLayerAvailability.Ready
                     : TerrainLayerAvailability.Missing,
                 false));
+            layers.Add(new TerrainLayerInfo(
+                "hydrology.water_dynamics.water_storage",
+                "hydrology",
+                "uint8",
+                0,
+                state.WaterDynamics?.WaterStorage?.Length == state.CellCount
+                    ? TerrainLayerAvailability.Ready
+                    : TerrainLayerAvailability.Missing,
+                false));
 
             TerrainLayerAvailability erosion = GetAvailability(
                 state.Erosion != null,

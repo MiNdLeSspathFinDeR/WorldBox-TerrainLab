@@ -294,6 +294,7 @@
   "terrain_lab_water_initial_source_volume": "Contact volume",
   "terrain_lab_water_geyser_pulse_volume": "Geyser volume",
   "terrain_lab_water_cells_per_tick": "Cells per tick",
+  "terrain_lab_water_evaporation_per_climate_step": "Evaporation / 30 s",
   "terrain_lab_water_dynamics_started": "Live DEM water enabled",
   "terrain_lab_water_dynamics_stopped": "Live DEM water disabled; existing water remains on the map",
   "terrain_lab_water_parameter_error": "Value must be from {0} to {1}.",

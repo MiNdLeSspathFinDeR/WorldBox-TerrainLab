@@ -294,6 +294,7 @@
   "terrain_lab_water_initial_source_volume": "Объем контакта",
   "terrain_lab_water_geyser_pulse_volume": "Объем гейзера",
   "terrain_lab_water_cells_per_tick": "Ячеек за такт",
+  "terrain_lab_water_evaporation_per_climate_step": "Испарение / 30 с",
   "terrain_lab_water_dynamics_started": "Живая вода по DEM включена",
   "terrain_lab_water_dynamics_stopped": "Живая вода выключена; созданная вода осталась на карте",
   "terrain_lab_water_parameter_error": "Значение должно быть от {0} до {1}.",

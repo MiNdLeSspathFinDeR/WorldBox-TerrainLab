@@ -56,7 +56,8 @@ The Analysis chapter also exposes `Live DEM water` with WorldBox's native rain
 icon. It is a repeat-click toggle with a green native activity lamp; the lamp
 turns amber when the configured area ceiling is reached. The Parameters page
 contains maximum flooded area, finite contact volume, geyser pulse volume, and
-cells-per-tick controls plus live managed-cell/source diagnostics. A segmented
+cells-per-tick controls, a `0..16` evaporation-per-30-second field, and live
+managed-cell/source diagnostics. A segmented
 `D8 | D-infinity | MFD` selector changes only future live channel routing and
 highlights the active method; each option has a method-specific hover summary.
 
@@ -67,6 +68,9 @@ level through blue/cyan and elevations at or above sea level through yellow/red.
 The negative and positive ranges normalize independently, so a deep ocean does
 not flatten land contrast. NODATA remains transparent. Brush edits and undo/redo
 update only touched `256 x 256` chunks unless an edit expands the display range.
+Each chunk inherits the gameplay tilemap's Unity layer and sorting layer, so the
+translucent DEM remains above the complete world surface while tool outlines
+remain readable above it.
 
 The standalone side button cycles through three levels: off, toolbar only, and
 toolbar plus general settings. Another press from settings closes the complete

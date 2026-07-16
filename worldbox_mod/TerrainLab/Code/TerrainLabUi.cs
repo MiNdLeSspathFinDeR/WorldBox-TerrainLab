@@ -1976,6 +1976,12 @@ namespace TerrainLab
                 parameters.CellsPerTick.ToString(),
                 HandleWaterCellsPerTickChanged,
                 3);
+            CreateNumericInputRow(
+                "TerrainLabWaterEvaporation",
+                "terrain_lab_water_evaporation_per_climate_step",
+                parameters.EvaporationPerClimateStep.ToString(),
+                HandleWaterEvaporationChanged,
+                2);
         }
 
         private void BuildReliefView()
@@ -2686,6 +2692,16 @@ namespace TerrainLab
                 (parameters, parsed) => parameters.CellsPerTick = parsed);
         }
 
+        private void HandleWaterEvaporationChanged(string value)
+        {
+            TryUpdateWaterParameter(
+                value,
+                0,
+                16,
+                (parameters, parsed) =>
+                    parameters.EvaporationPerClimateStep = parsed);
+        }
+
         private void CreateWaterRoutingButton(
             Transform parent,
             TerrainWaterRoutingAlgorithm selected,
@@ -2794,6 +2810,7 @@ namespace TerrainLab
                 InitialSourceVolume = source.InitialSourceVolume,
                 GeyserPulseVolume = source.GeyserPulseVolume,
                 CellsPerTick = source.CellsPerTick,
+                EvaporationPerClimateStep = source.EvaporationPerClimateStep,
                 RoutingAlgorithm = source.RoutingAlgorithm
             };
         }

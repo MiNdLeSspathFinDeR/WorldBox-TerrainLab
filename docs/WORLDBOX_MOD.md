@@ -91,19 +91,31 @@ Priority-Flood drainage rank. The Parameters page offers D8, D-infinity, and
 MFD channel routing: respectively one receiver, at most two triangular-facet
 receivers, or every strict downslope neighbor. Flats use the stable
 Priority-Flood receiver. The route is drawn with shallow channel cells;
-positive-depth depressions may fill locally with coastal/deep water according
-to fill depth. The simulation cannot convert more than the configured 1-50
-percent of valid DEM cells, never overwrites hazardous surfaces or ordinary
-buildings, pauses with WorldBox and modal windows, and does not count the
-pre-existing ocean against its limit. The selector does not alter analytical
-D8 watersheds, stream order, or erosion products.
+positive-depth depressions fill against the lower of source head and local
+spill elevation. Depth `0..5 m` is shallow water, `6..150 m` is shelf water,
+and depth above `150 m` is deep ocean. Existing water connected through water
+cells to a canvas edge or NODATA boundary uses sea level; an isolated inland
+water body uses its local spill level. A dry negative DEM cell is never made
+water merely because its absolute elevation is below zero. The simulation
+cannot convert more than the configured 1-50 percent of valid DEM cells, never
+overwrites hazardous surfaces or ordinary buildings, pauses with WorldBox and
+modal windows, and does not count the pre-existing ocean against its limit. The
+selector does not alter analytical D8 watersheds, stream order, or erosion
+products.
 
-The native `geyser` building is observed at its real drop-spawn call. Each pulse
-adds volume, making it a continuing river source without bypassing the same area
-cap. Disabling the toggle stops further routing but deliberately leaves already
-created WorldBox water in place. Parameters for area cap, one-shot contact
-volume, geyser pulse volume, and cells per tick live in the internal Parameters
-page.
+The native `geyser` building is observed when its real `rain` drop is submitted
+to `DropManager`. Each drop injects volume at the lowest safe adjacent cell, so
+the building is not replaced by its own puddle. Repeated pulses restart an
+exhausted route and replenish existing cells, making the geyser a continuing
+river source without bypassing the same area cap.
+
+Each managed cell also has a saturating UInt8 water store. A configurable
+uniform loss (`0..16` units per 30-second climate step) models the first
+evaporation baseline. Flow traversal and geyser pulses recharge cells. At zero,
+TerrainLab restores the compactly saved pre-water surface. This is a water
+budget extension point for later precipitation, PET, infiltration, and climate
+rasters, not a calibrated climate model. Disabling the toggle stops routing and
+climate updates but leaves the current WorldBox water visible.
 
 ### Erosion
 

@@ -402,10 +402,17 @@ internal static class Program
         water.Parameters.InitialSourceVolume = 19;
         water.Parameters.GeyserPulseVolume = 3;
         water.Parameters.CellsPerTick = 11;
+        water.Parameters.EvaporationPerClimateStep = 3;
         water.Parameters.RoutingAlgorithm =
             TerrainWaterRoutingAlgorithm.DInfinity;
         water.ManagedMask[2] = 1;
         water.ManagedMask[7] = 1;
+        water.WaterStorage[2] = 5;
+        water.WaterStorage[7] = 150;
+        water.RestoreSurfacePalette.Add(
+            new TerrainSurfaceStamp("soil_low", string.Empty, false));
+        water.RestoreSurfaceCodes[2] = 1;
+        water.RestoreSurfaceCodes[7] = 1;
         state.EnsureWaterDynamics();
 
         string gisDirectory = TerrainGisExporter.Export(
@@ -415,10 +422,15 @@ internal static class Program
             "GIS manifest was not created.");
         JObject gisManifest = JObject.Parse(
             File.ReadAllText(Path.Combine(gisDirectory, "terrainlab-gis.json")));
-        Assert(gisManifest["layers"].Count() == 16,
+        Assert(gisManifest["layers"].Count() == 17,
             "GIS export did not include every ready layer.");
         Assert(File.Exists(Path.Combine(gisDirectory, "managed_water.tif")),
             "GIS export omitted the managed-water mask.");
+        Assert(File.Exists(Path.Combine(gisDirectory, "water_storage.tif")),
+            "GIS export omitted dynamic-water storage.");
+        Assert((string)gisManifest["vertical_unit"] == "metre" &&
+               (short)gisManifest["sea_level"] == state.SeaLevel,
+            "GIS export lost the vertical reference.");
         Assert(((string)gisManifest["crs_wkt"]).StartsWith("ENGCRS["),
             "GIS manifest does not contain WKT2 ENGCRS.");
         Assert(
@@ -451,11 +463,23 @@ internal static class Program
             loaded.WaterDynamics != null &&
             loaded.WaterDynamics.ManagedCellCount == 2 &&
             loaded.WaterDynamics.ManagedMask.SequenceEqual(water.ManagedMask) &&
+            loaded.WaterDynamics.WaterStorage.SequenceEqual(water.WaterStorage) &&
+            loaded.WaterDynamics.RestoreSurfaceCodes.SequenceEqual(
+                water.RestoreSurfaceCodes) &&
+            loaded.WaterDynamics.RestoreSurfacePalette.SequenceEqual(
+                water.RestoreSurfacePalette) &&
             loaded.WaterDynamics.Parameters.MaximumFloodPercent == 37 &&
             loaded.WaterDynamics.Parameters.GeyserPulseVolume == 3 &&
+            loaded.WaterDynamics.Parameters.EvaporationPerClimateStep == 3 &&
             loaded.WaterDynamics.Parameters.RoutingAlgorithm ==
             TerrainWaterRoutingAlgorithm.DInfinity,
             "Water dynamics state changed during package round-trip.");
+        ValidateLegacyWaterMigration(
+            packagePath,
+            baseMap,
+            registry,
+            testRoot,
+            water.ManagedMask);
         Assert(
             loaded.Hydrology.FlowDirection[5] == byte.MaxValue &&
             loaded.Hydrology.FlowAccumulation[5] == 0 &&
@@ -635,6 +659,72 @@ internal static class Program
             "Stale overlay was accepted after base-map checksum changed.");
     }
 
+    private static void ValidateLegacyWaterMigration(
+        string packagePath,
+        string baseMap,
+        TerrainModuleRegistry registry,
+        string testRoot,
+        byte[] expectedMask)
+    {
+        string legacyPackage = Path.Combine(testRoot, "water-schema-1.1.wbxgeo");
+        File.Copy(packagePath, legacyPackage);
+        using (ZipArchive archive = ZipFile.Open(legacyPackage, ZipArchiveMode.Update))
+        {
+            archive.GetEntry(
+                "modules/hydrology.water_dynamics/water_storage.u8")?.Delete();
+            archive.GetEntry(
+                "modules/hydrology.water_dynamics/restore_surface.u8")?.Delete();
+
+            JObject manifest = JObject.Parse(
+                ReadArchiveText(archive, "manifest.json"));
+            JObject module = (JObject)manifest["modules"].Single(item =>
+                (string)item["id"] == "hydrology.water_dynamics");
+            module["schema_version"] = "1.1.0";
+            JArray layers = (JArray)manifest["layers"];
+            layers.Where(item =>
+                    (string)item["id"] ==
+                        "hydrology.water_dynamics.water_storage" ||
+                    (string)item["id"] ==
+                        "hydrology.water_dynamics.restore_surface")
+                .ToList()
+                .ForEach(item => item.Remove());
+            ReplaceArchiveEntry(
+                archive,
+                "manifest.json",
+                Encoding.UTF8.GetBytes(manifest.ToString(Formatting.Indented)));
+
+            const string statePath =
+                "modules/hydrology.water_dynamics/state.json";
+            JObject metadata = JObject.Parse(ReadArchiveText(archive, statePath));
+            metadata.Remove("restore_surface_palette");
+            ((JObject)metadata["parameters"])
+                .Remove("evaporation_per_climate_step");
+            ReplaceArchiveEntry(
+                archive,
+                statePath,
+                Encoding.UTF8.GetBytes(metadata.ToString(Formatting.Indented)));
+        }
+
+        Assert(
+            WbxGeoPackage.TryLoad(
+                legacyPackage,
+                baseMap,
+                registry,
+                out TerrainWorldState migrated,
+                out string error),
+            "Water schema 1.1 migration failed: " + error);
+        Assert(
+            migrated.WaterDynamics != null &&
+            migrated.WaterDynamics.ManagedMask.SequenceEqual(expectedMask) &&
+            migrated.WaterDynamics.WaterStorage
+                .Where((_, index) => expectedMask[index] != 0)
+                .All(value =>
+                    value == TerrainWaterDepthModel.ShallowMaximumMetres) &&
+            migrated.WaterDynamics.RestoreSurfaceCodes.All(value => value == 0) &&
+            migrated.WaterDynamics.Parameters.EvaporationPerClimateStep == 1,
+            "Water schema 1.1 did not receive safe 1.2 defaults.");
+    }
+
     private static void ValidateHydrologyAlgorithm()
     {
         const int width = 5;
@@ -726,6 +816,7 @@ internal static class Program
 
     private static void ValidateWaterDynamicsAlgorithm()
     {
+        ValidateWaterDepthAndBalance();
         const int width = 10;
         const int height = 10;
         const int count = width * height;
@@ -797,6 +888,10 @@ internal static class Program
                first.ManagedCellCount == 4 &&
                !first.IsWater(firstPath[0]),
             "Externally repainted water remained in the managed budget.");
+        Assert(
+            first.AddSource(source, elevation[source], 1) &&
+            first.Step(100, _ => true).Single().Index == firstPath[0],
+            "A renewed source did not refill its dried origin.");
 
         TerrainWaterSimulation repeated = new TerrainWaterSimulation(
             routing,
@@ -844,7 +939,10 @@ internal static class Program
             basinChanges.Any(change =>
                 change.DepthClass == TerrainWaterDepthClass.Shallow) &&
             basinChanges.Any(change =>
-                change.DepthClass == TerrainWaterDepthClass.Deep),
+                change.DepthClass == TerrainWaterDepthClass.Shelf &&
+                change.DepthMetres == 50) &&
+            basinChanges.All(change =>
+                change.DepthClass != TerrainWaterDepthClass.Deep),
             "Depression fill did not consume depth-weighted volume locally: " +
             string.Join(", ", basinChanges.Select(change => string.Format(
                 "{0}/{1}/{2}",
@@ -904,6 +1002,53 @@ internal static class Program
 
         Assert(registrySimulation.ActiveSourceCount == 0,
             "Completed external-water sources remained active.");
+    }
+
+    private static void ValidateWaterDepthAndBalance()
+    {
+        Assert(
+            TerrainWaterDepthModel.Classify(5) ==
+            TerrainWaterDepthClass.Shallow &&
+            TerrainWaterDepthModel.Classify(6) ==
+            TerrainWaterDepthClass.Shelf &&
+            TerrainWaterDepthModel.Classify(150) ==
+            TerrainWaterDepthClass.Shelf &&
+            TerrainWaterDepthModel.Classify(151) ==
+            TerrainWaterDepthClass.Deep,
+            "Water depth thresholds are not 5/150 metres.");
+        Assert(
+            TerrainWaterDepthModel.GetStorage(300) == byte.MaxValue,
+            "Dynamic-water storage did not saturate to UInt8.");
+
+        const int width = 5;
+        const int height = 5;
+        short[] elevation = Enumerable.Repeat((short)20, width * height).ToArray();
+        elevation[12] = -200;
+        byte[] water = new byte[width * height];
+        water[0] = 1;
+        water[6] = 1;
+        water[18] = 1;
+        byte[] marine = TerrainWaterConnectivity.BuildMarineMask(
+            width,
+            height,
+            elevation,
+            water);
+        Assert(marine[0] == 1 && marine[6] == 1 && marine[18] == 0 &&
+               marine[12] == 0,
+            "Marine connectivity treated an isolated or dry negative DEM cell as sea.");
+
+        byte[] managed = { 1, 1, 0 };
+        byte[] storage = { 5, 150, 200 };
+        List<int> dried = new List<int>();
+        Assert(
+            TerrainWaterBalance.ApplyEvaporation(
+                managed,
+                storage,
+                5,
+                dried) == 1 &&
+            dried.SequenceEqual(new[] { 0 }) &&
+            storage.SequenceEqual(new byte[] { 0, 145, 0 }),
+            "Dynamic-water evaporation balance is inconsistent.");
     }
 
     private static void ValidateWaterRoutingAlgorithms()
@@ -1414,6 +1559,8 @@ internal static class Program
                 "modules/hydrology/stream_order.u8",
                 "modules/hydrology.water_dynamics/state.json",
                 "modules/hydrology.water_dynamics/managed_water.u8",
+                "modules/hydrology.water_dynamics/water_storage.u8",
+                "modules/hydrology.water_dynamics/restore_surface.u8",
                 "modules/erosion.hydraulic/analysis.json",
                 "modules/erosion.hydraulic/result_elevation.i16",
                 "modules/erosion.hydraulic/net_change.i32"
@@ -1428,6 +1575,8 @@ internal static class Program
                 JObject manifest = JObject.Parse(reader.ReadToEnd());
                 Assert((string)manifest["vertical_reference"]["storage_type"] == "int16", "Not Int16.");
                 Assert((int)manifest["vertical_reference"]["nodata"] == 9999, "Wrong NODATA.");
+                Assert((string)manifest["vertical_reference"]["unit"] == "metre",
+                    "Wrong vertical unit.");
                 Assert((int)manifest["canvas"]["cell_count"] == expectedCells, "Wrong cell count.");
                 Assert(
                     manifest["modules"].Any(module => (string)module["id"] == "hydrology"),
@@ -1446,7 +1595,7 @@ internal static class Program
                     "Hydrology layer catalog is incomplete.");
                 Assert(
                     manifest["layers"].Count(layer =>
-                        (string)layer["module"] == "hydrology.water_dynamics") == 1,
+                        (string)layer["module"] == "hydrology.water_dynamics") == 3,
                     "Water dynamics layer catalog is incomplete.");
                 Assert(
                     manifest["layers"].Count(layer =>
@@ -1466,6 +1615,11 @@ internal static class Program
             input.CopyTo(output);
             return output.ToArray();
         }
+    }
+
+    private static string ReadArchiveText(ZipArchive archive, string path)
+    {
+        return Encoding.UTF8.GetString(ReadArchiveEntry(archive, path));
     }
 
     private static void ReplaceArchiveEntry(
