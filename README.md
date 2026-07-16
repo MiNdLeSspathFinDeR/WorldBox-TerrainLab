@@ -25,7 +25,8 @@ project layer for WorldBox.
 5. Configurable: the legacy direct-palette algorithm and custom tile sets remain available.
 6. In-game GIS: editable Int16 DEM, direct translucent Turbo height display,
    relief derivatives, Priority-Flood/D8, watersheds, Strahler order,
-   deterministic erosion, and chunked overlays.
+   selectable D8/D-infinity/MFD live-water channels, deterministic erosion,
+   and chunked overlays.
 7. GIS exchange: strict GeoTIFF export/import with baseline hashes, conflict
    detection, branches, and an append-only change log.
 8. QGIS-style workspace: routine project, DEM, analysis, and overlay commands

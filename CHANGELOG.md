@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+- Added selectable D8, Tarboton D-infinity, and Freeman MFD live channel
+  routing with conservative receiver weights, acyclic Priority-Flood ranks,
+  bounded branching, localized segmented controls, and WBXGEO persistence.
 - Added bounded live DEM water routing with finite painted sources,
   Priority-Flood/D8 channels, depth-weighted local depression filling, and a
   hard 50-percent valid-cell ceiling.

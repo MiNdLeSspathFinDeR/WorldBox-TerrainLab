@@ -13,6 +13,58 @@ namespace TerrainLab
         Deep = 2
     }
 
+    public enum TerrainWaterRoutingAlgorithm : byte
+    {
+        D8 = 0,
+        DInfinity = 1,
+        MultipleFlowDirection = 2
+    }
+
+    public static class TerrainWaterRoutingAlgorithms
+    {
+        public static TerrainWaterRoutingAlgorithm Normalize(
+            TerrainWaterRoutingAlgorithm algorithm)
+        {
+            return algorithm == TerrainWaterRoutingAlgorithm.DInfinity ||
+                   algorithm == TerrainWaterRoutingAlgorithm.MultipleFlowDirection
+                ? algorithm
+                : TerrainWaterRoutingAlgorithm.D8;
+        }
+
+        public static string ToStorageId(TerrainWaterRoutingAlgorithm algorithm)
+        {
+            switch (Normalize(algorithm))
+            {
+                case TerrainWaterRoutingAlgorithm.DInfinity:
+                    return "dinf";
+                case TerrainWaterRoutingAlgorithm.MultipleFlowDirection:
+                    return "mfd";
+                default:
+                    return "d8";
+            }
+        }
+
+        public static TerrainWaterRoutingAlgorithm ParseStorageId(string value)
+        {
+            if (string.Equals(value, "dinf", StringComparison.OrdinalIgnoreCase) ||
+                string.Equals(value, "d-infinity", StringComparison.OrdinalIgnoreCase))
+            {
+                return TerrainWaterRoutingAlgorithm.DInfinity;
+            }
+
+            if (string.Equals(value, "mfd", StringComparison.OrdinalIgnoreCase) ||
+                string.Equals(
+                    value,
+                    "multiple-flow-direction",
+                    StringComparison.OrdinalIgnoreCase))
+            {
+                return TerrainWaterRoutingAlgorithm.MultipleFlowDirection;
+            }
+
+            return TerrainWaterRoutingAlgorithm.D8;
+        }
+    }
+
     public sealed class TerrainWaterParameters
     {
         public const int HardMaximumFloodPercent = 50;
@@ -29,6 +81,18 @@ namespace TerrainLab
         [JsonProperty("cells_per_tick")]
         public int CellsPerTick { get; set; } = 48;
 
+        [JsonIgnore]
+        public TerrainWaterRoutingAlgorithm RoutingAlgorithm { get; set; } =
+            TerrainWaterRoutingAlgorithm.D8;
+
+        [JsonProperty("routing_algorithm")]
+        public string RoutingAlgorithmId
+        {
+            get => TerrainWaterRoutingAlgorithms.ToStorageId(RoutingAlgorithm);
+            set => RoutingAlgorithm =
+                TerrainWaterRoutingAlgorithms.ParseStorageId(value);
+        }
+
         public TerrainWaterParameters Normalize()
         {
             return new TerrainWaterParameters
@@ -38,7 +102,9 @@ namespace TerrainLab
                     Math.Min(HardMaximumFloodPercent, MaximumFloodPercent)),
                 InitialSourceVolume = Math.Max(1, Math.Min(4096, InitialSourceVolume)),
                 GeyserPulseVolume = Math.Max(1, Math.Min(1024, GeyserPulseVolume)),
-                CellsPerTick = Math.Max(1, Math.Min(512, CellsPerTick))
+                CellsPerTick = Math.Max(1, Math.Min(512, CellsPerTick)),
+                RoutingAlgorithm = TerrainWaterRoutingAlgorithms.Normalize(
+                    RoutingAlgorithm)
             };
         }
     }
@@ -99,10 +165,26 @@ namespace TerrainLab
         }
     }
 
+    public readonly struct TerrainWaterReceiver
+    {
+        public TerrainWaterReceiver(int index, double weight)
+        {
+            Index = index;
+            Weight = weight;
+        }
+
+        public int Index { get; }
+
+        public double Weight { get; }
+    }
+
     public sealed class TerrainWaterRouting
     {
         private static readonly int[] DirectionX = { 1, 1, 0, -1, -1, -1, 0, 1 };
         private static readonly int[] DirectionY = { 0, 1, 1, 1, 0, -1, -1, -1 };
+        private const double QuarterTurn = Math.PI / 4.0;
+        private const double DiagonalDistance = 1.4142135623730951;
+        private const double MfdExponent = 1.1;
 
         private TerrainWaterRouting(
             int width,
@@ -110,6 +192,7 @@ namespace TerrainLab
             short[] elevation,
             short[] filledElevation,
             int[] receiver,
+            int[] drainageRank,
             int validCellCount,
             int verticalUnit)
         {
@@ -118,6 +201,7 @@ namespace TerrainLab
             Elevation = elevation;
             FilledElevation = filledElevation;
             Receiver = receiver;
+            DrainageRank = drainageRank;
             ValidCellCount = validCellCount;
             VerticalUnit = verticalUnit;
         }
@@ -133,6 +217,8 @@ namespace TerrainLab
         public short[] FilledElevation { get; }
 
         public int[] Receiver { get; }
+
+        public int[] DrainageRank { get; }
 
         public int ValidCellCount { get; }
 
@@ -151,6 +237,7 @@ namespace TerrainLab
 
             short[] filled = (short[])elevation.Clone();
             int[] receiver = Enumerable.Repeat(-1, count).ToArray();
+            int[] drainageRank = Enumerable.Repeat(-1, count).ToArray();
             byte[] visited = new byte[count];
             CellMinHeap queue = new CellMinHeap(filled, Math.Min(count, 4096));
             int validCount = 0;
@@ -191,7 +278,7 @@ namespace TerrainLab
             while (queue.Count > 0)
             {
                 int current = queue.Pop();
-                processed++;
+                drainageRank[current] = processed++;
                 int currentX = current % width;
                 int currentY = current / width;
                 short spillElevation = filled[current];
@@ -238,8 +325,38 @@ namespace TerrainLab
                 (short[])elevation.Clone(),
                 filled,
                 receiver,
+                drainageRank,
                 validCount,
                 verticalUnit);
+        }
+
+        public int GetReceivers(
+            int index,
+            TerrainWaterRoutingAlgorithm algorithm,
+            TerrainWaterReceiver[] output)
+        {
+            if (output == null || output.Length < DirectionX.Length)
+            {
+                throw new ArgumentException(
+                    "Water receiver output must hold eight cells.",
+                    nameof(output));
+            }
+
+            if (index < 0 || index >= CellCount ||
+                Elevation[index] == TerrainElevationEncoding.NoData)
+            {
+                return 0;
+            }
+
+            switch (TerrainWaterRoutingAlgorithms.Normalize(algorithm))
+            {
+                case TerrainWaterRoutingAlgorithm.DInfinity:
+                    return GetDInfinityReceivers(index, output);
+                case TerrainWaterRoutingAlgorithm.MultipleFlowDirection:
+                    return GetMfdReceivers(index, output);
+                default:
+                    return GetD8Receiver(index, output);
+            }
         }
 
         public int GetFillDepth(int index)
@@ -267,6 +384,188 @@ namespace TerrainLab
                     action(neighborY * Width + neighborX);
                 }
             }
+        }
+
+        private int GetD8Receiver(int index, TerrainWaterReceiver[] output)
+        {
+            int receiver = Receiver[index];
+            if (receiver < 0)
+            {
+                return 0;
+            }
+
+            output[0] = new TerrainWaterReceiver(receiver, 1.0);
+            return 1;
+        }
+
+        private int GetDInfinityReceivers(
+            int index,
+            TerrainWaterReceiver[] output)
+        {
+            int x = index % Width;
+            int y = index / Width;
+            double center = FilledElevation[index];
+            double bestSlope = 0.0;
+            int bestCardinal = -1;
+            int bestDiagonal = -1;
+            double bestCardinalWeight = 0.0;
+            double bestDiagonalWeight = 0.0;
+
+            for (int cardinalDirection = 0;
+                 cardinalDirection < DirectionX.Length;
+                 cardinalDirection += 2)
+            {
+                for (int side = -1; side <= 1; side += 2)
+                {
+                    int diagonalDirection =
+                        (cardinalDirection + side + DirectionX.Length) %
+                        DirectionX.Length;
+                    int cardinal = GetNeighborIndex(x, y, cardinalDirection);
+                    int diagonal = GetNeighborIndex(x, y, diagonalDirection);
+                    if (cardinal < 0 || diagonal < 0 ||
+                        Elevation[cardinal] == TerrainElevationEncoding.NoData ||
+                        Elevation[diagonal] == TerrainElevationEncoding.NoData)
+                    {
+                        continue;
+                    }
+
+                    double firstSlope = center - FilledElevation[cardinal];
+                    double crossSlope =
+                        FilledElevation[cardinal] - FilledElevation[diagonal];
+                    double angle = Math.Atan2(crossSlope, firstSlope);
+                    double slope;
+                    if (angle <= 0.0)
+                    {
+                        angle = 0.0;
+                        slope = firstSlope;
+                    }
+                    else if (angle >= QuarterTurn)
+                    {
+                        angle = QuarterTurn;
+                        slope = (center - FilledElevation[diagonal]) /
+                                DiagonalDistance;
+                    }
+                    else
+                    {
+                        slope = Math.Sqrt(
+                            firstSlope * firstSlope + crossSlope * crossSlope);
+                    }
+
+                    if (slope <= bestSlope)
+                    {
+                        continue;
+                    }
+
+                    double diagonalWeight = angle / QuarterTurn;
+                    double cardinalWeight = 1.0 - diagonalWeight;
+                    bool cardinalValid = cardinalWeight > 0.0 &&
+                        IsDrainageCandidate(index, cardinal);
+                    bool diagonalValid = diagonalWeight > 0.0 &&
+                        IsDrainageCandidate(index, diagonal);
+                    if (!cardinalValid && !diagonalValid)
+                    {
+                        continue;
+                    }
+
+                    bestSlope = slope;
+                    bestCardinal = cardinalValid ? cardinal : -1;
+                    bestDiagonal = diagonalValid ? diagonal : -1;
+                    bestCardinalWeight = cardinalValid ? cardinalWeight : 0.0;
+                    bestDiagonalWeight = diagonalValid ? diagonalWeight : 0.0;
+                }
+            }
+
+            double totalWeight = bestCardinalWeight + bestDiagonalWeight;
+            if (bestSlope <= 0.0 || totalWeight <= 0.0)
+            {
+                return GetD8Receiver(index, output);
+            }
+
+            int count = 0;
+            if (bestCardinal >= 0)
+            {
+                output[count++] = new TerrainWaterReceiver(
+                    bestCardinal,
+                    bestCardinalWeight / totalWeight);
+            }
+
+            if (bestDiagonal >= 0 && bestDiagonal != bestCardinal)
+            {
+                output[count++] = new TerrainWaterReceiver(
+                    bestDiagonal,
+                    bestDiagonalWeight / totalWeight);
+            }
+
+            return count > 0 ? count : GetD8Receiver(index, output);
+        }
+
+        private int GetMfdReceivers(
+            int index,
+            TerrainWaterReceiver[] output)
+        {
+            int x = index % Width;
+            int y = index / Width;
+            double center = FilledElevation[index];
+            double totalWeight = 0.0;
+            int count = 0;
+            for (int direction = 0; direction < DirectionX.Length; direction++)
+            {
+                int neighbor = GetNeighborIndex(x, y, direction);
+                if (neighbor < 0 || !IsDrainageCandidate(index, neighbor))
+                {
+                    continue;
+                }
+
+                double drop = center - FilledElevation[neighbor];
+                if (drop <= 0.0)
+                {
+                    continue;
+                }
+
+                double distance = direction % 2 == 0 ? 1.0 : DiagonalDistance;
+                double weight = Math.Pow(drop / distance, MfdExponent);
+                if (weight <= 0.0 || double.IsNaN(weight))
+                {
+                    continue;
+                }
+
+                output[count++] = new TerrainWaterReceiver(neighbor, weight);
+                totalWeight += weight;
+            }
+
+            if (count == 0 || totalWeight <= 0.0)
+            {
+                return GetD8Receiver(index, output);
+            }
+
+            for (int outputIndex = 0; outputIndex < count; outputIndex++)
+            {
+                TerrainWaterReceiver receiver = output[outputIndex];
+                output[outputIndex] = new TerrainWaterReceiver(
+                    receiver.Index,
+                    receiver.Weight / totalWeight);
+            }
+
+            return count;
+        }
+
+        private bool IsDrainageCandidate(int source, int candidate)
+        {
+            return candidate >= 0 && candidate < CellCount &&
+                   Elevation[candidate] != TerrainElevationEncoding.NoData &&
+                   DrainageRank[candidate] >= 0 &&
+                   DrainageRank[candidate] < DrainageRank[source] &&
+                   FilledElevation[candidate] <= FilledElevation[source];
+        }
+
+        private int GetNeighborIndex(int x, int y, int direction)
+        {
+            int neighborX = x + DirectionX[direction];
+            int neighborY = y + DirectionY[direction];
+            return neighborX < 0 || neighborX >= Width ||
+                   neighborY < 0 || neighborY >= Height
+                ? -1
+                : neighborY * Width + neighborX;
         }
 
         private static bool IsOutletCell(
@@ -400,7 +699,9 @@ namespace TerrainLab
     public sealed class TerrainWaterSimulation
     {
         private const int MaximumSources = 256;
+        private const int MaximumChannelFrontsPerSource = 512;
         private const int ChannelCellsPerBasinCell = 3;
+        private const double MinimumFlowPriority = 1e-12;
 
         private readonly TerrainWaterRouting _routing;
         private readonly byte[] _waterMask;
@@ -408,6 +709,8 @@ namespace TerrainLab
         private readonly Dictionary<int, WaterSource> _sourceLookup =
             new Dictionary<int, WaterSource>();
         private readonly List<WaterSource> _sources = new List<WaterSource>();
+        private readonly TerrainWaterReceiver[] _receiverBuffer =
+            new TerrainWaterReceiver[8];
         private TerrainWaterParameters _parameters;
         private int _managedCellCount;
         private int _nextSource;
@@ -455,7 +758,20 @@ namespace TerrainLab
 
         public void UpdateParameters(TerrainWaterParameters parameters)
         {
-            _parameters = (parameters ?? new TerrainWaterParameters()).Normalize();
+            TerrainWaterParameters normalized =
+                (parameters ?? new TerrainWaterParameters()).Normalize();
+            bool routingChanged = normalized.RoutingAlgorithm !=
+                                  _parameters.RoutingAlgorithm;
+            _parameters = normalized;
+            if (!routingChanged)
+            {
+                return;
+            }
+
+            foreach (WaterSource source in _sources)
+            {
+                source.ResetChannel();
+            }
         }
 
         public bool IsWater(int index)
@@ -576,18 +892,18 @@ namespace TerrainLab
             WaterSource source,
             Func<int, bool> canFlood)
         {
-            if ((source.ChannelEnded ||
+            if ((source.Channel.Count == 0 ||
                  source.ChannelCellsSinceBasin >= ChannelCellsPerBasinCell) &&
                 source.Basin.Count > 0)
             {
                 TerrainWaterCellChange? basinChange = AdvanceBasin(source, canFlood);
-                if (basinChange.HasValue || source.ChannelEnded)
+                if (basinChange.HasValue || source.Channel.Count == 0)
                 {
                     return basinChange;
                 }
             }
 
-            if (source.ChannelEnded)
+            if (source.Channel.Count == 0)
             {
                 source.Budget = 0;
                 return null;
@@ -602,34 +918,28 @@ namespace TerrainLab
         {
             for (int skip = 0; skip < 64; skip++)
             {
-                int candidate = source.Cursor;
-                if (candidate < 0)
+                if (!source.Channel.TryPop(out ChannelFront front))
                 {
-                    source.ChannelEnded = true;
                     return null;
                 }
 
-                if (!source.ChannelVisited.Add(candidate))
-                {
-                    source.ChannelEnded = true;
-                    return null;
-                }
+                int candidate = front.Index;
 
                 if (_waterMask[candidate] != 0)
                 {
                     if (candidate != source.Origin && _managedMask[candidate] == 0)
                     {
-                        source.ChannelEnded = true;
-                        return null;
+                        continue;
                     }
 
                     EnqueueBasin(source, candidate);
-                    source.Cursor = _routing.Receiver[candidate];
+                    EnqueueReceivers(source, candidate, front.Priority);
                     continue;
                 }
 
                 if (_routing.Elevation[candidate] > source.HeadElevation)
                 {
+                    source.Channel.Push(front);
                     return null;
                 }
 
@@ -638,23 +948,24 @@ namespace TerrainLab
                     int alternative = FindAlternativeReceiver(source, candidate);
                     if (alternative < 0)
                     {
-                        return null;
+                        continue;
                     }
 
-                    source.Cursor = alternative;
+                    TryEnqueueChannel(source, alternative, front.Priority);
                     continue;
                 }
 
                 int cost = GetCellCost(candidate);
                 if (source.Budget < cost || LimitReached)
                 {
+                    source.Channel.Push(front);
                     return null;
                 }
 
                 source.Budget -= cost;
                 MarkManagedWater(candidate);
                 EnqueueBasin(source, candidate);
-                source.Cursor = _routing.Receiver[candidate];
+                EnqueueReceivers(source, candidate, front.Priority);
                 source.ChannelCellsSinceBasin++;
                 return new TerrainWaterCellChange(
                     candidate,
@@ -735,7 +1046,9 @@ namespace TerrainLab
             {
                 if (_routing.Elevation[neighbor] == TerrainElevationEncoding.NoData ||
                     _routing.Elevation[neighbor] > source.HeadElevation ||
-                    source.ChannelVisited.Contains(neighbor) ||
+                    source.ChannelSeen.Contains(neighbor) ||
+                    _routing.DrainageRank[neighbor] >=
+                    _routing.DrainageRank[current] ||
                     _routing.FilledElevation[neighbor] > _routing.FilledElevation[current])
                 {
                     return;
@@ -751,6 +1064,69 @@ namespace TerrainLab
                 }
             });
             return best;
+        }
+
+        private void EnqueueReceivers(
+            WaterSource source,
+            int current,
+            double parentPriority)
+        {
+            int count = _routing.GetReceivers(
+                current,
+                _parameters.RoutingAlgorithm,
+                _receiverBuffer);
+            SortReceiversByWeight(_receiverBuffer, count);
+            for (int index = 0; index < count; index++)
+            {
+                TerrainWaterReceiver receiver = _receiverBuffer[index];
+                double priority = parentPriority * receiver.Weight;
+                if (double.IsNaN(priority) || priority <= 0.0)
+                {
+                    continue;
+                }
+
+                TryEnqueueChannel(
+                    source,
+                    receiver.Index,
+                    Math.Max(MinimumFlowPriority, priority));
+            }
+        }
+
+        private static void SortReceiversByWeight(
+            TerrainWaterReceiver[] receivers,
+            int count)
+        {
+            for (int index = 1; index < count; index++)
+            {
+                TerrainWaterReceiver value = receivers[index];
+                int position = index - 1;
+                while (position >= 0 &&
+                       (receivers[position].Weight < value.Weight ||
+                        receivers[position].Weight == value.Weight &&
+                        receivers[position].Index > value.Index))
+                {
+                    receivers[position + 1] = receivers[position];
+                    position--;
+                }
+
+                receivers[position + 1] = value;
+            }
+        }
+
+        private static bool TryEnqueueChannel(
+            WaterSource source,
+            int candidate,
+            double priority)
+        {
+            if (candidate < 0 ||
+                source.Channel.Count >= MaximumChannelFrontsPerSource ||
+                !source.ChannelSeen.Add(candidate))
+            {
+                return false;
+            }
+
+            source.Channel.Push(candidate, priority);
+            return true;
         }
 
         private int GetCellCost(int index)
@@ -822,24 +1198,146 @@ namespace TerrainLab
                 short[] elevation)
             {
                 Origin = origin;
-                Cursor = origin;
                 HeadElevation = headElevation;
                 Budget = budget;
                 Basin = new IndexMinHeap(elevation);
                 BasinSeen.Add(origin);
+                ResetChannel();
             }
 
             public int Origin;
-            public int Cursor;
             public int HeadElevation;
             public long Budget;
-            public bool ChannelEnded;
             public int ChannelCellsSinceBasin;
-            public bool CanReceive => !ChannelEnded || Basin.Count > 0;
+            public bool CanReceive => Channel.Count > 0 || Basin.Count > 0;
             public bool CanAdvance => Budget > 0 && CanReceive;
-            public readonly HashSet<int> ChannelVisited = new HashSet<int>();
+            public readonly HashSet<int> ChannelSeen = new HashSet<int>();
             public readonly HashSet<int> BasinSeen = new HashSet<int>();
+            public readonly ChannelMaxHeap Channel = new ChannelMaxHeap();
             public readonly IndexMinHeap Basin;
+
+            public void ResetChannel()
+            {
+                Channel.Clear();
+                ChannelSeen.Clear();
+                ChannelSeen.Add(Origin);
+                Channel.Push(Origin, 1.0);
+                ChannelCellsSinceBasin = 0;
+            }
+        }
+
+        private readonly struct ChannelFront
+        {
+            public ChannelFront(int index, double priority, long order)
+            {
+                Index = index;
+                Priority = priority;
+                Order = order;
+            }
+
+            public int Index { get; }
+
+            public double Priority { get; }
+
+            public long Order { get; }
+        }
+
+        private sealed class ChannelMaxHeap
+        {
+            private ChannelFront[] _items = new ChannelFront[16];
+            private long _nextOrder;
+
+            public int Count { get; private set; }
+
+            public void Clear()
+            {
+                Count = 0;
+                _nextOrder = 0;
+            }
+
+            public void Push(int index, double priority)
+            {
+                Push(new ChannelFront(index, priority, _nextOrder++));
+            }
+
+            public void Push(ChannelFront value)
+            {
+                if (Count == _items.Length)
+                {
+                    Array.Resize(ref _items, checked(_items.Length * 2));
+                }
+
+                int position = Count++;
+                while (position > 0)
+                {
+                    int parent = (position - 1) / 2;
+                    if (Compare(_items[parent], value) >= 0)
+                    {
+                        break;
+                    }
+
+                    _items[position] = _items[parent];
+                    position = parent;
+                }
+
+                _items[position] = value;
+            }
+
+            public bool TryPop(out ChannelFront result)
+            {
+                if (Count == 0)
+                {
+                    result = default;
+                    return false;
+                }
+
+                result = _items[0];
+                ChannelFront replacement = _items[--Count];
+                if (Count == 0)
+                {
+                    return true;
+                }
+
+                int position = 0;
+                while (true)
+                {
+                    int left = position * 2 + 1;
+                    if (left >= Count)
+                    {
+                        break;
+                    }
+
+                    int right = left + 1;
+                    int child = right < Count &&
+                                Compare(_items[right], _items[left]) > 0
+                        ? right
+                        : left;
+                    if (Compare(replacement, _items[child]) >= 0)
+                    {
+                        break;
+                    }
+
+                    _items[position] = _items[child];
+                    position = child;
+                }
+
+                _items[position] = replacement;
+                return true;
+            }
+
+            private static int Compare(ChannelFront left, ChannelFront right)
+            {
+                int priority = left.Priority.CompareTo(right.Priority);
+                if (priority != 0)
+                {
+                    return priority;
+                }
+
+                int order = right.Order.CompareTo(left.Order);
+                return order != 0
+                    ? order
+                    : right.Index.CompareTo(left.Index);
+            }
         }
 
         private sealed class IndexMinHeap
@@ -927,7 +1425,7 @@ namespace TerrainLab
 
         public string Id => "hydrology.water_dynamics";
 
-        public string SchemaVersion => "1.0.0";
+        public string SchemaVersion => "1.1.0";
 
         public bool IsRequired => false;
 

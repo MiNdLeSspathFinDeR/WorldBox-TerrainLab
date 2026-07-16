@@ -285,7 +285,9 @@ internal static class Program
                 MaximumFloodPercent = 50,
                 InitialSourceVolume = 128,
                 GeyserPulseVolume = 2,
-                CellsPerTick = 128
+                CellsPerTick = 128,
+                RoutingAlgorithm =
+                    TerrainWaterRoutingAlgorithm.MultipleFlowDirection
             });
         int waterSource = height / 2 * width + width / 2;
         water.AddSource(waterSource, elevation[waterSource], 128);
@@ -400,6 +402,8 @@ internal static class Program
         water.Parameters.InitialSourceVolume = 19;
         water.Parameters.GeyserPulseVolume = 3;
         water.Parameters.CellsPerTick = 11;
+        water.Parameters.RoutingAlgorithm =
+            TerrainWaterRoutingAlgorithm.DInfinity;
         water.ManagedMask[2] = 1;
         water.ManagedMask[7] = 1;
         state.EnsureWaterDynamics();
@@ -448,7 +452,9 @@ internal static class Program
             loaded.WaterDynamics.ManagedCellCount == 2 &&
             loaded.WaterDynamics.ManagedMask.SequenceEqual(water.ManagedMask) &&
             loaded.WaterDynamics.Parameters.MaximumFloodPercent == 37 &&
-            loaded.WaterDynamics.Parameters.GeyserPulseVolume == 3,
+            loaded.WaterDynamics.Parameters.GeyserPulseVolume == 3 &&
+            loaded.WaterDynamics.Parameters.RoutingAlgorithm ==
+            TerrainWaterRoutingAlgorithm.DInfinity,
             "Water dynamics state changed during package round-trip.");
         Assert(
             loaded.Hydrology.FlowDirection[5] == byte.MaxValue &&
@@ -738,6 +744,13 @@ internal static class Program
             width,
             height,
             elevation);
+        ValidateWaterRoutingAlgorithms();
+        TerrainWaterParameters legacyParameters =
+            JsonConvert.DeserializeObject<TerrainWaterParameters>(
+                "{\"maximum_flood_percent\":25}");
+        Assert(
+            legacyParameters.RoutingAlgorithm == TerrainWaterRoutingAlgorithm.D8,
+            "A legacy live-water payload did not default to D8.");
         TerrainWaterParameters cappedParameters = new TerrainWaterParameters
         {
             MaximumFloodPercent = 99,
@@ -891,6 +904,112 @@ internal static class Program
 
         Assert(registrySimulation.ActiveSourceCount == 0,
             "Completed external-water sources remained active.");
+    }
+
+    private static void ValidateWaterRoutingAlgorithms()
+    {
+        const int width = 7;
+        const int height = 7;
+        short[] elevation = new short[width * height];
+        for (int y = 0; y < height; y++)
+        {
+            for (int x = 0; x < width; x++)
+            {
+                elevation[y * width + x] = (short)(500 - x * 20 - y * 7);
+            }
+        }
+
+        TerrainWaterRouting routing = TerrainWaterRouting.Build(
+            width,
+            height,
+            elevation);
+        int center = 3 * width + 3;
+        TerrainWaterReceiver[] receivers = new TerrainWaterReceiver[8];
+
+        int d8Count = routing.GetReceivers(
+            center,
+            TerrainWaterRoutingAlgorithm.D8,
+            receivers);
+        Assert(d8Count == 1 && Math.Abs(receivers[0].Weight - 1.0) < 1e-12,
+            "D8 live-water routing did not select exactly one receiver.");
+
+        int dinfCount = routing.GetReceivers(
+            center,
+            TerrainWaterRoutingAlgorithm.DInfinity,
+            receivers);
+        Assert(dinfCount == 2,
+            "D-infinity did not split an oblique planar slope between two cells.");
+        Assert(
+            Math.Abs(receivers.Take(dinfCount).Sum(item => item.Weight) - 1.0) < 1e-12,
+            "D-infinity receiver weights are not conservative.");
+        Assert(
+            receivers.Take(dinfCount).All(item =>
+                item.Weight > 0.0 &&
+                routing.DrainageRank[item.Index] < routing.DrainageRank[center]),
+            "D-infinity produced an invalid or cyclic receiver.");
+        HashSet<int> dinfDirectReceivers = new HashSet<int>(
+            receivers.Take(dinfCount).Select(item => item.Index));
+
+        TerrainWaterSimulation dinfSimulation = new TerrainWaterSimulation(
+            routing,
+            new byte[elevation.Length],
+            new byte[elevation.Length],
+            new TerrainWaterParameters
+            {
+                RoutingAlgorithm = TerrainWaterRoutingAlgorithm.DInfinity
+            });
+        dinfSimulation.AddSource(center, elevation[center], 3);
+        int[] dinfPath = dinfSimulation.Step(3, _ => true)
+            .Select(change => change.Index)
+            .ToArray();
+        Assert(
+            dinfPath.Length == 3 &&
+            dinfPath.Skip(1).All(dinfDirectReceivers.Contains),
+            "D-infinity channel fronts did not materialize both weighted branches.");
+
+        int mfdCount = routing.GetReceivers(
+            center,
+            TerrainWaterRoutingAlgorithm.MultipleFlowDirection,
+            receivers);
+        Assert(mfdCount > 2,
+            "MFD did not distribute an oblique planar slope across downslope cells.");
+        Assert(
+            Math.Abs(receivers.Take(mfdCount).Sum(item => item.Weight) - 1.0) < 1e-12,
+            "MFD receiver weights are not conservative.");
+        Assert(
+            receivers.Take(mfdCount).All(item =>
+                item.Weight > 0.0 &&
+                routing.DrainageRank[item.Index] < routing.DrainageRank[center]),
+            "MFD produced an invalid or cyclic receiver.");
+        HashSet<int> mfdDirectReceivers = new HashSet<int>(
+            receivers.Take(mfdCount).Select(item => item.Index));
+
+        TerrainWaterSimulation mfdSimulation = new TerrainWaterSimulation(
+            routing,
+            new byte[elevation.Length],
+            new byte[elevation.Length],
+            new TerrainWaterParameters
+            {
+                RoutingAlgorithm =
+                    TerrainWaterRoutingAlgorithm.MultipleFlowDirection
+            });
+        mfdSimulation.AddSource(center, elevation[center], 3);
+        int[] mfdPath = mfdSimulation.Step(3, _ => true)
+            .Select(change => change.Index)
+            .ToArray();
+        Assert(
+            mfdPath.Length == 3 &&
+            mfdPath.Skip(1).Distinct().Count() == 2 &&
+            mfdPath.Skip(1).All(mfdDirectReceivers.Contains),
+            "MFD channel fronts did not materialize distinct weighted branches.");
+
+        TerrainWaterParameters mfdParameters = new TerrainWaterParameters
+        {
+            RoutingAlgorithm = TerrainWaterRoutingAlgorithm.MultipleFlowDirection
+        };
+        string serialized = JsonConvert.SerializeObject(mfdParameters);
+        Assert(serialized.Contains("\"routing_algorithm\":\"mfd\""),
+            "The live-water routing algorithm is not stored by stable string ID.");
     }
 
     private static void ValidateGeoTiff(string testRoot)

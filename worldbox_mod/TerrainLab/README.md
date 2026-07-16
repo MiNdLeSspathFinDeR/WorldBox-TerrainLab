@@ -25,8 +25,9 @@ under `Code` when the game starts.
 - Priority-Flood, deterministic D8, UInt32 accumulation, stream extraction,
   stable watershed IDs, and Strahler stream order;
 - bounded live-water routing with finite painted sources, native geyser pulse
-  replenishment, local depression filling, gameplay-safe conversion, and a
-  non-bypassable 50-percent valid-cell ceiling;
+  replenishment, selectable D8/D-infinity/MFD channel routing, local depression
+  filling, gameplay-safe conversion, and a non-bypassable 50-percent valid-cell
+  ceiling;
 - deterministic integer hydraulic/thermal transport with exact mass balance,
   preview overlays, apply, and undo;
 - optional hydrology, live-water, and erosion payloads in WBXGEO, each protected

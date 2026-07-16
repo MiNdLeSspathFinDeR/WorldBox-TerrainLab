@@ -1931,6 +1931,27 @@ namespace TerrainLab
                     ? "terrain_lab_water_dynamics_disable"
                     : "terrain_lab_water_dynamics_enable",
                 "terrain_lab_toolbar_water_dynamics_description");
+            CreateSectionHeading(
+                _moduleContent,
+                "terrain_lab_water_routing_algorithm_heading");
+            Transform routingRow = CreateActionRow(
+                _moduleContent,
+                "TerrainLabWaterRoutingAlgorithm");
+            CreateWaterRoutingButton(
+                routingRow,
+                parameters.RoutingAlgorithm,
+                TerrainWaterRoutingAlgorithm.D8,
+                "terrain_lab_water_routing_d8");
+            CreateWaterRoutingButton(
+                routingRow,
+                parameters.RoutingAlgorithm,
+                TerrainWaterRoutingAlgorithm.DInfinity,
+                "terrain_lab_water_routing_dinf");
+            CreateWaterRoutingButton(
+                routingRow,
+                parameters.RoutingAlgorithm,
+                TerrainWaterRoutingAlgorithm.MultipleFlowDirection,
+                "terrain_lab_water_routing_mfd");
             CreateNumericInputRow(
                 "TerrainLabWaterMaximumFlood",
                 "terrain_lab_water_maximum_flood_percent",
@@ -2665,6 +2686,65 @@ namespace TerrainLab
                 (parameters, parsed) => parameters.CellsPerTick = parsed);
         }
 
+        private void CreateWaterRoutingButton(
+            Transform parent,
+            TerrainWaterRoutingAlgorithm selected,
+            TerrainWaterRoutingAlgorithm algorithm,
+            string localizationKey)
+        {
+            SimpleButton button = CreateActionButton(
+                parent,
+                LM.Get(localizationKey),
+                delegate { SelectWaterRoutingAlgorithm(algorithm); },
+                64f,
+                28f,
+                null,
+                localizationKey,
+                localizationKey + "_description");
+            button.Background.color = selected == algorithm
+                ? Color.white
+                : InactiveButton;
+        }
+
+        private void SelectWaterRoutingAlgorithm(
+            TerrainWaterRoutingAlgorithm algorithm)
+        {
+            TerrainLabRuntime runtime = TerrainLabRuntime.Instance;
+            TerrainWorldState state = runtime?.State;
+            TerrainWaterDynamicsService service = runtime?.WaterDynamics;
+            if (state == null || service == null)
+            {
+                SetError(LM.Get("terrain_lab_no_project_state"));
+                return;
+            }
+
+            TerrainWaterParameters source = state.WaterDynamics?.Parameters ??
+                new TerrainWaterParameters();
+            TerrainWaterRoutingAlgorithm normalized =
+                TerrainWaterRoutingAlgorithms.Normalize(algorithm);
+            if (source.RoutingAlgorithm == normalized)
+            {
+                return;
+            }
+
+            TerrainWaterParameters updated = CopyWaterParameters(source);
+            updated.RoutingAlgorithm = normalized;
+            if (!service.TryUpdateParameters(state, updated, out string error))
+            {
+                SetError(error);
+                return;
+            }
+
+            UpdateToolbarState();
+            RebuildModuleContent();
+            SetStatus(
+                string.Format(
+                    LM.Get("terrain_lab_water_routing_algorithm_updated_format"),
+                    LM.Get(GetWaterRoutingLocalizationKey(normalized))),
+                false,
+                true);
+        }
+
         private void TryUpdateWaterParameter(
             string value,
             int minimum,
@@ -2692,13 +2772,7 @@ namespace TerrainLab
 
             TerrainWaterParameters source = state.WaterDynamics?.Parameters ??
                 new TerrainWaterParameters();
-            TerrainWaterParameters updated = new TerrainWaterParameters
-            {
-                MaximumFloodPercent = source.MaximumFloodPercent,
-                InitialSourceVolume = source.InitialSourceVolume,
-                GeyserPulseVolume = source.GeyserPulseVolume,
-                CellsPerTick = source.CellsPerTick
-            };
+            TerrainWaterParameters updated = CopyWaterParameters(source);
             setter(updated, parsed);
             if (!service.TryUpdateParameters(state, updated, out string error))
             {
@@ -2708,6 +2782,34 @@ namespace TerrainLab
 
             UpdateToolbarState();
             SetStatus(LM.Get("terrain_lab_water_parameters_updated"), false, true);
+        }
+
+        private static TerrainWaterParameters CopyWaterParameters(
+            TerrainWaterParameters source)
+        {
+            source = source ?? new TerrainWaterParameters();
+            return new TerrainWaterParameters
+            {
+                MaximumFloodPercent = source.MaximumFloodPercent,
+                InitialSourceVolume = source.InitialSourceVolume,
+                GeyserPulseVolume = source.GeyserPulseVolume,
+                CellsPerTick = source.CellsPerTick,
+                RoutingAlgorithm = source.RoutingAlgorithm
+            };
+        }
+
+        private static string GetWaterRoutingLocalizationKey(
+            TerrainWaterRoutingAlgorithm algorithm)
+        {
+            switch (TerrainWaterRoutingAlgorithms.Normalize(algorithm))
+            {
+                case TerrainWaterRoutingAlgorithm.DInfinity:
+                    return "terrain_lab_water_routing_dinf";
+                case TerrainWaterRoutingAlgorithm.MultipleFlowDirection:
+                    return "terrain_lab_water_routing_mfd";
+                default:
+                    return "terrain_lab_water_routing_d8";
+            }
         }
 
         private void EnsureHydrologyThreshold(TerrainWorldState state)

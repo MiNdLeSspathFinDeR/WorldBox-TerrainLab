@@ -283,7 +283,7 @@
   "terrain_lab_error_surface_operation": "Операция с поверхностью не выполнена: {0}",
   "terrain_lab_error_digitizing_vertices": "Нужно не меньше {0} вершин.",
   "terrain_lab_toolbar_water_dynamics": "Живая вода по DEM",
-  "terrain_lab_toolbar_water_dynamics_description": "Включить ограниченное по объему растекание воды по DEM. Вода идет по детерминированным руслам D8, заполняет только связанные депрессии и не преобразует больше заданной доли валидных ячеек (жесткий максимум 50%). Штатные импульсы гейзера пополняют источник.",
+  "terrain_lab_toolbar_water_dynamics_description": "Включить ограниченное по объему растекание воды по DEM с выбранным алгоритмом руслоизации. Вода заполняет только связанные депрессии и не преобразует больше заданной доли валидных ячеек (жесткий максимум 50%). Штатные импульсы гейзера пополняют источник.",
   "terrain_lab_water_dynamics_heading": "ЖИВАЯ ВОДА ПО DEM",
   "terrain_lab_water_dynamics_status_format": "{0}; под управлением {1:N0} / {2:N0} ячеек; источников {3}; запас воды {4:N0}",
   "terrain_lab_water_dynamics_enabled": "включена",
@@ -297,5 +297,13 @@
   "terrain_lab_water_dynamics_started": "Живая вода по DEM включена",
   "terrain_lab_water_dynamics_stopped": "Живая вода выключена; созданная вода осталась на карте",
   "terrain_lab_water_parameter_error": "Значение должно быть от {0} до {1}.",
-  "terrain_lab_water_parameters_updated": "Параметры живой воды обновлены"
+  "terrain_lab_water_parameters_updated": "Параметры живой воды обновлены",
+  "terrain_lab_water_routing_algorithm_heading": "АЛГОРИТМ РУСЛОИЗАЦИИ",
+  "terrain_lab_water_routing_d8": "D8",
+  "terrain_lab_water_routing_d8_description": "Направлять поток в одну соседнюю ячейку по бесцикловому графу Priority-Flood. Дает узкие, стабильные и быстрые русла с заметной привязкой к восьми направлениям сетки.",
+  "terrain_lab_water_routing_dinf": "D∞",
+  "terrain_lab_water_routing_dinf_description": "Метод Тарбонтона: искать максимальный уклон на восьми треугольных гранях и делить поток не более чем между двумя соседями. Уменьшает сеточную угловатость без сильного расползания русла.",
+  "terrain_lab_water_routing_mfd": "MFD",
+  "terrain_lab_water_routing_mfd_description": "Распределять поток между всеми нижележащими соседями пропорционально уклону в степени 1,1. Формирует широкие разветвленные зоны стока и требует больше вычислений.",
+  "terrain_lab_water_routing_algorithm_updated_format": "Алгоритм руслоизации: {0}"
 }

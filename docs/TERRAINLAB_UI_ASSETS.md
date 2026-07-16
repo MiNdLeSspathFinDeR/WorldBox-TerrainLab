@@ -56,7 +56,9 @@ The Analysis chapter also exposes `Live DEM water` with WorldBox's native rain
 icon. It is a repeat-click toggle with a green native activity lamp; the lamp
 turns amber when the configured area ceiling is reached. The Parameters page
 contains maximum flooded area, finite contact volume, geyser pulse volume, and
-cells-per-tick controls plus live managed-cell/source diagnostics.
+cells-per-tick controls plus live managed-cell/source diagnostics. A segmented
+`D8 | D-infinity | MFD` selector changes only future live channel routing and
+highlights the active method; each option has a method-specific hover summary.
 
 The Layers chapter also exposes the authoritative Int16 DEM directly, without
 requiring relief analysis. It renders one point-filtered texture pixel per world

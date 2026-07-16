@@ -87,12 +87,16 @@ order have chunked overlays. Any DEM edit marks the analysis stale.
 
 The Analysis toolbar also has a persistent `Live DEM water` toggle. A normal
 water-layer contact receives a finite integer budget and follows the dedicated
-Priority-Flood/D8 graph. The route is drawn as a shallow one-cell channel;
+Priority-Flood drainage rank. The Parameters page offers D8, D-infinity, and
+MFD channel routing: respectively one receiver, at most two triangular-facet
+receivers, or every strict downslope neighbor. Flats use the stable
+Priority-Flood receiver. The route is drawn with shallow channel cells;
 positive-depth depressions may fill locally with coastal/deep water according
 to fill depth. The simulation cannot convert more than the configured 1-50
 percent of valid DEM cells, never overwrites hazardous surfaces or ordinary
 buildings, pauses with WorldBox and modal windows, and does not count the
-pre-existing ocean against its limit.
+pre-existing ocean against its limit. The selector does not alter analytical
+D8 watersheds, stream order, or erosion products.
 
 The native `geyser` building is observed at its real drop-spawn call. Each pulse
 adds volume, making it a continuing river source without bypassing the same area

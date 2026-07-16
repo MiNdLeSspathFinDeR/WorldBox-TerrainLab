@@ -79,26 +79,36 @@ bounded DEM process without replacing WorldBox's own ocean behavior:
    existing water and lower-or-equal DEM cells. Painting a deep, coastal, or
    shallow water layer creates one debounced finite source at its best downhill
    contact.
-2. A dedicated Priority-Flood surface provides depression spill levels and a
-   deterministic D8 receiver graph. The algorithm first cuts a one-cell channel
-   along D8, then interleaves local filling only among cells in the same
-   positive-depth depression and at the same spill elevation. It does not run an
-   unrestricted flood fill over a tilted plane.
-3. Source volume is integer. A channel cell costs one unit; filling a depression
+2. A dedicated Priority-Flood surface provides depression spill levels and an
+   acyclic drainage rank. Live channel routing is selectable: D8 follows one
+   stable receiver; D-infinity evaluates the steepest direction over eight
+   triangular facets and divides flow between at most two adjacent cells; MFD
+   distributes flow among every strict downslope neighbor with Freeman's slope
+   exponent `1.1`. Flats fall back to the Priority-Flood receiver.
+3. The selected routing front first cuts shallow channels, then interleaves
+   local filling only among cells in the same positive-depth depression and at
+   the same spill elevation. It does not run an unrestricted flood fill over a
+   tilted plane. D-infinity and MFD fronts are capped at 512 queued branches per
+   source; all branches consume the same finite integer source budget.
+4. Source volume is integer. A channel cell costs one unit; filling a depression
    costs more in proportion to its Priority-Flood depth. An ordinary contact has
    a finite configurable volume.
-4. A Harmony postfix observes the native `geyser` building's actual
+5. A Harmony postfix observes the native `geyser` building's actual
    `spawnBurstSpecial` call. Every real pulse adds configurable volume, so a live
    geyser behaves as a continuing river source while still respecting native
    pause, disable, destruction, and spawn timing.
-5. TerrainLab-created water may occupy at most the configured 1-50 percent of
+6. TerrainLab-created water may occupy at most the configured 1-50 percent of
    valid DEM cells. Fifty percent is a non-bypassable hard maximum. Existing
    ocean cells do not consume that budget, and hazardous/non-copyable surfaces
    or non-geyser buildings are never converted.
-6. Shallow channel cells and depth-classified coastal/deep depression cells are
+7. Shallow channel cells and depth-classified coastal/deep depression cells are
    written as normal WorldBox terrain. The managed UInt8 mask persists in
    WBXGEO and exports as `managed_water.tif`; the vanilla map therefore retains
    the visible river even without the mod.
+
+The selector affects only live channel creation. Stored watershed,
+flow-accumulation, Strahler, and erosion products retain their deterministic D8
+contracts.
 
 Finite source queues are intentionally runtime-only and are not replenished on
 reload. The managed mask is restored, while native geysers resume through later

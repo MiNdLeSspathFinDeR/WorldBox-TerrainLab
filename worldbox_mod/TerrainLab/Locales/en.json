@@ -283,7 +283,7 @@
   "terrain_lab_error_surface_operation": "Surface operation failed: {0}",
   "terrain_lab_error_digitizing_vertices": "At least {0} vertices are required.",
   "terrain_lab_toolbar_water_dynamics": "Live DEM water",
-  "terrain_lab_toolbar_water_dynamics_description": "Toggle finite-volume water routing over the DEM. Water follows deterministic D8 channels, fills only connected depressions, and never converts more than the configured limit of valid cells (hard maximum 50%). Native geyser pulses replenish their source.",
+  "terrain_lab_toolbar_water_dynamics_description": "Toggle finite-volume water routing over the DEM with the selected channel-routing algorithm. Water fills only connected depressions and never converts more than the configured limit of valid cells (hard maximum 50%). Native geyser pulses replenish their source.",
   "terrain_lab_water_dynamics_heading": "LIVE WATER ROUTING",
   "terrain_lab_water_dynamics_status_format": "{0}; managed {1:N0} / {2:N0} cells; sources {3}; pending volume {4:N0}",
   "terrain_lab_water_dynamics_enabled": "enabled",
@@ -297,5 +297,13 @@
   "terrain_lab_water_dynamics_started": "Live DEM water enabled",
   "terrain_lab_water_dynamics_stopped": "Live DEM water disabled; existing water remains on the map",
   "terrain_lab_water_parameter_error": "Value must be from {0} to {1}.",
-  "terrain_lab_water_parameters_updated": "Live-water parameters updated"
+  "terrain_lab_water_parameters_updated": "Live-water parameters updated",
+  "terrain_lab_water_routing_algorithm_heading": "CHANNEL ROUTING ALGORITHM",
+  "terrain_lab_water_routing_d8": "D8",
+  "terrain_lab_water_routing_d8_description": "Route flow to one neighboring cell over the acyclic Priority-Flood graph. Produces narrow, stable, fast channels with visible eight-direction grid bias.",
+  "terrain_lab_water_routing_dinf": "D∞",
+  "terrain_lab_water_routing_dinf_description": "Tarboton's method: find the steepest direction over eight triangular facets and split flow between at most two neighbors. Reduces grid angularity without strongly dispersing a channel.",
+  "terrain_lab_water_routing_mfd": "MFD",
+  "terrain_lab_water_routing_mfd_description": "Distribute flow among all downslope neighbors in proportion to slope raised to 1.1. Produces broad branching runoff zones and requires more computation.",
+  "terrain_lab_water_routing_algorithm_updated_format": "Channel routing algorithm: {0}"
 }
