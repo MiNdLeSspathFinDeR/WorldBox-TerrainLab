@@ -1,5 +1,16 @@
 # Changelog
 
+## Unreleased
+
+- Added a direct per-cell Int16 DEM overlay with translucent, sea-level-centered
+  Turbo colors and incremental chunk refresh during edit, undo, and redo.
+- Added command-specific Russian and English hover descriptions to every
+  TerrainLab toolbar and internal-window button.
+- Made tooltip metadata mandatory for internal action buttons and added
+  one-time missing-sprite diagnostics with text fallback.
+- Added icons to internal module, layer, DEM, analysis, and overlay controls;
+  documented all remaining purpose-drawn art and unimplemented GIS modules.
+
 ## 1.0.0 - 2026-07-16
 
 - Added the in-game Int16 DEM editor with inspect, brush tools, and undo/redo.

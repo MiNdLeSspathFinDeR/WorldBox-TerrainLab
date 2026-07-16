@@ -10,6 +10,7 @@ using System.Threading;
 using Newtonsoft.Json;
 using Newtonsoft.Json.Linq;
 using TerrainLab;
+using UnityEngine;
 
 internal static class Program
 {
@@ -49,6 +50,7 @@ internal static class Program
         {
             ValidateMapBudget();
             ValidateDigitizingRaster();
+            ValidateElevationPalette();
             ValidateReliefAlgorithm();
             ValidateHydrologyAlgorithm();
             ValidateGeoTiff(testRoot);
@@ -117,6 +119,38 @@ internal static class Program
             masked.Ruggedness[0] == ushort.MaxValue &&
             masked.Hillshade[0] == byte.MaxValue,
             "Relief NODATA encoding is incorrect.");
+    }
+
+    private static void ValidateElevationPalette()
+    {
+        Color32 noData = TerrainElevationOverlay.GetColor(
+            TerrainElevationEncoding.NoData,
+            0,
+            -100,
+            100);
+        Color32 belowSea = TerrainElevationOverlay.GetColor(-100, 0, -100, 100);
+        Color32 shallow = TerrainElevationOverlay.GetColor(-1, 0, -100, 100);
+        Color32 seaLevel = TerrainElevationOverlay.GetColor(0, 0, -100, 100);
+        Color32 high = TerrainElevationOverlay.GetColor(100, 0, -100, 100);
+
+        Assert(noData.a == 0, "Elevation palette renders NODATA.");
+        Assert(
+            belowSea.b > belowSea.r && belowSea.b > belowSea.g,
+            "Negative elevation does not start in the blue Turbo range.");
+        Assert(
+            shallow.b > shallow.r,
+            "Shallow negative elevation left the blue/cyan range.");
+        Assert(
+            seaLevel.r > seaLevel.b && seaLevel.g > seaLevel.b,
+            "Sea level does not start the yellow positive range.");
+        Assert(
+            high.r > high.g && high.r > high.b,
+            "Positive maximum does not end in the red Turbo range.");
+        Assert(
+            belowSea.a > 0 && belowSea.a < byte.MaxValue &&
+            belowSea.a == shallow.a && shallow.a == seaLevel.a &&
+            seaLevel.a == high.a,
+            "Elevation overlay alpha is not consistently translucent.");
     }
 
     private static void ValidateDigitizingRaster()

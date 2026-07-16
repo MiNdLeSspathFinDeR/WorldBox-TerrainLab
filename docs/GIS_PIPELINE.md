@@ -33,6 +33,21 @@ of a degree, hillshade, and local ruggedness. Edge samples are clamped and
 `NODATA` neighbors fall back to the center cell. The calculation is cancellable,
 revision-bound, and does not alter the DEM.
 
+## Implemented DEM visualization
+
+The authoritative signed Int16 DEM has a direct map overlay independent of the
+Horn derivatives. It is rendered in `256 x 256` point-filtered chunks with one
+texture pixel per WorldBox cell and fixed alpha `156/255`. `NODATA=9999` is fully
+transparent.
+
+The color mapping uses the polynomial Turbo palette over two semantic ranges.
+Values below the project's sea level occupy the blue-to-cyan interval, while
+sea level and positive relief occupy the yellow-to-red interval. Each side is
+normalized against its own observed minimum or maximum. This preserves both
+bathymetric and terrestrial contrast on strongly asymmetric DEMs. Incremental
+DEM edits rewrite only affected chunks; a new out-of-range value triggers one
+full rescale.
+
 ## Implemented runtime hydrology
 
 The deterministic hydrology module operates over the same DEM:

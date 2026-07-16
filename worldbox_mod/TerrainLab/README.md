@@ -15,6 +15,9 @@ under `Code` when the game starts.
 
 - signed Int16 elevation with reserved `NODATA=9999`, independent from vanilla
   terrain morphotypes;
+- a direct translucent DEM overlay with one pixel per world cell, split
+  blue/cyan and yellow/red Turbo scaling around sea level, and incremental
+  refresh during edit, undo, and redo;
 - inspect, set, raise, lower, smooth, brush radius, and 32-operation undo/redo;
 - gameplay-safe surface sampling, four-connected fill, line, polygon,
   rectangle, connected-region polygonization, and apply-selection;

@@ -51,6 +51,8 @@ namespace TerrainLab
 
         public event Action<int> EditApplied;
 
+        public event Action<TerrainElevationEdit> ElevationChanged;
+
         public event Action<TerrainSurfaceStamp> SurfaceSampled;
 
         public event Action<string, string> OperationFailed;
@@ -184,6 +186,11 @@ namespace TerrainLab
             _redoHistoryBytes += edit.EstimatedBytes;
             changedCells = edit.ChangedCellCount;
             ClearPolygonizedSelection();
+            if (edit is TerrainElevationEdit elevationEdit)
+            {
+                ElevationChanged?.Invoke(elevationEdit);
+            }
+
             return true;
         }
 
@@ -204,6 +211,11 @@ namespace TerrainLab
             AddUndoEntry(edit);
             changedCells = edit.ChangedCellCount;
             ClearPolygonizedSelection();
+            if (edit is TerrainElevationEdit elevationEdit)
+            {
+                ElevationChanged?.Invoke(elevationEdit);
+            }
+
             return true;
         }
 
@@ -218,6 +230,11 @@ namespace TerrainLab
             AddUndoEntry(edit);
             ClearRedoHistory();
             ClearPolygonizedSelection();
+            if (edit is TerrainElevationEdit elevationEdit)
+            {
+                ElevationChanged?.Invoke(elevationEdit);
+            }
+
             EditApplied?.Invoke(edit.ChangedCellCount);
         }
 

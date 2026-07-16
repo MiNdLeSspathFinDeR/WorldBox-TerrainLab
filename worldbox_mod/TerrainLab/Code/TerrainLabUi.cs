@@ -102,6 +102,8 @@ namespace TerrainLab
             new Dictionary<string, SimpleButton>();
         private readonly Dictionary<string, Sprite> _iconCache =
             new Dictionary<string, Sprite>();
+        private readonly HashSet<string> _missingIconIds =
+            new HashSet<string>(StringComparer.Ordinal);
         private readonly List<ToolbarLayoutButton> _toolbarLayoutButtons =
             new List<ToolbarLayoutButton>();
         private readonly List<ToolbarLayoutSeparator> _toolbarLayoutSeparators =
@@ -117,6 +119,7 @@ namespace TerrainLab
         private ScrollWindow _window;
         private SimpleButton _sideButton;
         private TerrainLabEditor _editor;
+        private TerrainElevationOverlay _elevationOverlay;
         private TerrainReliefOverlay _reliefOverlay;
         private TerrainHydrologyOverlay _hydrologyOverlay;
         private TerrainErosionOverlay _erosionOverlay;
@@ -177,6 +180,12 @@ namespace TerrainLab
             }
 
             _editor = editor ?? throw new ArgumentNullException(nameof(editor));
+            _elevationOverlay = GetComponent<TerrainElevationOverlay>();
+            if (_elevationOverlay == null)
+            {
+                _elevationOverlay = gameObject.AddComponent<TerrainElevationOverlay>();
+            }
+
             _reliefOverlay = GetComponent<TerrainReliefOverlay>();
             if (_reliefOverlay == null)
             {
@@ -201,6 +210,7 @@ namespace TerrainLab
             CreateSideButton(declaration.GetIcon());
             CreateMapStatusBar();
             _editor.EditApplied += HandleElevationEditApplied;
+            _editor.ElevationChanged += HandleElevationChanged;
             _editor.SurfaceSampled += HandleSurfaceSampled;
             _editor.OperationFailed += HandleEditorOperationFailed;
             _editor.RegionPolygonized += HandleRegionPolygonized;
@@ -255,6 +265,12 @@ namespace TerrainLab
             }
 
             TerrainWorldState state = TerrainLabRuntime.Instance?.State;
+            if (_elevationOverlay != null && _elevationOverlay.IsVisible &&
+                !_elevationOverlay.References(state))
+            {
+                _elevationOverlay.Clear();
+            }
+
             if (_reliefOverlay != null &&
                 _reliefOverlay.Mode != TerrainReliefOverlayMode.None &&
                 (state?.Relief == null || !state.Relief.IsCurrent(state)))
@@ -478,7 +494,7 @@ namespace TerrainLab
                 null,
                 ShowWindow,
                 "terrain_lab_toolbar_menu",
-                "terrain_lab_toolbar_project_description");
+                "terrain_lab_toolbar_menu_description");
             _toolbarCommandButtons["save"] = CreateToolbarButton(
                 row,
                 "save",
@@ -486,7 +502,7 @@ namespace TerrainLab
                 null,
                 SaveProject,
                 "terrain_lab_action_save",
-                "terrain_lab_toolbar_project_description");
+                "terrain_lab_action_save_description");
 
             CreateToolbarSeparator(row);
             _toolbarCreationRole = ToolbarButtonRole.Section;
@@ -536,7 +552,7 @@ namespace TerrainLab
                 badge,
                 delegate { SelectToolbarSection(section); },
                 tooltipNameKey,
-                "terrain_lab_toolbar_section_description");
+                GetToolbarSectionDescriptionLocalizationKey(section));
             _toolbarSectionButtons[section] = button;
         }
 
@@ -553,7 +569,7 @@ namespace TerrainLab
                 null,
                 ExportProject,
                 "terrain_lab_action_export",
-                "terrain_lab_toolbar_project_description");
+                "terrain_lab_action_export_description");
             _toolbarCommandButtons["validate"] = CreateToolbarButton(
                 row,
                 "validate",
@@ -561,7 +577,7 @@ namespace TerrainLab
                 null,
                 ValidateProject,
                 "terrain_lab_action_validate",
-                "terrain_lab_toolbar_project_description");
+                "terrain_lab_action_validate_description");
             _toolbarCommandButtons["export_gis"] = CreateToolbarButton(
                 row,
                 "export_gis",
@@ -569,7 +585,7 @@ namespace TerrainLab
                 null,
                 ExportGisLayers,
                 "terrain_lab_action_export_gis",
-                "terrain_lab_toolbar_project_description");
+                "terrain_lab_action_export_gis_description");
             CreateToolbarSeparator(row);
             _toolbarCommandButtons["sync_prepare"] = CreateToolbarButton(
                 row,
@@ -578,7 +594,7 @@ namespace TerrainLab
                 null,
                 PrepareFileSync,
                 "terrain_lab_action_prepare_sync",
-                "terrain_lab_toolbar_sync_description");
+                "terrain_lab_action_prepare_sync_description");
             _toolbarCommandButtons["sync_pull"] = CreateToolbarButton(
                 row,
                 "sync_pull",
@@ -586,7 +602,7 @@ namespace TerrainLab
                 "P",
                 delegate { PullFileSync(TerrainSyncConflictPolicy.Reject); },
                 "terrain_lab_action_pull_sync",
-                "terrain_lab_toolbar_sync_description");
+                "terrain_lab_action_pull_sync_description");
             _toolbarCommandButtons["sync_branch"] = CreateToolbarButton(
                 row,
                 "sync_branch",
@@ -597,7 +613,7 @@ namespace TerrainLab
                     PullFileSync(TerrainSyncConflictPolicy.BranchAndApplyIncoming);
                 },
                 "terrain_lab_action_pull_branch",
-                "terrain_lab_toolbar_sync_description");
+                "terrain_lab_action_pull_branch_description");
 
         }
 
@@ -646,7 +662,7 @@ namespace TerrainLab
                 null,
                 UndoElevationEdit,
                 "terrain_lab_action_undo",
-                "terrain_lab_toolbar_history_description");
+                "terrain_lab_action_undo_description");
             _toolbarCommandButtons["redo"] = CreateToolbarButton(
                 row,
                 "redo",
@@ -654,7 +670,7 @@ namespace TerrainLab
                 null,
                 RedoElevationEdit,
                 "terrain_lab_action_redo",
-                "terrain_lab_toolbar_history_description");
+                "terrain_lab_action_redo_description");
 
             _toolbarCreationSection = ToolbarSection.Digitizing;
             _toolbarLayoutGroup++;
@@ -701,7 +717,7 @@ namespace TerrainLab
                 "S",
                 ApplyPolygonizedSelection,
                 "terrain_lab_action_apply_selection",
-                "terrain_lab_toolbar_digitizing_description");
+                "terrain_lab_action_apply_selection_description");
             _toolbarCommandButtons["digitizing_cancel"] = CreateToolbarButton(
                 row,
                 "digitizing_cancel",
@@ -709,7 +725,7 @@ namespace TerrainLab
                 "X",
                 CancelDigitizing,
                 "terrain_lab_action_cancel_digitizing",
-                "terrain_lab_toolbar_digitizing_description");
+                "terrain_lab_action_cancel_digitizing_description");
 
             _toolbarCreationSection = ToolbarSection.Analysis;
             _toolbarLayoutGroup++;
@@ -720,7 +736,7 @@ namespace TerrainLab
                 "R",
                 ToggleReliefAnalysis,
                 "terrain_lab_toolbar_relief_job",
-                "terrain_lab_toolbar_analysis_description");
+                "terrain_lab_toolbar_relief_job_description");
             _hydrologyJobButton = CreateToolbarButton(
                 row,
                 "hydrology_job",
@@ -728,7 +744,7 @@ namespace TerrainLab
                 "H",
                 ToggleHydrologyAnalysis,
                 "terrain_lab_toolbar_hydrology_job",
-                "terrain_lab_toolbar_analysis_description");
+                "terrain_lab_toolbar_hydrology_job_description");
             _erosionJobButton = CreateToolbarButton(
                 row,
                 "erosion_job",
@@ -736,7 +752,7 @@ namespace TerrainLab
                 "E",
                 ToggleErosionAnalysis,
                 "terrain_lab_toolbar_erosion_job",
-                "terrain_lab_toolbar_analysis_description");
+                "terrain_lab_toolbar_erosion_job_description");
             _applyErosionButton = CreateToolbarButton(
                 row,
                 "erosion_apply",
@@ -744,7 +760,7 @@ namespace TerrainLab
                 "E",
                 ApplyErosion,
                 "terrain_lab_erosion_apply",
-                "terrain_lab_toolbar_analysis_description");
+                "terrain_lab_erosion_apply_description");
         }
 
         private void CreateOverlayToolbarRow()
@@ -753,6 +769,14 @@ namespace TerrainLab
             _toolbarCreationSection = ToolbarSection.Layers;
             _toolbarCreationRole = ToolbarButtonRole.Functional;
             _toolbarLayoutGroup++;
+            CreateToolbarOverlayButton(
+                row,
+                "dem_elevation",
+                "layer_add_raster",
+                "Z",
+                ShowElevationOverlay,
+                "terrain_lab_elevation_overlay");
+            CreateToolbarSeparator(row);
             CreateToolbarOverlayButton(
                 row,
                 "relief_hypsometry",
@@ -864,7 +888,7 @@ namespace TerrainLab
                 null,
                 HideAllOverlaysWithStatus,
                 "terrain_lab_toolbar_hide_overlays",
-                "terrain_lab_toolbar_overlay_description");
+                "terrain_lab_toolbar_hide_overlays_description");
         }
 
         private void CreateSideButton(Sprite icon)
@@ -975,7 +999,18 @@ namespace TerrainLab
                     ? LM.Get("terrain_lab_value_nodata")
                     : elevation.ToString();
                 TerrainHydrologyResult hydrology = state.Hydrology;
-                if (_hydrologyOverlay != null &&
+                if (_elevationOverlay != null && _elevationOverlay.IsVisible)
+                {
+                    status = string.Format(
+                        LM.Get("terrain_lab_elevation_map_status_format"),
+                        tile.x,
+                        tile.y,
+                        value,
+                        _elevationOverlay.DisplayMinimum,
+                        _elevationOverlay.SeaLevel,
+                        _elevationOverlay.DisplayMaximum);
+                }
+                else if (_hydrologyOverlay != null &&
                     _hydrologyOverlay.Mode != TerrainHydrologyOverlayMode.None &&
                     hydrology != null && hydrology.IsCurrent(state) &&
                     hydrology.TryGetCell(
@@ -1318,11 +1353,13 @@ namespace TerrainLab
             string activeOverlay = GetActiveToolbarOverlay();
             foreach (KeyValuePair<string, SimpleButton> pair in _toolbarOverlayButtons)
             {
-                bool enabled = pair.Key.StartsWith("relief_", StringComparison.Ordinal)
-                    ? reliefCurrent
-                    : pair.Key.StartsWith("hydrology_", StringComparison.Ordinal)
-                        ? hydrologyCurrent
-                        : erosionCurrent;
+                bool enabled = pair.Key == "dem_elevation"
+                    ? hasState
+                    : pair.Key.StartsWith("relief_", StringComparison.Ordinal)
+                        ? reliefCurrent
+                        : pair.Key.StartsWith("hydrology_", StringComparison.Ordinal)
+                            ? hydrologyCurrent
+                            : erosionCurrent;
                 pair.Value.Button.interactable = enabled;
                 pair.Value.Background.color = enabled ? Color.white : InactiveButton;
                 SetToolbarActivity(
@@ -1376,6 +1413,11 @@ namespace TerrainLab
 
         private string GetActiveToolbarOverlay()
         {
+            if (_elevationOverlay != null && _elevationOverlay.IsVisible)
+            {
+                return "dem_elevation";
+            }
+
             if (_reliefOverlay != null)
             {
                 switch (_reliefOverlay.Mode)
@@ -1433,9 +1475,29 @@ namespace TerrainLab
                 LM.Get(labelKey),
                 delegate { SelectModule(moduleId); },
                 194f,
-                30f);
+                30f,
+                GetModuleIconId(moduleId),
+                labelKey,
+                labelKey + "_description");
             button.name = "TerrainLabModule_" + moduleId;
             _moduleButtons[moduleId] = button;
+        }
+
+        private static string GetModuleIconId(string moduleId)
+        {
+            switch (moduleId)
+            {
+                case "project":
+                    return "project_open";
+                case "parameters":
+                    return "layer_properties";
+                case "layers":
+                    return "layer_stack";
+                case "settings":
+                    return "module_manager";
+                default:
+                    return "module_manager";
+            }
         }
 
         private void SelectModule(string moduleId)
@@ -1591,7 +1653,9 @@ namespace TerrainLab
                 OpenExchangeDirectory,
                 194f,
                 28f,
-                "project_open");
+                "project_open",
+                "terrain_lab_action_open_exchange",
+                "terrain_lab_action_open_exchange_description");
 
             CreateSectionHeading(_moduleContent, "terrain_lab_exchange_heading");
             IReadOnlyList<string> packages = runtime.GetExchangePackages(3);
@@ -1612,7 +1676,9 @@ namespace TerrainLab
                     delegate { ImportProject(capturedPath); },
                     194f,
                     28f,
-                    "import_wbxgeo");
+                    "import_wbxgeo",
+                    "terrain_lab_action_import",
+                    "terrain_lab_action_import_description");
             }
         }
 
@@ -1650,7 +1716,15 @@ namespace TerrainLab
                 TextAnchor.MiddleLeft,
                 NeutralText,
                 78f);
-            CreateActionButton(radiusRow, "-", DecreaseBrushRadius, 34f, 26f);
+            CreateActionButton(
+                radiusRow,
+                "-",
+                DecreaseBrushRadius,
+                34f,
+                26f,
+                null,
+                "terrain_lab_action_radius_decrease",
+                "terrain_lab_action_radius_decrease_description");
             _brushRadiusText = CreateTextLabel(
                 radiusRow,
                 "TerrainLabElevationRadiusValue",
@@ -1661,7 +1735,15 @@ namespace TerrainLab
                 TextAnchor.MiddleCenter,
                 Color.white,
                 40f);
-            CreateActionButton(radiusRow, "+", IncreaseBrushRadius, 34f, 26f);
+            CreateActionButton(
+                radiusRow,
+                "+",
+                IncreaseBrushRadius,
+                34f,
+                26f,
+                null,
+                "terrain_lab_action_radius_increase",
+                "terrain_lab_action_radius_increase_description");
 
             CreateSectionHeading(_moduleContent, "terrain_lab_hydrology_heading");
             EnsureHydrologyThreshold(state);
@@ -1846,7 +1928,9 @@ namespace TerrainLab
                     CancelRelief,
                     194f,
                     28f,
-                    "ui/Icons/iconPause");
+                    "ui/Icons/iconPause",
+                    "terrain_lab_relief_cancel",
+                    "terrain_lab_relief_cancel_description");
                 return;
             }
 
@@ -1893,7 +1977,11 @@ namespace TerrainLab
                 RunRelief,
                 194f,
                 28f,
-                "ui/Icons/iconPlay");
+                "ui/Icons/iconPlay",
+                resultCurrent
+                    ? "terrain_lab_relief_recompute"
+                    : "terrain_lab_relief_run",
+                "terrain_lab_relief_run_description");
             if (!resultCurrent)
             {
                 return;
@@ -1909,13 +1997,18 @@ namespace TerrainLab
                 delegate { ShowReliefOverlay(TerrainReliefOverlayMode.Hypsometry); },
                 94f,
                 28f,
-                "visibility_on");
+                "visibility_on",
+                "terrain_lab_relief_overlay_hypsometry",
+                "terrain_lab_relief_overlay_hypsometry_description");
             CreateActionButton(
                 firstRow,
                 LM.Get("terrain_lab_relief_overlay_slope"),
                 delegate { ShowReliefOverlay(TerrainReliefOverlayMode.Slope); },
                 94f,
-                28f);
+                28f,
+                "layer_filter",
+                "terrain_lab_relief_overlay_slope",
+                "terrain_lab_relief_overlay_slope_description");
 
             Transform secondRow = CreateActionRow(
                 _moduleContent,
@@ -1925,20 +2018,28 @@ namespace TerrainLab
                 LM.Get("terrain_lab_relief_overlay_aspect"),
                 delegate { ShowReliefOverlay(TerrainReliefOverlayMode.Aspect); },
                 94f,
-                28f);
+                28f,
+                "visibility_on",
+                "terrain_lab_relief_overlay_aspect",
+                "terrain_lab_relief_overlay_aspect_description");
             CreateActionButton(
                 secondRow,
                 LM.Get("terrain_lab_relief_overlay_hillshade"),
                 delegate { ShowReliefOverlay(TerrainReliefOverlayMode.Hillshade); },
                 94f,
-                28f);
+                28f,
+                "visibility_on",
+                "terrain_lab_relief_overlay_hillshade",
+                "terrain_lab_relief_overlay_hillshade_description");
             CreateActionButton(
                 _moduleContent,
                 LM.Get("terrain_lab_relief_overlay_hide"),
                 HideReliefOverlay,
                 194f,
                 28f,
-                "visibility_off");
+                "visibility_off",
+                "terrain_lab_relief_overlay_hide",
+                "terrain_lab_relief_overlay_hide_description");
         }
 
         private void RunRelief()
@@ -1976,6 +2077,40 @@ namespace TerrainLab
             SetStatus(LM.Get("terrain_lab_relief_cancelling"), false);
         }
 
+        private void ShowElevationOverlay()
+        {
+            if (_elevationOverlay != null && _elevationOverlay.IsVisible)
+            {
+                _elevationOverlay.Clear();
+                SetStatus(LM.Get("terrain_lab_elevation_overlay_hidden"), false);
+                return;
+            }
+
+            TerrainWorldState state = TerrainLabRuntime.Instance?.State;
+            if (_elevationOverlay == null || state == null)
+            {
+                SetError(LM.Get("terrain_lab_no_project_state"));
+                return;
+            }
+
+            _reliefOverlay?.Clear();
+            _hydrologyOverlay?.Clear();
+            _erosionOverlay?.Clear();
+            _elevationOverlay.Show(state);
+            if (!_elevationOverlay.IsVisible)
+            {
+                SetError(LM.Get("terrain_lab_elevation_overlay_empty"));
+                return;
+            }
+
+            SetStatus(
+                string.Format(
+                    LM.Get("terrain_lab_selected_format"),
+                    LM.Get("terrain_lab_elevation_overlay")),
+                false,
+                true);
+        }
+
         private void ShowReliefOverlay(TerrainReliefOverlayMode mode)
         {
             if (_reliefOverlay != null && _reliefOverlay.Mode == mode)
@@ -1992,6 +2127,7 @@ namespace TerrainLab
                 return;
             }
 
+            _elevationOverlay?.Clear();
             _hydrologyOverlay?.Clear();
             _erosionOverlay?.Clear();
             _reliefOverlay.Show(mode, state, result);
@@ -2031,7 +2167,8 @@ namespace TerrainLab
                 firstToolRow,
                 TerrainEditorTool.SetElevation,
                 "terrain_lab_tool_set",
-                94f);
+                94f,
+                "layer_style");
 
             Transform secondToolRow = CreateActionRow(
                 _moduleContent,
@@ -2046,13 +2183,16 @@ namespace TerrainLab
                 secondToolRow,
                 TerrainEditorTool.LowerElevation,
                 "terrain_lab_tool_lower",
-                94f);
+                94f,
+                "elevation_raise",
+                180f);
 
             CreateEditorToolButton(
                 _moduleContent,
                 TerrainEditorTool.SmoothElevation,
                 "terrain_lab_tool_smooth",
-                194f);
+                194f,
+                "layer_filter");
 
             CreateNumericInputRow(
                 "TerrainLabElevationTarget",
@@ -2078,7 +2218,15 @@ namespace TerrainLab
                 TextAnchor.MiddleLeft,
                 NeutralText,
                 78f);
-            CreateActionButton(radiusRow, "-", DecreaseBrushRadius, 34f, 26f);
+            CreateActionButton(
+                radiusRow,
+                "-",
+                DecreaseBrushRadius,
+                34f,
+                26f,
+                null,
+                "terrain_lab_action_radius_decrease",
+                "terrain_lab_action_radius_decrease_description");
             _brushRadiusText = CreateTextLabel(
                 radiusRow,
                 "TerrainLabElevationRadiusValue",
@@ -2089,7 +2237,15 @@ namespace TerrainLab
                 TextAnchor.MiddleCenter,
                 Color.white,
                 40f);
-            CreateActionButton(radiusRow, "+", IncreaseBrushRadius, 34f, 26f);
+            CreateActionButton(
+                radiusRow,
+                "+",
+                IncreaseBrushRadius,
+                34f,
+                26f,
+                null,
+                "terrain_lab_action_radius_increase",
+                "terrain_lab_action_radius_increase_description");
 
             Transform historyRow = CreateActionRow(
                 _moduleContent,
@@ -2100,14 +2256,18 @@ namespace TerrainLab
                 UndoElevationEdit,
                 94f,
                 28f,
-                "undo");
+                "undo",
+                "terrain_lab_action_undo",
+                "terrain_lab_action_undo_description");
             CreateActionButton(
                 historyRow,
                 LM.Get("terrain_lab_action_redo"),
                 RedoElevationEdit,
                 94f,
                 28f,
-                "redo");
+                "redo",
+                "terrain_lab_action_redo",
+                "terrain_lab_action_redo_description");
         }
 
         private void BuildHydrologyView()
@@ -2143,7 +2303,9 @@ namespace TerrainLab
                     CancelHydrology,
                     194f,
                     28f,
-                    "ui/Icons/iconPause");
+                    "ui/Icons/iconPause",
+                    "terrain_lab_hydrology_cancel",
+                    "terrain_lab_hydrology_cancel_description");
                 return;
             }
 
@@ -2209,7 +2371,11 @@ namespace TerrainLab
                 RunHydrology,
                 194f,
                 28f,
-                "ui/Icons/iconPlay");
+                "ui/Icons/iconPlay",
+                resultCurrent
+                    ? "terrain_lab_hydrology_recompute"
+                    : "terrain_lab_hydrology_run",
+                "terrain_lab_hydrology_run_description");
 
             if (!resultCurrent)
             {
@@ -2226,13 +2392,18 @@ namespace TerrainLab
                 delegate { ShowHydrologyOverlay(TerrainHydrologyOverlayMode.Streams); },
                 94f,
                 28f,
-                "visibility_on");
+                "visibility_on",
+                "terrain_lab_hydrology_overlay_streams",
+                "terrain_lab_hydrology_overlay_streams_description");
             CreateActionButton(
                 firstOverlayRow,
                 LM.Get("terrain_lab_hydrology_overlay_accumulation"),
                 delegate { ShowHydrologyOverlay(TerrainHydrologyOverlayMode.Accumulation); },
                 94f,
-                28f);
+                28f,
+                "layer_filter",
+                "terrain_lab_hydrology_overlay_accumulation",
+                "terrain_lab_hydrology_overlay_accumulation_description");
 
             Transform secondOverlayRow = CreateActionRow(
                 _moduleContent,
@@ -2242,13 +2413,19 @@ namespace TerrainLab
                 LM.Get("terrain_lab_hydrology_overlay_fill"),
                 delegate { ShowHydrologyOverlay(TerrainHydrologyOverlayMode.FillDepth); },
                 94f,
-                28f);
+                28f,
+                "layer_add_raster",
+                "terrain_lab_hydrology_overlay_fill",
+                "terrain_lab_hydrology_overlay_fill_description");
             CreateActionButton(
                 secondOverlayRow,
                 LM.Get("terrain_lab_hydrology_overlay_watersheds"),
                 delegate { ShowHydrologyOverlay(TerrainHydrologyOverlayMode.Watersheds); },
                 94f,
-                28f);
+                28f,
+                "layer_group",
+                "terrain_lab_hydrology_overlay_watersheds",
+                "terrain_lab_hydrology_overlay_watersheds_description");
 
             Transform thirdOverlayRow = CreateActionRow(
                 _moduleContent,
@@ -2258,14 +2435,19 @@ namespace TerrainLab
                 LM.Get("terrain_lab_hydrology_overlay_stream_order"),
                 delegate { ShowHydrologyOverlay(TerrainHydrologyOverlayMode.StreamOrder); },
                 94f,
-                28f);
+                28f,
+                "layer_stack",
+                "terrain_lab_hydrology_overlay_stream_order",
+                "terrain_lab_hydrology_overlay_stream_order_description");
             CreateActionButton(
                 thirdOverlayRow,
                 LM.Get("terrain_lab_hydrology_overlay_hide"),
                 HideHydrologyOverlay,
                 94f,
                 28f,
-                "visibility_off");
+                "visibility_off",
+                "terrain_lab_hydrology_overlay_hide",
+                "terrain_lab_hydrology_overlay_hide_description");
         }
 
         private void RunHydrology()
@@ -2392,6 +2574,7 @@ namespace TerrainLab
                 return;
             }
 
+            _elevationOverlay?.Clear();
             _reliefOverlay?.Clear();
             _erosionOverlay?.Clear();
             _hydrologyOverlay.Show(mode, state, result);
@@ -2443,7 +2626,9 @@ namespace TerrainLab
                     CancelErosion,
                     194f,
                     28f,
-                    "ui/Icons/iconPause");
+                    "ui/Icons/iconPause",
+                    "terrain_lab_erosion_cancel",
+                    "terrain_lab_erosion_cancel_description");
                 return;
             }
 
@@ -2527,7 +2712,11 @@ namespace TerrainLab
                 RunErosion,
                 194f,
                 28f,
-                "ui/Icons/iconPlay");
+                "ui/Icons/iconPlay",
+                resultCurrent
+                    ? "terrain_lab_erosion_recompute"
+                    : "terrain_lab_erosion_run",
+                "terrain_lab_erosion_run_description");
 
             if (!resultCurrent)
             {
@@ -2544,13 +2733,19 @@ namespace TerrainLab
                 delegate { ShowErosionOverlay(TerrainErosionOverlayMode.NetChange); },
                 94f,
                 28f,
-                "visibility_on");
+                "visibility_on",
+                "terrain_lab_erosion_overlay_net",
+                "terrain_lab_erosion_overlay_net_description");
             CreateActionButton(
                 firstRow,
                 LM.Get("terrain_lab_erosion_overlay_cut"),
                 delegate { ShowErosionOverlay(TerrainErosionOverlayMode.Erosion); },
                 94f,
-                28f);
+                28f,
+                "elevation_raise",
+                "terrain_lab_erosion_overlay_cut",
+                "terrain_lab_erosion_overlay_cut_description",
+                180f);
             Transform secondRow = CreateActionRow(
                 _moduleContent,
                 "TerrainLabErosionOverlaysSecondary");
@@ -2559,13 +2754,19 @@ namespace TerrainLab
                 LM.Get("terrain_lab_erosion_overlay_fill"),
                 delegate { ShowErosionOverlay(TerrainErosionOverlayMode.Deposition); },
                 94f,
-                28f);
+                28f,
+                "elevation_raise",
+                "terrain_lab_erosion_overlay_fill",
+                "terrain_lab_erosion_overlay_fill_description");
             CreateActionButton(
                 secondRow,
                 LM.Get("terrain_lab_erosion_overlay_result"),
                 delegate { ShowErosionOverlay(TerrainErosionOverlayMode.ResultElevation); },
                 94f,
-                28f);
+                28f,
+                "layer_properties",
+                "terrain_lab_erosion_overlay_result",
+                "terrain_lab_erosion_overlay_result_description");
             Transform actionRow = CreateActionRow(
                 _moduleContent,
                 "TerrainLabErosionResultActions");
@@ -2574,14 +2775,19 @@ namespace TerrainLab
                 LM.Get("terrain_lab_erosion_apply"),
                 ApplyErosion,
                 94f,
-                28f);
+                28f,
+                "project_validate",
+                "terrain_lab_erosion_apply",
+                "terrain_lab_erosion_apply_description");
             CreateActionButton(
                 actionRow,
                 LM.Get("terrain_lab_erosion_overlay_hide"),
                 HideErosionOverlay,
                 94f,
                 28f,
-                "visibility_off");
+                "visibility_off",
+                "terrain_lab_erosion_overlay_hide",
+                "terrain_lab_erosion_overlay_hide_description");
         }
 
         private void RunErosion()
@@ -2697,6 +2903,7 @@ namespace TerrainLab
                 return;
             }
 
+            _elevationOverlay?.Clear();
             _reliefOverlay?.Clear();
             _hydrologyOverlay?.Clear();
             _erosionOverlay.Show(mode, state, result);
@@ -2777,7 +2984,8 @@ namespace TerrainLab
             TerrainEditorTool tool,
             string localizationKey,
             float width,
-            string iconId = null)
+            string iconId = null,
+            float iconRotation = 0f)
         {
             SimpleButton button = CreateActionButton(
                 parent,
@@ -2785,7 +2993,10 @@ namespace TerrainLab
                 delegate { SelectEditorTool(tool); },
                 width,
                 28f,
-                iconId);
+                iconId,
+                localizationKey,
+                GetEditorToolDescriptionLocalizationKey(tool),
+                iconRotation);
             button.Background.color = _editor.Tool == tool
                 ? Color.white
                 : InactiveButton;
@@ -2964,7 +3175,9 @@ namespace TerrainLab
         {
             if (changedCells > 0)
             {
-                HideAllOverlays();
+                _reliefOverlay?.Clear();
+                _hydrologyOverlay?.Clear();
+                _erosionOverlay?.Clear();
             }
 
             SetStatus(
@@ -2973,6 +3186,12 @@ namespace TerrainLab
                     changedCells),
                 false,
                 changedCells > 0);
+        }
+
+        private void HandleElevationChanged(TerrainElevationEdit edit)
+        {
+            TerrainWorldState state = TerrainLabRuntime.Instance?.State;
+            _elevationOverlay?.UpdateCells(state, edit);
         }
 
         private void HandleSurfaceSampled(TerrainSurfaceStamp stamp)
@@ -3032,6 +3251,32 @@ namespace TerrainLab
                     return "terrain_lab_tool_polygonize";
                 default:
                     return "terrain_lab_tool_inspect";
+            }
+        }
+
+        private static string GetEditorToolDescriptionLocalizationKey(
+            TerrainEditorTool tool)
+        {
+            return GetEditorToolLocalizationKey(tool) + "_description";
+        }
+
+        private static string GetToolbarSectionDescriptionLocalizationKey(
+            ToolbarSection section)
+        {
+            switch (section)
+            {
+                case ToolbarSection.Project:
+                    return "terrain_lab_section_project_description";
+                case ToolbarSection.Terrain:
+                    return "terrain_lab_section_terrain_description";
+                case ToolbarSection.Digitizing:
+                    return "terrain_lab_section_digitizing_description";
+                case ToolbarSection.Analysis:
+                    return "terrain_lab_section_analysis_description";
+                case ToolbarSection.Layers:
+                    return "terrain_lab_section_layers_description";
+                default:
+                    return "terrain_lab_toolbar_section_description";
             }
         }
 
@@ -3118,6 +3363,7 @@ namespace TerrainLab
 
         private void HideAllOverlays()
         {
+            _elevationOverlay?.Clear();
             _reliefOverlay?.Clear();
             _hydrologyOverlay?.Clear();
             _erosionOverlay?.Clear();
@@ -3176,14 +3422,18 @@ namespace TerrainLab
                 OpenExchangeDirectory,
                 194f,
                 28f,
-                "project_open");
+                "project_open",
+                "terrain_lab_action_open_exchange",
+                "terrain_lab_action_open_exchange_description");
             CreateActionButton(
                 _moduleContent,
                 LM.Get("terrain_lab_action_open_sync"),
                 OpenSyncDirectory,
                 194f,
                 28f,
-                "sync_qgis");
+                "sync_qgis",
+                "terrain_lab_action_open_sync",
+                "terrain_lab_action_open_sync_description");
         }
 
         private void CreateLayerButton(string layerId, string labelKey)
@@ -3197,10 +3447,30 @@ namespace TerrainLab
                     RebuildModuleContent();
                 },
                 194f,
-                28f);
+                28f,
+                GetLayerIconId(layerId),
+                labelKey,
+                labelKey + "_description");
             button.Background.color = layerId == _selectedLayer
                 ? Color.white
                 : InactiveButton;
+        }
+
+        private static string GetLayerIconId(string layerId)
+        {
+            switch (layerId)
+            {
+                case "elevation":
+                    return "layer_add_raster";
+                case "landform":
+                    return "layer_add_vector";
+                case "material":
+                    return "layer_style";
+                case "vanilla":
+                    return "project_open";
+                default:
+                    return "layer_stack";
+            }
         }
 
         private void SaveProject()
@@ -3422,6 +3692,12 @@ namespace TerrainLab
         private void HandleRuntimeStateChanged()
         {
             TerrainWorldState state = TerrainLabRuntime.Instance?.State;
+            if (_elevationOverlay != null && _elevationOverlay.IsVisible &&
+                !_elevationOverlay.References(state))
+            {
+                _elevationOverlay.Clear();
+            }
+
             if (_reliefOverlay != null &&
                 (state?.Relief == null || !state.Relief.IsCurrent(state)))
             {
@@ -4350,9 +4626,7 @@ namespace TerrainLab
                 badge,
                 delegate { SelectEditorTool(tool); },
                 tooltipNameKey,
-                tool >= TerrainEditorTool.SampleSurface
-                    ? "terrain_lab_toolbar_digitizing_description"
-                    : "terrain_lab_toolbar_edit_description",
+                GetEditorToolDescriptionLocalizationKey(tool),
                 iconRotation);
             _toolbarEditorButtons[tool] = button;
         }
@@ -4373,7 +4647,7 @@ namespace TerrainLab
                 badge,
                 action,
                 tooltipNameKey,
-                "terrain_lab_toolbar_overlay_description",
+                tooltipNameKey + "_description",
                 iconRotation);
             _toolbarOverlayButtons[overlayId] = button;
         }
@@ -4443,16 +4717,29 @@ namespace TerrainLab
             UnityEngine.Events.UnityAction action,
             float width,
             float height,
-            string iconId = null)
+            string iconId,
+            string tooltipNameKey,
+            string tooltipDescriptionKey,
+            float iconRotation = 0f)
         {
             Sprite icon = GetIcon(iconId);
             SimpleButton button = SimpleButton.Instantiate(parent, false);
-            button.Setup(action, icon, text, new Vector2(width, height));
+            button.Setup(
+                action,
+                icon,
+                text,
+                new Vector2(width, height),
+                "tip",
+                new TooltipData
+                {
+                    tip_name = tooltipNameKey,
+                    tip_description = tooltipDescriptionKey
+                });
             button.Text.resizeTextMinSize = 7;
             button.Text.resizeTextMaxSize = 11;
             if (icon != null)
             {
-                ConfigureActionButtonIcon(button, width, height);
+                ConfigureActionButtonIcon(button, width, height, iconRotation);
             }
 
             LayoutElement element = button.GetComponent<LayoutElement>();
@@ -4483,13 +4770,21 @@ namespace TerrainLab
                 : IconResourceRoot + iconId;
             Sprite icon = SpriteTextureLoader.getSprite(resourcePath);
             _iconCache[iconId] = icon;
+            if (icon == null && _missingIconIds.Add(iconId))
+            {
+                Debug.LogWarning(
+                    "[TerrainLab] UI sprite not found: " + resourcePath +
+                    ". A text fallback will be used.");
+            }
+
             return icon;
         }
 
         private static void ConfigureActionButtonIcon(
             SimpleButton button,
             float width,
-            float height)
+            float height,
+            float iconRotation)
         {
             float iconSize = Mathf.Max(14f, height - 8f);
             button.Icon.gameObject.SetActive(true);
@@ -4501,6 +4796,7 @@ namespace TerrainLab
             iconRect.anchorMax = new Vector2(0.5f, 0.5f);
             iconRect.pivot = new Vector2(0.5f, 0.5f);
             iconRect.sizeDelta = new Vector2(iconSize, iconSize);
+            iconRect.localEulerAngles = new Vector3(0f, 0f, iconRotation);
             iconRect.anchoredPosition = new Vector2(
                 -width * 0.5f + 4f + iconSize * 0.5f,
                 0f);
@@ -4613,6 +4909,7 @@ namespace TerrainLab
             if (_editor != null)
             {
                 _editor.EditApplied -= HandleElevationEditApplied;
+                _editor.ElevationChanged -= HandleElevationChanged;
                 _editor.SurfaceSampled -= HandleSurfaceSampled;
                 _editor.OperationFailed -= HandleEditorOperationFailed;
                 _editor.RegionPolygonized -= HandleRegionPolygonized;

@@ -52,6 +52,14 @@ and all raster overlays use `256 x 256` chunks. The internal window now contains
 only project/import details, algorithm parameters, the runtime layer catalog,
 and format/exchange settings; it does not duplicate routine map commands.
 
+The Layers chapter also exposes the authoritative Int16 DEM directly, without
+requiring relief analysis. It renders one point-filtered texture pixel per world
+cell at 61-percent opacity. A Turbo-derived split scale maps elevations below sea
+level through blue/cyan and elevations at or above sea level through yellow/red.
+The negative and positive ranges normalize independently, so a deep ocean does
+not flatten land contrast. NODATA remains transparent. Brush edits and undo/redo
+update only touched `256 x 256` chunks unless an edit expands the display range.
+
 The standalone side button cycles through three levels: off, toolbar only, and
 toolbar plus general settings. Another press from settings closes the complete
 workspace. Closing the settings window with its stock cross performs that same
@@ -68,6 +76,86 @@ GeoTIFF, sync, and module sprites through NML `GameResources`. Analysis jobs
 reuse WorldBox's play/pause sprites. Compact ASCII badges disambiguate grouped
 commands until the remaining purpose-drawn relief, hydrology, and erosion icons
 are delivered; every toolbar control has a localized tooltip.
+
+## Runtime button and tooltip audit
+
+The current top toolbar contains 47 controls. Every one is connected to a real
+handler; there are no visible placeholder or no-op buttons.
+
+| Surface | Count | Implemented behavior |
+|---|---:|---|
+| Side switch | 1 | Cycles off, toolbar, and toolbar plus settings |
+| Critical and chapter row | 7 | Opens settings, saves, and selects one of five chapters |
+| Project chapter | 6 | WBXGEO export/validation, GeoTIFF export, and three sync commands |
+| Terrain chapter | 7 | Five DEM tools plus undo and redo |
+| Digitizing chapter | 8 | Six surface tools, apply selection, and cancel |
+| Analysis chapter | 4 | Relief, hydrology, erosion preview, and explicit erosion apply |
+| Derived-layer chapter | 15 | Direct DEM, four relief, five hydrology, four erosion layers, and hide all |
+
+The live internal window's module selectors, package imports, radius controls,
+and exchange-folder buttons are also connected. Routine edit, run/cancel, and
+overlay commands remain on the top toolbar as intended. Commands that require a
+current result or sampled surface are disabled until their prerequisite exists;
+that is a guarded state, not missing behavior.
+
+Every TerrainLab-created `SimpleButton` now supplies a localized tooltip title
+and a command-specific description. The internal `CreateActionButton` API makes
+both keys mandatory, so a newly added button cannot compile without an explicit
+tooltip. English and Russian locale files have matching key sets. Tooltips state
+what data changes, required input, repeat-click behavior, and whether an action
+is a preview or writes the authoritative DEM.
+
+## Current icon coverage
+
+All live controls have a visible icon, native symbol, or compact fallback badge;
+none is intentionally blank. The install contains 21 custom transparent PNGs.
+WorldBox supplies play, pause, bucket, and native toggle-lamp sprites, while the
+brush-radius buttons deliberately retain the familiar `-` and `+` symbols.
+Missing sprite loads are logged once with their exact resource ID and fall back
+to text rather than producing an empty button.
+
+The following working commands still lack purpose-drawn art and currently reuse
+the nearest icon or an ASCII badge:
+
+| Working area | Purpose-drawn files still wanted |
+|---|---|
+| DEM editing and display | `dem_elevation`, `elevation_set`, `elevation_lower`, `elevation_smooth` |
+| Surface digitizing | `surface_sample`, `surface_line`, `surface_polygon`, `surface_rectangle`, `surface_polygonize`, `selection_apply`, `digitizing_cancel` |
+| Relief layers | `hypsometry`, `slope`, `aspect`, `hillshade` |
+| Hydrology layers | `stream_extract`, `flow_accumulation`, `sink_fill`, `watershed`, `stream_order` |
+| Erosion result | `erosion_net`, `erosion_cut`, `deposition`, `erosion_result`, `erosion_apply` |
+
+The safe-fill control already uses WorldBox's exact bucket metaphor. Analysis
+run/cancel controls intentionally use native play/pause with `R`, `H`, and `E`
+badges. Separate safe-pull and branch-pull sync sprites would be useful polish,
+but their current `P` and `B` badges are complete and unambiguous.
+
+## Functionality not implemented yet
+
+These are actual runtime boundaries, not merely missing icons:
+
+1. In-game image loading and workspace watching. The Python converter already
+   provides adaptive terrain classification and direct save output, but it is
+   not invoked from the NML interface.
+2. Optional UMAP embedding. The current adaptive image backend uses deterministic
+   feature-space clustering; the UMAP stage described in `GIS_PIPELINE.md` is
+   still a design target.
+3. Docked layer tree and properties panels, legends, opacity/blend controls,
+   layer styling, custom cursors, and selection/attribute-table workflows.
+4. Persistent OGC Simple Features, vector import/export, geometry editing,
+   buffering, clipping, intersection, and raster-to-vector output.
+5. Real-world CRS assignment, reprojection, GCP georeferencing, raster warping,
+   GeoPackage export, and projection-aware scale/measurement tools.
+6. Advanced DEM tools such as flatten, ramp, sampled elevation, contour
+   generation, raster calculator, and explicit sea-level editing.
+7. Advanced hydrology: MFD flow, sink breaching, editable outlets, lakes,
+   constrained river vectors, water depth/surface, and flood simulation.
+8. Calibrated process modules with rainfall fields, persistent water/sediment,
+   variable erodibility, physical units, process stepping, and reset.
+9. A QGIS plugin or live transport. Version 1.0 implements the documented file
+   protocol only; vector sync and silent conflict policies are not exposed.
+
+The future controls and their art names remain listed in Batches A-D below.
 
 ## Batch A: core command inventory
 

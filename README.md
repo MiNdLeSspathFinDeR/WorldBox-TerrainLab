@@ -23,8 +23,9 @@ project layer for WorldBox.
 3. Direct WorldBox saves: complete `saveN` folders can be created in the game's save directory.
 4. Auto sizing: if only one size parameter is set, the other is calculated from the image ratio.
 5. Configurable: the legacy direct-palette algorithm and custom tile sets remain available.
-6. In-game GIS: editable Int16 DEM, relief derivatives, Priority-Flood/D8,
-   watersheds, Strahler order, deterministic erosion, and chunked overlays.
+6. In-game GIS: editable Int16 DEM, direct translucent Turbo height display,
+   relief derivatives, Priority-Flood/D8, watersheds, Strahler order,
+   deterministic erosion, and chunked overlays.
 7. GIS exchange: strict GeoTIFF export/import with baseline hashes, conflict
    detection, branches, and an append-only change log.
 8. QGIS-style workspace: routine project, DEM, analysis, and overlay commands
