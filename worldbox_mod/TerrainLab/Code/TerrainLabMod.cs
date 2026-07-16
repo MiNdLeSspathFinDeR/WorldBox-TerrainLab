@@ -48,7 +48,7 @@ namespace TerrainLab
                 }
 
                 _ui.Initialize(GetDeclaration(), _editor);
-                LogInfo("GIS window, DEM editor and WBXGEO persistence initialized.");
+                LogInfo("TerrainLab 1.0 GIS runtime initialized.");
             }
             catch (Exception exception)
             {

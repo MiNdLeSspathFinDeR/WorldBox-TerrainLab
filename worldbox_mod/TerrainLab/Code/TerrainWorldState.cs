@@ -45,7 +45,7 @@ namespace TerrainLab
         Smooth
     }
 
-    public sealed class TerrainElevationEdit
+    public sealed class TerrainElevationEdit : ITerrainLabEdit
     {
         internal TerrainElevationEdit(
             string projectId,
@@ -65,6 +65,12 @@ namespace TerrainLab
 
         public int ChangedCellCount => Indices.Length;
 
+        public long EstimatedBytes =>
+            (long)Indices.Length * sizeof(int) +
+            (long)Before.Length * sizeof(short) +
+            (long)After.Length * sizeof(short) +
+            (long)(WorldCacheBefore?.Length ?? 0) * sizeof(int) + 96L;
+
         internal int[] Indices { get; }
 
         internal short[] Before { get; }
@@ -72,12 +78,19 @@ namespace TerrainLab
         internal short[] After { get; }
 
         internal int[] WorldCacheBefore { get; }
+
+        public void Apply(TerrainWorldState state, bool useAfterValues)
+        {
+            state.ApplyElevationEdit(this, useAfterValues);
+        }
     }
 
     public sealed class TerrainWorldState
     {
         private static readonly FieldInfo TilesListField =
             AccessTools.Field(typeof(MapBox), "tiles_list");
+        private static readonly MethodInfo CityPlaceFinderSetDirtyMethod =
+            AccessTools.Method(typeof(CityPlaceFinder), "setDirty");
 
         public string ProjectId { get; private set; }
 
@@ -96,6 +109,14 @@ namespace TerrainLab
         public byte[] Material { get; private set; }
 
         public int CellCount => Elevation?.Length ?? 0;
+
+        public long Revision { get; private set; }
+
+        public TerrainHydrologyResult Hydrology { get; internal set; }
+
+        public TerrainReliefResult Relief { get; internal set; }
+
+        public TerrainErosionResult Erosion { get; internal set; }
 
         public bool IsDirty { get; private set; }
 
@@ -300,6 +321,53 @@ namespace TerrainLab
             return edit;
         }
 
+        public TerrainElevationEdit ApplyElevationGrid(short[] values)
+        {
+            if (values == null || values.Length != CellCount)
+            {
+                throw new ArgumentException(
+                    "Replacement elevation grid does not match the project.",
+                    nameof(values));
+            }
+
+            int changedCount = 0;
+            for (int index = 0; index < values.Length; index++)
+            {
+                if (Elevation[index] != values[index])
+                {
+                    changedCount++;
+                }
+            }
+
+            int[] changedIndices = new int[changedCount];
+            short[] beforeValues = new short[changedCount];
+            short[] afterValues = new short[changedCount];
+            int offset = 0;
+            for (int index = 0; index < values.Length; index++)
+            {
+                short before = Elevation[index];
+                short after = values[index];
+                if (before == after)
+                {
+                    continue;
+                }
+
+                changedIndices[offset] = index;
+                beforeValues[offset] = before;
+                afterValues[offset] = after;
+                offset++;
+            }
+
+            TerrainElevationEdit edit = new TerrainElevationEdit(
+                ProjectId,
+                changedIndices,
+                beforeValues,
+                afterValues,
+                CaptureWorldCache(changedIndices));
+            ApplyElevationEdit(edit, true);
+            return edit;
+        }
+
         public void ApplyElevationEdit(TerrainElevationEdit edit, bool useAfterValues)
         {
             if (edit == null)
@@ -326,9 +394,258 @@ namespace TerrainLab
 
             if (edit.ChangedCellCount > 0)
             {
+                Revision++;
                 IsDirty = true;
                 ApplyElevationEditToWorldCache(edit, source);
             }
+        }
+
+        internal bool TryGetSurfaceStamp(
+            int x,
+            int y,
+            out TerrainSurfaceStamp stamp)
+        {
+            stamp = default(TerrainSurfaceStamp);
+            if (x < 0 || x >= Width || y < 0 || y >= Height ||
+                !MatchesCurrentWorld())
+            {
+                return false;
+            }
+
+            WorldTile[] tiles = GetCurrentTiles();
+            stamp = TerrainSurfaceStamp.Capture(tiles[checked(y * Width + x)]);
+            return true;
+        }
+
+        internal int[] CollectConnectedSurfaceRegion(
+            int x,
+            int y,
+            out TerrainSurfaceStamp source)
+        {
+            if (!TryGetSurfaceStamp(x, y, out source))
+            {
+                return Array.Empty<int>();
+            }
+
+            WorldTile[] tiles = GetCurrentTiles();
+            int startIndex = checked(y * Width + x);
+            TerrainSurfaceStamp regionSource = source;
+            return TerrainDigitizingRaster.CollectConnectedRegion(
+                startIndex,
+                Width,
+                Height,
+                index => TerrainSurfaceStamp.Capture(tiles[index]).Equals(regionSource));
+        }
+
+        internal TerrainSurfaceEdit ApplySurfaceCells(
+            int[] candidateIndices,
+            TerrainSurfaceStamp target)
+        {
+            if (candidateIndices == null)
+            {
+                throw new ArgumentNullException(nameof(candidateIndices));
+            }
+
+            if (!MatchesCurrentWorld())
+            {
+                throw new InvalidOperationException(
+                    "Terrain state does not match the loaded world.");
+            }
+
+            if (!target.TryResolve(out _, out _, out string resolveError))
+            {
+                throw new InvalidOperationException(resolveError);
+            }
+
+            WorldTile[] tiles = GetCurrentTiles();
+            List<int> changed = new List<int>(candidateIndices.Length);
+            List<ushort> beforeCodes = new List<ushort>(candidateIndices.Length);
+            List<TerrainSurfaceStamp> palette = new List<TerrainSurfaceStamp>();
+            Dictionary<TerrainSurfaceStamp, ushort> paletteLookup =
+                new Dictionary<TerrainSurfaceStamp, ushort>();
+            for (int offset = 0; offset < candidateIndices.Length; offset++)
+            {
+                int index = candidateIndices[offset];
+                if (index < 0 || index >= CellCount)
+                {
+                    continue;
+                }
+
+                TerrainSurfaceStamp before = TerrainSurfaceStamp.Capture(tiles[index]);
+                if (before.Equals(target))
+                {
+                    continue;
+                }
+
+                if (!paletteLookup.TryGetValue(before, out ushort code))
+                {
+                    if (palette.Count == ushort.MaxValue)
+                    {
+                        throw new InvalidOperationException(
+                            "Surface edit contains too many distinct source types.");
+                    }
+
+                    code = (ushort)palette.Count;
+                    palette.Add(before);
+                    paletteLookup.Add(before, code);
+                }
+
+                changed.Add(index);
+                beforeCodes.Add(code);
+            }
+
+            int[] indices = changed.Count == candidateIndices.Length
+                ? candidateIndices
+                : changed.ToArray();
+            TerrainSurfaceEdit edit = new TerrainSurfaceEdit(
+                ProjectId,
+                indices,
+                palette.ToArray(),
+                palette.Count <= 1 ? null : beforeCodes.ToArray(),
+                target);
+            ApplySurfaceEdit(edit, true);
+            return edit;
+        }
+
+        internal TerrainSurfaceEdit ApplyUniformSurfaceRegion(
+            int[] indices,
+            TerrainSurfaceStamp before,
+            TerrainSurfaceStamp target)
+        {
+            if (indices == null)
+            {
+                throw new ArgumentNullException(nameof(indices));
+            }
+
+            if (before.Equals(target))
+            {
+                return new TerrainSurfaceEdit(
+                    ProjectId,
+                    Array.Empty<int>(),
+                    Array.Empty<TerrainSurfaceStamp>(),
+                    null,
+                    target);
+            }
+
+            if (!target.TryResolve(out _, out _, out string resolveError))
+            {
+                throw new InvalidOperationException(resolveError);
+            }
+
+            TerrainSurfaceEdit edit = new TerrainSurfaceEdit(
+                ProjectId,
+                indices,
+                new[] { before },
+                null,
+                target);
+            ApplySurfaceEdit(edit, true);
+            return edit;
+        }
+
+        public void ApplySurfaceEdit(TerrainSurfaceEdit edit, bool useAfterValues)
+        {
+            if (edit == null)
+            {
+                throw new ArgumentNullException(nameof(edit));
+            }
+
+            if (!string.Equals(edit.ProjectId, ProjectId, StringComparison.Ordinal))
+            {
+                throw new InvalidOperationException("Surface edit belongs to another project.");
+            }
+
+            if (edit.ChangedCellCount == 0)
+            {
+                return;
+            }
+
+            if (!MatchesCurrentWorld())
+            {
+                throw new InvalidOperationException(
+                    "Terrain state does not match the loaded world.");
+            }
+
+            TileType afterMain = null;
+            TopTileType afterTop = null;
+            TileType[] beforeMain = null;
+            TopTileType[] beforeTop = null;
+            if (useAfterValues)
+            {
+                if (!edit.After.TryResolve(
+                        out afterMain,
+                        out afterTop,
+                        out string resolveError))
+                {
+                    throw new InvalidOperationException(resolveError);
+                }
+            }
+            else
+            {
+                beforeMain = new TileType[edit.BeforePalette.Length];
+                beforeTop = new TopTileType[edit.BeforePalette.Length];
+                for (int paletteIndex = 0;
+                     paletteIndex < edit.BeforePalette.Length;
+                     paletteIndex++)
+                {
+                    if (!edit.BeforePalette[paletteIndex].TryResolve(
+                            out beforeMain[paletteIndex],
+                            out beforeTop[paletteIndex],
+                            out string resolveError,
+                            false))
+                    {
+                        throw new InvalidOperationException(resolveError);
+                    }
+                }
+            }
+
+            WorldTile[] tiles = GetCurrentTiles();
+            bool cityPlacementChanged = false;
+            for (int offset = 0; offset < edit.Indices.Length; offset++)
+            {
+                int index = edit.Indices[offset];
+                if (index < 0 || index >= CellCount)
+                {
+                    throw new InvalidOperationException(
+                        "Surface edit index is outside the project grid.");
+                }
+
+                TerrainSurfaceStamp stamp;
+                TileType mainType;
+                TopTileType topType;
+                if (useAfterValues)
+                {
+                    stamp = edit.After;
+                    mainType = afterMain;
+                    topType = afterTop;
+                }
+                else
+                {
+                    int paletteIndex = edit.BeforeCodes == null
+                        ? 0
+                        : edit.BeforeCodes[offset];
+                    stamp = edit.BeforePalette[paletteIndex];
+                    mainType = beforeMain[paletteIndex];
+                    topType = beforeTop[paletteIndex];
+                }
+
+                cityPlacementChanged |= ApplySurfaceToWorldTile(
+                    tiles[index],
+                    stamp,
+                    mainType,
+                    topType);
+                ClassifyTile(index, tiles[index]);
+            }
+
+            if (cityPlacementChanged)
+            {
+                CityPlaceFinderSetDirtyMethod?.Invoke(
+                    World.world.city_zone_helper.city_place_finder,
+                    null);
+            }
+
+            Revision++;
+            IsDirty = true;
+            World.world.resetRedrawTimer();
         }
 
         public void MarkSaved()
@@ -344,9 +661,17 @@ namespace TerrainLab
             }
 
             WorldTile[] tiles = GetCurrentTiles();
+            bool hydrologySourceChanged = false;
             for (int index = 0; index < tiles.Length; index++)
             {
+                byte previousLandform = Landform[index];
                 ClassifyTile(index, tiles[index]);
+                hydrologySourceChanged |= previousLandform != Landform[index];
+            }
+
+            if (hydrologySourceChanged)
+            {
+                Revision++;
             }
         }
 
@@ -417,7 +742,7 @@ namespace TerrainLab
             return (short)clamped;
         }
 
-        private int[] CaptureWorldCache(List<int> indices)
+        private int[] CaptureWorldCache(IList<int> indices)
         {
             if (!MatchesCurrentWorld())
             {
@@ -456,6 +781,36 @@ namespace TerrainLab
                     tiles[edit.Indices[offset]].Height = edit.WorldCacheBefore[offset];
                 }
             }
+        }
+
+        private static bool ApplySurfaceToWorldTile(
+            WorldTile tile,
+            TerrainSurfaceStamp stamp,
+            TileType mainType,
+            TopTileType topType)
+        {
+            tile.data.frozen = stamp.Frozen;
+            if (tile.hasBuilding())
+            {
+                MapAction.terraformTile(
+                    tile,
+                    mainType,
+                    topType,
+                    TerraformLibrary.nothing);
+                return false;
+            }
+
+            bool wasFarmable = tile.Type.can_be_farm;
+            tile.setTileTypes(mainType, topType, false);
+            bool cityPlacementChanged = wasFarmable != tile.Type.can_be_farm &&
+                                        tile.zone != null && !tile.zone.hasCity();
+            if (tile.burned_stages > 0 && !tile.Type.can_be_set_on_fire)
+            {
+                tile.removeBurn();
+            }
+
+            World.world.setTileDirty(tile);
+            return cityPlacementChanged;
         }
 
         private static TerrainWorldState CreateEmpty(

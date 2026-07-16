@@ -10,8 +10,10 @@ namespace TerrainLab
 {
     public sealed class TerrainLabRuntime : MonoBehaviour
     {
-        private static readonly TerrainModuleRegistry ModuleRegistry =
-            new TerrainModuleRegistry();
+        private static readonly TerrainModuleRegistry ModuleRegistry;
+        private static readonly TerrainReliefService ReliefService;
+        private static readonly TerrainHydrologyModule HydrologyModule;
+        private static readonly TerrainErosionModule ErosionModule;
 
         private static string _pendingLoadDirectory;
 
@@ -21,7 +23,36 @@ namespace TerrainLab
 
         public static TerrainLabRuntime Instance { get; private set; }
 
+        static TerrainLabRuntime()
+        {
+            ModuleRegistry = new TerrainModuleRegistry();
+            ReliefService = new TerrainReliefService();
+            HydrologyModule = new TerrainHydrologyModule();
+            ErosionModule = new TerrainErosionModule();
+            ModuleRegistry.Register(HydrologyModule);
+            ModuleRegistry.Register(ErosionModule);
+        }
+
         public TerrainWorldState State { get; private set; }
+
+        public TerrainHydrologyModule Hydrology => HydrologyModule;
+
+        public TerrainReliefService Relief => ReliefService;
+
+        public TerrainErosionModule Erosion => ErosionModule;
+
+        public bool HasRunningAnalysis =>
+            ReliefService.IsRunning || HydrologyModule.IsRunning || ErosionModule.IsRunning;
+
+        public bool HasUnsavedChanges =>
+            State != null &&
+            (State.IsDirty ||
+             State.Hydrology != null &&
+             State.Hydrology.IsCurrent(State) &&
+             State.Hydrology.IsDirty ||
+             State.Erosion != null &&
+             State.Erosion.IsCurrent(State) &&
+             State.Erosion.IsDirty);
 
         public event Action StateChanged;
 
@@ -49,9 +80,48 @@ namespace TerrainLab
             "TerrainLab",
             "Exchange");
 
+        public string CurrentSyncDirectory => State == null
+            ? null
+            : TerrainFileSync.GetWorkspaceDirectory(ExchangeDirectory, State);
+
         public static void RegisterModule(ITerrainLabPackageModule module)
         {
             ModuleRegistry.Register(module);
+        }
+
+        public bool TryStartReliefAnalysis(out string error)
+        {
+            if (HydrologyModule.IsRunning || ErosionModule.IsRunning)
+            {
+                error = "Another TerrainLab analysis is already running.";
+                return false;
+            }
+
+            return ReliefService.TryStartAnalysis(State, out error);
+        }
+
+        public bool TryStartHydrologyAnalysis(int streamThreshold, out string error)
+        {
+            if (ReliefService.IsRunning || ErosionModule.IsRunning)
+            {
+                error = "Another TerrainLab analysis is already running.";
+                return false;
+            }
+
+            return HydrologyModule.TryStartAnalysis(State, streamThreshold, out error);
+        }
+
+        public bool TryStartErosionAnalysis(
+            TerrainErosionParameters parameters,
+            out string error)
+        {
+            if (ReliefService.IsRunning || HydrologyModule.IsRunning)
+            {
+                error = "Another TerrainLab analysis is already running.";
+                return false;
+            }
+
+            return ErosionModule.TryStartAnalysis(State, parameters, out error);
         }
 
         public void Initialize()
@@ -64,6 +134,22 @@ namespace TerrainLab
             Instance = this;
             AttachWorldLoadedCallback();
             _initialized = true;
+        }
+
+        private void Update()
+        {
+            bool changed = false;
+            if (_initialized)
+            {
+                changed |= ReliefService.Poll(State);
+                changed |= HydrologyModule.Poll(State);
+                changed |= ErosionModule.Poll(State);
+            }
+
+            if (changed)
+            {
+                NotifyStateChanged();
+            }
         }
 
         public static void CaptureLoadDirectory(string path)
@@ -115,6 +201,8 @@ namespace TerrainLab
 
                 WbxGeoPackage.Save(directory, State, savedMap, ModuleRegistry);
                 State.MarkSaved();
+                HydrologyModule.MarkSaved(State);
+                ErosionModule.MarkSaved(State);
                 Debug.Log("[TerrainLab] Saved " + WbxGeoPackage.GetSidecarPath(directory));
             }
             catch (Exception exception)
@@ -226,6 +314,86 @@ namespace TerrainLab
             catch (Exception exception)
             {
                 exportPath = null;
+                error = exception.Message;
+                return false;
+            }
+        }
+
+        public bool TryExportGisLayers(out string exportDirectory, out string error)
+        {
+            exportDirectory = null;
+            error = null;
+            try
+            {
+                if (State == null)
+                {
+                    throw new InvalidOperationException(
+                        "GIS export requires an active TerrainLab project.");
+                }
+
+                exportDirectory = TerrainGisExporter.Export(ExchangeDirectory, State);
+                return true;
+            }
+            catch (Exception exception)
+            {
+                exportDirectory = null;
+                error = exception.Message;
+                return false;
+            }
+        }
+
+        public bool TryPrepareFileSync(out TerrainSyncResult result, out string error)
+        {
+            result = null;
+            error = null;
+            try
+            {
+                if (State == null)
+                {
+                    throw new InvalidOperationException(
+                        "File sync requires an active TerrainLab project.");
+                }
+
+                result = TerrainFileSync.PrepareWorkspace(ExchangeDirectory, State);
+                return true;
+            }
+            catch (Exception exception)
+            {
+                result = null;
+                error = exception.Message;
+                return false;
+            }
+        }
+
+        public bool TryPullFileSync(
+            TerrainSyncConflictPolicy policy,
+            out TerrainSyncResult result,
+            out string error)
+        {
+            result = null;
+            error = null;
+            try
+            {
+                if (State == null)
+                {
+                    throw new InvalidOperationException(
+                        "File sync requires an active TerrainLab project.");
+                }
+
+                ReliefService.Cancel();
+                HydrologyModule.Cancel();
+                ErosionModule.Cancel();
+                result = TerrainFileSync.Pull(ExchangeDirectory, State, policy);
+                if (result.Applied)
+                {
+                    NotifyStateChanged();
+                }
+
+                return true;
+            }
+            catch (Exception exception)
+            {
+                result = null;
                 error = exception.Message;
                 return false;
             }
@@ -357,6 +525,9 @@ namespace TerrainLab
 
         private void HandleWorldLoaded()
         {
+            ReliefService.Cancel();
+            HydrologyModule.Cancel();
+            ErosionModule.Cancel();
             try
             {
                 if (!TerrainMapLimits.TryValidate(MapBox.width, MapBox.height, out string limitError))
@@ -507,6 +678,9 @@ namespace TerrainLab
 
         private void OnDestroy()
         {
+            ReliefService.Cancel();
+            HydrologyModule.Cancel();
+            ErosionModule.Cancel();
             if (_worldLoadedField != null && _worldLoadedCallback != null)
             {
                 Action current = (Action)_worldLoadedField.GetValue(null);

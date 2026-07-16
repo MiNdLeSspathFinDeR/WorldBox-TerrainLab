@@ -20,19 +20,56 @@ against screen edges and can be collapsed independently.
 
 ## Implementation status
 
-Version 0.4 implements the standalone side button and a stock WorldBox project
-window without waiting for custom art. The map view has working save, validate,
-export, exchange-folder, and package-import commands. The relief view adds a
-map inspection cursor, bottom coordinate/elevation status, and editable Int16
-DEM tools for set, raise, lower, and smooth operations. Brush radius, target,
-step, modified state, and a 32-operation undo/redo history are functional.
+Version 1.0.0 implements the standalone side button, an adaptive top GIS
+toolbar, and a stock WorldBox internal window. The toolbar copies the bottom
+WorldBox panel and button sprites, stretches to the logical canvas width, and
+balances commands across as few rows as the current UI scale permits. Its frame
+is vertically flipped for top docking, reaches both canvas edges, and follows
+the actual row count without a redundant status caption. Unflipped, clipped
+copies of the stock frame restore the side ornament up to the top canvas edge.
+The permanent control row uses red buttons for critical menu/save actions and
+gray chapter buttons for Project, Terrain, Digitizing, Analysis, and Layers.
+Selecting a chapter replaces the functional row below it. Functional groups
+retain distinct outline colors and matching flag separators; selection and
+readiness use WorldBox's native `ToggleIcon.spriteON/spriteOFF` lamps, while
+running jobs and the settings level use amber. Re-clicking an active chapter,
+map tool, or derived layer switches it off, matching the base-game power bar.
+Row breaks prefer semantic group boundaries.
+Active tools and overlays are highlighted, unavailable operations are disabled,
+and running jobs switch from play to pause.
 
-The compact icon toolbar, docked layer tree, custom cursors, layer styling, and
-derived relief views remain later interface batches. Their semantic command IDs
-below are unchanged, so icon delivery will not require WBXGEO or runtime API
-changes.
+Surface digitizing includes a gameplay-safe eyedropper, four-connected bucket
+fill, multi-vertex line, filled polygon, rectangle, connected-region
+polygonization, and apply-selection. The eyedropper rejects explosive,
+damaging, spreading, lava, acid, `grey_goo`, TNT, and mine-like surfaces. These
+operations copy vanilla surface type and frozen state but never overwrite the
+independent Int16 DEM.
 
-## Batch A: required for the first usable build
+Hydrology exposes Priority-Flood/D8, streams, accumulation, fill, watersheds,
+and Strahler order. Erosion exposes integer process parameters, exact mass
+diagnostics, four preview layers, and explicit apply. All analysis is cancellable
+and all raster overlays use `256 x 256` chunks. The internal window now contains
+only project/import details, algorithm parameters, the runtime layer catalog,
+and format/exchange settings; it does not duplicate routine map commands.
+
+The standalone side button cycles through three levels: off, toolbar only, and
+toolbar plus general settings. Another press from settings closes the complete
+workspace. Closing the settings window with its stock cross performs that same
+next transition instead of falling back to toolbar-only mode. Three compact
+native lamps below the side button expose the current level.
+
+The docked layer tree, custom cursors, legends, and advanced layer styling remain
+later interface batches. Their semantic command IDs below are unchanged, so
+delivering art will not require WBXGEO or runtime API changes.
+
+The first transparent 64 px draft pack has been audited. TerrainLab loads the
+needed project, exchange, identify, elevation, history, visibility, layer,
+GeoTIFF, sync, and module sprites through NML `GameResources`. Analysis jobs
+reuse WorldBox's play/pause sprites. Compact ASCII badges disambiguate grouped
+commands until the remaining purpose-drawn relief, hydrology, and erosion icons
+are delivered; every toolbar control has a localized tooltip.
+
+## Batch A: core command inventory
 
 ### Project and exchange
 
@@ -95,6 +132,19 @@ changes.
 | `contours` | nested contour lines | Contour view |
 | `slope` | triangle with angle mark | Slope view |
 | `aspect` | hill with compass arrow | Aspect view |
+
+### Surface digitizing
+
+| Asset name | Visual idea | Command |
+|---|---|---|
+| `surface_sample` | eyedropper over one terrain pixel | Save safe surface |
+| `surface_fill` | bucket entering a bounded region | Fill connected surface |
+| `surface_line` | linked vertices over pixels | Draw multi-vertex line |
+| `surface_polygon` | closed nodes over filled cells | Draw filled polygon |
+| `surface_rectangle` | rectangular selection over cells | Draw rectangle |
+| `surface_polygonize` | raster region becoming a boundary | Polygonize region |
+| `selection_apply` | selected boundary with check mark | Apply sampled surface |
+| `digitizing_cancel` | open polyline with cross | Cancel active geometry |
 
 ## Batch B: georeferencing and projection
 
@@ -179,6 +229,7 @@ Confirmed reusable game assets in WorldBox 0.51.2:
 | `lock` | `PrefabLibrary.iconLock` |
 | `process_run` | `ui/Icons/iconPlay` |
 | `process_pause` | `ui/Icons/iconPause` |
+| `surface_fill` | `ui/Icons/iconBucket` |
 | generic close | `ui/Icons/iconClose` |
 | generic warning | `ui/Icons/iconWarning` |
 | brush-size selectors | existing `ui/Icons/brushes/` family |
@@ -199,7 +250,8 @@ before reusing any less exact metaphor.
   UI tinting. Draw a second sprite only when tinting cannot communicate state.
 - File names use lowercase snake case and match the names in this document.
 
-The first custom art delivery is 37 Batch A icons after the confirmed stock
-reuse, plus six brush cursors, all layer badges, the elevation/bathymetry ramps,
-and the status markers. That is enough to build the project shell and DEM editor
-before hydrology assets are ready.
+The next custom-art delivery should prioritize `elevation_set`,
+`elevation_lower`, `elevation_smooth`, `flow_accumulation`, `stream_extract`,
+`sink_fill`, six brush cursors, layer badges, elevation/bathymetry ramps, and
+status markers. The broader Batch A concepts can receive a final hand-cleaned
+24 px pass when their corresponding controls are implemented.

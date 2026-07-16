@@ -3,8 +3,8 @@ TerrainLab combines an adaptive image-to-map converter with an extensible GIS
 project layer for WorldBox.
 
 > [!IMPORTANT]
-> This is an intermediate alpha release. WBXGEO embeds a vanilla `map.wbox`,
-> while normal save directories retain their standalone fallback map.
+> TerrainLab 1.0 keeps WorldBox compatibility first: WBXGEO and scientific
+> layers are additive, while every normal save retains its vanilla `map.wbox`.
 
 ## Table of contents
 - [Key Features](#key-features)
@@ -23,8 +23,20 @@ project layer for WorldBox.
 3. Direct WorldBox saves: complete `saveN` folders can be created in the game's save directory.
 4. Auto sizing: if only one size parameter is set, the other is calculated from the image ratio.
 5. Configurable: the legacy direct-palette algorithm and custom tile sets remain available.
+6. In-game GIS: editable Int16 DEM, relief derivatives, Priority-Flood/D8,
+   watersheds, Strahler order, deterministic erosion, and chunked overlays.
+7. GIS exchange: strict GeoTIFF export/import with baseline hashes, conflict
+   detection, branches, and an append-only change log.
+8. QGIS-style workspace: routine project, DEM, analysis, and overlay commands
+   live in a compact three-row top toolbar; parameters and diagnostics remain in
+   the internal window.
 
-The terrain-analysis stages and planned hydrology/erosion modules are described in [GIS terrain pipeline](docs/GIS_PIPELINE.md). The in-game NML mod stores extended projects in the portable [WBXGEO overlay format](docs/WBXGEO_FORMAT.md), while preserving a normal WorldBox map for users without the mod.
+The implemented terrain-analysis stages are described in
+[GIS terrain pipeline](docs/GIS_PIPELINE.md). The
+in-game NML mod stores extended projects in the portable
+[WBXGEO overlay format](docs/WBXGEO_FORMAT.md), while preserving a normal
+WorldBox map for users without the mod. The QGIS-facing local exchange contract
+is documented in [TerrainLab file sync](docs/FILE_SYNC.md).
 
 ## Installation
 ### PC
@@ -54,10 +66,11 @@ source mod from a repository checkout with:
 worldbox_mod\install.cmd
 ```
 
-The in-game project view saves and validates the WBXGEO sidecar, exports a
-portable package, and imports exchange packages into a free WorldBox save slot.
-The relief view inspects the core layers and provides map-based Int16 DEM tools
-with brush radius, undo/redo, and a coordinate/elevation status strip. See
+The in-game three-row toolbar saves and validates WBXGEO, edits the Int16 DEM,
+runs relief/hydrology/erosion jobs, switches derived map layers, exports GeoTIFF,
+and operates protected file sync. The internal window holds imports, numeric
+parameters, layer diagnostics, and settings. Erosion provides a deterministic,
+exact-mass-balance preview that can be applied as one undoable DEM edit. See
 [TerrainLab in WorldBox](docs/WORLDBOX_MOD.md) for paths and lifecycle details.
 
 ## Usage

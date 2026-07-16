@@ -1,33 +1,58 @@
 # TerrainLab WorldBox mod
 
-NML mod that adds a transparent side button around the TerrainLab icon. The
-button opens a window cloned from WorldBox's `windows/empty` prefab. The
-project view saves, validates, exports, and imports WBXGEO packages. The relief
-view inspects all core layers and edits the independent Int16 elevation grid.
-Hydrology and erosion remain reserved module slots.
+TerrainLab 1.0 is an NML source mod that adds an in-game GIS workspace without
+replacing WorldBox's normal save format. Its standalone transparent side icon
+opens an adaptive map toolbar styled from WorldBox's bottom panel and a stock
+internal window. Routine map commands stay in the toolbar, while project/import
+details, numeric parameters, layer diagnostics, and settings stay in the
+window. Custom GIS data is stored in an adjacent WBXGEO project and a vanilla
+`map.wbox` remains available as the fallback.
 
-The source mod is installed into `<WorldBox>/Mods/TerrainLab`. NML compiles the
-files under `Code` when the game starts.
+The source mod installs to `<WorldBox>/Mods/TerrainLab`. NML compiles the files
+under `Code` when the game starts.
 
-Version 0.4 exposes WBXGEO persistence and the first DEM editor through the game UI:
+## Implemented 1.0 surface
 
-- the vanilla `map.wbox` remains the fallback save;
-- `terrainlab.wbxgeo` embeds that save and the authoritative GIS arrays;
-- elevation is signed Int16 with `9999` reserved as `NODATA`;
-- map size is limited by total cell count, not aspect ratio;
-- optional module payloads have isolated namespaces and survive round trips;
-- exports are written to `<WorldBox persistent data>/TerrainLab/Exchange`;
-- imports are validated and atomically installed into the first free `saveN`.
-- inspect, set, raise, lower, and smooth tools operate directly over the map;
-- the bottom strip reports cell coordinates, elevation, CRS, and budget usage;
-- elevation edits have a 32-operation undo/redo history and preserve vanilla
-  terrain morphotypes.
+- signed Int16 elevation with reserved `NODATA=9999`, independent from vanilla
+  terrain morphotypes;
+- inspect, set, raise, lower, smooth, brush radius, and 32-operation undo/redo;
+- gameplay-safe surface sampling, four-connected fill, line, polygon,
+  rectangle, connected-region polygonization, and apply-selection;
+- Horn 3 x 3 slope, aspect, hillshade, ruggedness, and hypsometric overlays;
+- Priority-Flood, deterministic D8, UInt32 accumulation, stream extraction,
+  stable watershed IDs, and Strahler stream order;
+- deterministic integer hydraulic/thermal transport with exact mass balance,
+  preview overlays, apply, and undo;
+- optional hydrology and erosion payloads in WBXGEO, each bound to source and
+  layer checksums;
+- strict north-first GeoTIFF export and protected Int16 DEM import;
+- local file sync with baseline SHA-256, conflict rejection, branch-and-apply,
+  incoming history, and `changes.jsonl`;
+- a total map budget of 1,884,160 cells with unrestricted aspect ratio;
+- one background scientific job at a time and `256 x 256` overlay chunks;
+- a two-level adaptive GIS toolbar with red critical actions, gray chapter
+  selectors, contextual functional tools, balanced wrapping, colored semantic
+  separators, native WorldBox on/off lamps, repeat-click deselection,
+  availability, progress, cancellation, localized tooltips, a three-level
+  side-button cycle, and a separate internal settings window whose close button
+  advances that cycle to off.
 
-See `docs/WBXGEO_FORMAT.md` for the package contract and
-`docs/TERRAINLAB_UI_ASSETS.md` for the UI art list.
+Exports and sync workspaces are written below
+`<WorldBox persistent data>/TerrainLab/Exchange`. File sync is a local protocol
+in 1.0; a separate QGIS plugin or network transport can build on it later.
 
-Run the package round-trip probe from the repository root:
+Format details:
+
+- `docs/WBXGEO_FORMAT.md`
+- `docs/FILE_SYNC.md`
+- `docs/TERRAINLAB_UI_ASSETS.md`
+
+Run the complete package, algorithm, GeoTIFF, and sync probe from the repository
+root:
 
 ```powershell
 dotnet run --project worldbox_mod/TerrainLab.PackageProbe/TerrainLab.PackageProbe.csproj -c Release
 ```
+
+Append `-- --stress` to run the exact 1,884,160-cell relief, hydrology, and
+erosion acceptance case.

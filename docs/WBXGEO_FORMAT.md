@@ -29,8 +29,18 @@ terrainlab.wbxgeo
 |   |-- landform.u8
 |   `-- material.u8
 `-- modules/
-    |-- hydrology/...        future
-    |-- erosion/...          future
+    |-- hydrology/
+    |   |-- analysis.json
+    |   |-- filled_elevation.i16
+    |   |-- flow_direction.u8
+    |   |-- flow_accumulation.u32
+    |   |-- streams.u8
+    |   |-- watersheds.u32
+    |   `-- stream_order.u8
+    |-- erosion.hydraulic/
+    |   |-- analysis.json
+    |   |-- result_elevation.i16
+    |   `-- net_change.i32
     `-- export.projection/... future
 ```
 
@@ -184,7 +194,7 @@ Unknown optional modules and their ZIP entries are copied unchanged when the
 project is saved. Unknown required modules make the extended project
 unavailable, but the embedded or adjacent vanilla map remains recoverable.
 
-Planned first-party module IDs:
+First-party and reserved module IDs:
 
 ```text
 hydrology
@@ -195,6 +205,53 @@ export.projection
 georeference
 qgis.sync
 ```
+
+### Hydrology module
+
+TerrainLab 1.0 implements optional module `hydrology` schema `1.1.0`. Its
+`analysis.json` records the `priority-flood-d8` algorithm version, source grid
+SHA-256, threshold, timestamp, dimensions, and diagnostics. A ready result adds:
+
+| Layer | Storage | NODATA | Meaning |
+|---|---|---:|---|
+| `hydrology.filled_elevation` | Int16 | `9999` | Non-destructive Priority-Flood surface |
+| `hydrology.flow_direction` | UInt8 | `255` | D8 receiver: E, NE, N, NW, W, SW, S, SE = 0..7 |
+| `hydrology.flow_accumulation` | UInt32 | `0` | Contributing cells including the current cell |
+| `hydrology.streams` | UInt8 | `255` | `1` stream, `0` valid non-stream cell |
+| `hydrology.watersheds` | UInt32 | `0` | Stable outlet-based watershed ID |
+| `hydrology.stream_order` | UInt8 | `255` | Strahler order on stream cells, `0` off-stream |
+
+The source checksum covers little-endian elevation plus the landform grid.
+TerrainLab ignores an optional hydrology payload when that checksum, dimensions,
+layer lengths, or per-layer checksums do not match. A stale or uncomputed module
+keeps only `analysis.json`; it never modifies the authoritative DEM during save.
+
+Readers migrate valid hydrology schema `1.0.x` payloads by deriving watersheds
+and stream order from the stored D8 graph. Invalid optional data is discarded as
+one module; it does not invalidate the core project.
+
+### Erosion module
+
+TerrainLab 1.0 implements optional module `erosion.hydraulic` schema `1.0.0`.
+Its `analysis.json` records the `fixed-d8-mass-transfer` algorithm, parameters,
+source SHA-256, dimensions, timestamps, and exact mass diagnostics.
+
+| Layer | Storage | NODATA | Meaning |
+|---|---|---:|---|
+| `erosion.result_elevation` | Int16 | `9999` | Preview DEM after integer transport |
+| `erosion.net_change` | Int32 | `-2147483648` | Result minus source elevation |
+
+The source checksum binds elevation and landform to the D8 algorithm version.
+The loader verifies every cell (`result - source = net change`), NODATA masks,
+checksums, dimensions, and zero initial/final mass difference. Loading a valid
+preview never applies it to the authoritative DEM automatically.
+
+## External GIS exchange
+
+GeoTIFF exports and file-sync state are intentionally outside WBXGEO. This keeps
+the portable game project independent from transient QGIS working files. See
+[TerrainLab file sync](FILE_SYNC.md) for the strict raster profile, baseline
+hashes, conflict policies, branch files, and change log.
 
 ## Save and load lifecycle
 

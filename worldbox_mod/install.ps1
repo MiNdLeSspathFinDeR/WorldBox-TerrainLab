@@ -29,12 +29,15 @@ New-Item -ItemType Directory -Force -Path $modTarget | Out-Null
 Copy-Item -LiteralPath (Join-Path $modSource "mod.json") -Destination $modTarget -Force
 Copy-Item -LiteralPath (Join-Path $modSource "icon.png") -Destination $modTarget -Force
 
-foreach ($directoryName in @("Code", "Locales")) {
+foreach ($directoryName in @("Code", "Locales", "GameResources")) {
     $sourceDirectory = Join-Path $modSource $directoryName
     $targetDirectory = Join-Path $modTarget $directoryName
     New-Item -ItemType Directory -Force -Path $targetDirectory | Out-Null
-    Get-ChildItem -LiteralPath $sourceDirectory -File | ForEach-Object {
-        Copy-Item -LiteralPath $_.FullName -Destination $targetDirectory -Force
+    Get-ChildItem -LiteralPath $sourceDirectory -File -Recurse | ForEach-Object {
+        $relativePath = $_.FullName.Substring($sourceDirectory.Length + 1)
+        $targetPath = Join-Path $targetDirectory $relativePath
+        New-Item -ItemType Directory -Force -Path (Split-Path $targetPath) | Out-Null
+        Copy-Item -LiteralPath $_.FullName -Destination $targetPath -Force
     }
 }
 

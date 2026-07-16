@@ -243,13 +243,23 @@ namespace TerrainLab
 
         public T ReadJson<T>(string relativePath)
         {
-            using (Stream stream = OpenEntry(relativePath))
+            string normalized = TerrainModuleWriteContext.NormalizeRelativePath(relativePath);
+            ZipArchiveEntry entry = _archive.GetEntry(_prefix + normalized);
+            if (entry == null)
             {
-                if (stream == null)
-                {
-                    throw new FileNotFoundException("Module package entry was not found.", relativePath);
-                }
+                throw new FileNotFoundException(
+                    "Module package entry was not found.",
+                    relativePath);
+            }
 
+            if (entry.Length > 1024 * 1024)
+            {
+                throw new InvalidDataException(
+                    "Module JSON metadata is unexpectedly large: " + relativePath);
+            }
+
+            using (Stream stream = entry.Open())
+            {
                 using (StreamReader reader = new StreamReader(stream, Encoding.UTF8, true, 4096, false))
                 using (JsonTextReader jsonReader = new JsonTextReader(reader))
                 {
