@@ -32,6 +32,8 @@ namespace TerrainLab
         private float _nextTickTime;
         private float _nextClimateTime;
 
+        public event Action<IReadOnlyList<int>> CellsChanged;
+
         public string LastError { get; private set; }
 
         public bool Enabled => _state?.WaterDynamics?.Enabled == true;
@@ -99,6 +101,7 @@ namespace TerrainLab
             {
                 _state = state;
                 ReconcileWaterSurface(state, changedIndices);
+                NotifyCellsChanged(changedIndices);
                 if (!Enabled)
                 {
                     _tiles = null;
@@ -157,6 +160,8 @@ namespace TerrainLab
                 {
                     ResetRuntime(keepState: true);
                 }
+
+                NotifyCellsChanged(null);
 
                 return true;
             }
@@ -366,6 +371,7 @@ namespace TerrainLab
                     _state.WaterDynamics.ManagedCellCount =
                         _simulation.ManagedCellCount;
                     _state.WaterDynamics.IsDirty = true;
+                    NotifyCellsChanged(new[] { index });
                 }
 
                 return;
@@ -407,9 +413,15 @@ namespace TerrainLab
             {
                 EnsureSimulation();
                 ProcessPaintedWater();
-                bool changed = ProcessClimate();
+                bool climateChanged = ProcessClimate();
+                bool changed = climateChanged;
                 if (Time.unscaledTime < _nextTickTime || _simulation.LimitReached)
                 {
+                    if (climateChanged)
+                    {
+                        NotifyCellsChanged(null);
+                    }
+
                     return changed;
                 }
 
@@ -417,13 +429,41 @@ namespace TerrainLab
                 IReadOnlyList<TerrainWaterCellChange> changes = _simulation.Step(
                     state.WaterDynamics.Parameters.CellsPerTick,
                     CanFloodCell);
-                changed |= ApplyRecharge(_simulation.RechargedCells);
+                IReadOnlyList<int> rechargedCells = _simulation.RechargedCells;
+                bool recharged = ApplyRecharge(rechargedCells);
+                changed |= recharged;
                 if (changes.Count == 0)
                 {
+                    if (climateChanged)
+                    {
+                        NotifyCellsChanged(null);
+                    }
+                    else if (recharged)
+                    {
+                        NotifyCellsChanged(rechargedCells);
+                    }
+
                     return changed;
                 }
 
                 ApplyChanges(changes);
+                if (climateChanged)
+                {
+                    NotifyCellsChanged(null);
+                }
+                else if (recharged)
+                {
+                    List<int> combined = new List<int>(
+                        changes.Count + rechargedCells.Count);
+                    combined.AddRange(changes.Select(item => item.Index));
+                    combined.AddRange(rechargedCells);
+                    NotifyCellsChanged(combined);
+                }
+                else
+                {
+                    NotifyCellsChanged(changes.Select(item => item.Index).ToArray());
+                }
+
                 return true;
             }
             catch (Exception exception)
@@ -713,6 +753,19 @@ namespace TerrainLab
                 consumed);
             water.IsDirty = true;
             _routingRevision = _state.Revision;
+        }
+
+        private void NotifyCellsChanged(IReadOnlyList<int> indices)
+        {
+            try
+            {
+                CellsChanged?.Invoke(indices);
+            }
+            catch (Exception exception)
+            {
+                Debug.LogError(
+                    "[TerrainLab] Water overlay listener failed: " + exception);
+            }
         }
 
         private bool ApplyRecharge(IReadOnlyList<int> rechargedCells)

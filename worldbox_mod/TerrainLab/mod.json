@@ -1,7 +1,7 @@
 {
   "name": "TerrainLab",
   "author": "Vlad",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "description": "GIS relief, hydrology, erosion, GeoTIFF exchange, and vanilla WorldBox fallback.",
   "iconPath": "icon.png",
   "GUID": "Vlad.TerrainLab",

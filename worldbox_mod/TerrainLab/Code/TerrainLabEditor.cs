@@ -12,6 +12,7 @@ namespace TerrainLab
         RaiseElevation,
         LowerElevation,
         SmoothElevation,
+        RampElevation,
         SampleSurface,
         FloodFillSurface,
         DrawLineSurface,
@@ -58,6 +59,8 @@ namespace TerrainLab
         public event Action<string, string> OperationFailed;
 
         public event Action<int> RegionPolygonized;
+
+        public event Action<short> RampStarted;
 
         public TerrainEditorTool Tool { get; private set; } = TerrainEditorTool.None;
 
@@ -186,6 +189,8 @@ namespace TerrainLab
                 ElevationChanged?.Invoke(elevationEdit);
             }
 
+            EditApplied?.Invoke(changedCells);
+
             return true;
         }
 
@@ -210,6 +215,8 @@ namespace TerrainLab
             {
                 ElevationChanged?.Invoke(elevationEdit);
             }
+
+            EditApplied?.Invoke(changedCells);
 
             return true;
         }
@@ -321,6 +328,14 @@ namespace TerrainLab
             }
 
             if (Input.GetMouseButtonDown(1) &&
+                Tool == TerrainEditorTool.RampElevation &&
+                _digitizingVertices.Count > 0)
+            {
+                CancelDigitizing();
+                return;
+            }
+
+            if (Input.GetMouseButtonDown(1) &&
                 (Tool == TerrainEditorTool.DrawLineSurface ||
                  Tool == TerrainEditorTool.DrawPolygonSurface) &&
                 _digitizingVertices.Count > 0)
@@ -352,6 +367,9 @@ namespace TerrainLab
                     break;
                 case TerrainEditorTool.SmoothElevation:
                     ApplyElevationTool(centerTile, TerrainElevationOperation.Smooth);
+                    break;
+                case TerrainEditorTool.RampElevation:
+                    AddElevationRampPoint(centerTile);
                     break;
                 case TerrainEditorTool.SampleSurface:
                     SampleSurface(centerTile);
@@ -412,6 +430,53 @@ namespace TerrainLab
             }
 
             SurfaceSampled?.Invoke(stamp);
+        }
+
+        private void AddElevationRampPoint(WorldTile tile)
+        {
+            TerrainGridPoint point = new TerrainGridPoint(tile.x, tile.y);
+            if (_digitizingVertices.Count == 0)
+            {
+                if (!_historyState.TryGetElevation(
+                        tile.x,
+                        tile.y,
+                        out short startElevation) ||
+                    startElevation == TerrainElevationEncoding.NoData)
+                {
+                    RaiseFailure("terrain_lab_error_ramp_nodata", null);
+                    return;
+                }
+
+                _digitizingVertices.Add(point);
+                RampStarted?.Invoke(startElevation);
+                return;
+            }
+
+            TerrainGridPoint start = _digitizingVertices[0];
+            _digitizingVertices.Clear();
+            SetDigitizingVisible(false);
+            try
+            {
+                TerrainElevationEdit edit = _historyState.ApplyElevationRamp(
+                    start.X,
+                    start.Y,
+                    point.X,
+                    point.Y,
+                    BrushRadius,
+                    TargetElevation);
+                if (edit.ChangedCellCount > 0)
+                {
+                    RecordAppliedEdit(edit);
+                }
+                else
+                {
+                    EditApplied?.Invoke(0);
+                }
+            }
+            catch (Exception exception)
+            {
+                RaiseFailure("terrain_lab_error_ramp_operation", exception.Message);
+            }
         }
 
         private void FloodFillSurface(WorldTile tile)
@@ -702,6 +767,7 @@ namespace TerrainLab
                               Tool == TerrainEditorTool.RaiseElevation ||
                               Tool == TerrainEditorTool.LowerElevation ||
                               Tool == TerrainEditorTool.SmoothElevation ||
+                              Tool == TerrainEditorTool.RampElevation ||
                               Tool == TerrainEditorTool.DrawLineSurface;
             float radius = usesRadius ? BrushRadius + 0.5f : 0.5f;
             Vector3 center = new Vector3(tile.x, tile.y, -1f);
@@ -724,7 +790,8 @@ namespace TerrainLab
             if (!_interactionEnabled || _digitizingVertices.Count == 0 ||
                 (Tool != TerrainEditorTool.DrawLineSurface &&
                  Tool != TerrainEditorTool.DrawPolygonSurface &&
-                 Tool != TerrainEditorTool.DrawRectangleSurface))
+                 Tool != TerrainEditorTool.DrawRectangleSurface &&
+                 Tool != TerrainEditorTool.RampElevation))
             {
                 SetDigitizingVisible(false);
                 return;
@@ -843,6 +910,9 @@ namespace TerrainLab
                     break;
                 case TerrainEditorTool.SetElevation:
                     color = new Color(0.95f, 0.9f, 0.42f, 0.95f);
+                    break;
+                case TerrainEditorTool.RampElevation:
+                    color = new Color(0.45f, 0.95f, 0.8f, 0.95f);
                     break;
                 case TerrainEditorTool.SampleSurface:
                     color = new Color(0.42f, 0.92f, 1f, 0.95f);

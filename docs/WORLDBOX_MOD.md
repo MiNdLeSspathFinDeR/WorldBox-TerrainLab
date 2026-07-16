@@ -18,7 +18,7 @@ the local game assemblies and copies only TerrainLab source, locales, metadata,
 and resources. It uses normal `dotnet` and file-copy operations; it does not
 compile temporary PowerShell interop assemblies.
 
-## TerrainLab 1.0 workspace
+## TerrainLab 1.1 workspace
 
 The top toolbar keeps routine commands over the map. It stretches with the
 logical canvas, evenly distributes buttons, and wraps into the minimum balanced
@@ -34,9 +34,8 @@ map tool, or visible derived layer. The frame height shrinks or grows to its row
 count. The internal window is limited to project/import details, numeric
 parameters, layer
 diagnostics, and settings.
-Closing that window leaves the map toolbar active; the standalone side icon
-closes or reopens the complete workspace. The stock window cross advances the
-side-button cycle from settings to off.
+The standalone side icon closes or reopens the complete workspace. The stock
+window cross advances the side-button cycle from settings to off.
 
 ### Map
 
@@ -54,16 +53,19 @@ silent conflict overwrite in the 1.0 UI. See [file sync](FILE_SYNC.md).
 ### Relief
 
 The layer page exposes the authoritative elevation, landform, material, and
-vanilla layers. Toolbar tools inspect, set, raise, lower, and smooth the
-`-20000..9000 m` signed Int16 DEM. Target, step, and radius live in Parameters;
-32-operation undo/redo stays directly on the toolbar.
+vanilla layers. Toolbar tools inspect, set/flatten, raise, lower, smooth, and
+grade the `-20000..9000 m` signed Int16 DEM. The two-click ramp samples its
+start height and interpolates to the configured endpoint across the current
+brush width. Target, step, and radius live in Parameters; 32-operation
+undo/redo stays directly on the toolbar.
 
 `9999` cannot be painted because it is reserved for `NODATA`.
 
 The surface toolbar adds a safe eyedropper, four-connected bucket fill,
 multi-vertex line, filled polygon, rectangle, and connected-region
 polygonization with an explicit apply-selection command. A sampled surface
-contains the vanilla base/top tile type and frozen state; it never copies DEM
+contains the vanilla base/top tile type and frozen state. Sampling also updates
+the DEM target height, while applying the sampled surface never alters DEM
 height. Explosive, damaging, spreading, lava/acid, `grey_goo`, TNT, mine-like,
 and other non-copyable game surfaces are rejected as targets. Undo/redo handles
 both DEM and surface edits through one history capped at 32 entries and 64 MiB.
@@ -71,8 +73,10 @@ both DEM and surface edits through one history capped at 32 entries and 64 MiB.
 The existing WorldBox terrain morphotype stays independent, so a mountain tile
 can carry any analytical height. Horn `3 x 3` analysis derives slope, aspect,
 hillshade, and ruggedness in a cancellable background job. Hypsometry and all
-three display derivatives can be drawn over the game map. Selecting a missing
-or stale derivative starts its calculation and opens it when ready.
+four display derivatives can be drawn over the game map. Core landforms,
+materials, and DEM contours at 250-metre intervals are direct overlays that do
+not require relief analysis. Selecting a missing or stale derivative starts its
+calculation and opens it when ready.
 
 ### Hydrology
 
@@ -83,8 +87,9 @@ Changing only the stream threshold rebuilds streams and order without rerunning
 Priority-Flood.
 
 The view reports outlets, fill depth, accumulation, stream cells, watershed
-count, and maximum order. Streams, accumulation, fill, watersheds, and Strahler
-order have chunked overlays. Any DEM edit marks the analysis stale.
+count, and maximum order. Filled elevation, D8 direction, streams,
+accumulation, fill depth, watersheds, and Strahler order have chunked overlays.
+Any DEM edit marks the analysis stale.
 
 The Analysis toolbar also has a persistent `Live DEM water` toggle. A normal
 water-layer contact receives a finite integer budget and follows the dedicated
@@ -117,6 +122,11 @@ TerrainLab restores the compactly saved pre-water surface. This is a water
 budget extension point for later precipitation, PET, infiltration, and climate
 rasters, not a calibrated climate model. Disabling the toggle stops routing and
 climate updates but leaves valid current WorldBox water visible.
+
+The Layers chapter can display the managed-water mask and UInt8 reserve above
+the world. Routing and recharge update only touched texture cells; the
+30-second evaporation pass refreshes the complete active water layer because it
+may change every managed cell.
 
 ### Erosion
 
@@ -152,8 +162,9 @@ WorldBox writes `map.wbox` first; TerrainLab then writes
 `terrainlab.wbxgeo` beside it by temporary-file replacement. WBXGEO embeds the
 same vanilla map plus core GIS arrays and optional hydrology, live-water, and
 erosion modules.
-Live-water configuration and its managed UInt8 mask use the separate optional
-`hydrology.water_dynamics` module; the mask also exports to GeoTIFF.
+Live-water configuration, its managed UInt8 mask, and its UInt8 store use the
+separate optional `hydrology.water_dynamics` module; both rasters export to
+GeoTIFF.
 Unknown optional module data survives load/save. Invalid optional data is
 dropped without blocking the core project or vanilla map.
 

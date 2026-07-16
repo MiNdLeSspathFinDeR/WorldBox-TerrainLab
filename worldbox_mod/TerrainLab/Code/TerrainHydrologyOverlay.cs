@@ -10,6 +10,8 @@ namespace TerrainLab
         Streams,
         Accumulation,
         FillDepth,
+        FilledElevation,
+        FlowDirection,
         Watersheds,
         StreamOrder
     }
@@ -203,6 +205,16 @@ namespace TerrainLab
                         new Color32(225, 55, 45, 215),
                         fill);
 
+                case TerrainHydrologyOverlayMode.FilledElevation:
+                    return TerrainElevationOverlay.GetColor(
+                        result.FilledElevation[index],
+                        state.SeaLevel,
+                        TerrainElevationEncoding.Minimum,
+                        TerrainElevationEncoding.Maximum);
+
+                case TerrainHydrologyOverlayMode.FlowDirection:
+                    return GetFlowDirectionColor(result.FlowDirection[index]);
+
                 case TerrainHydrologyOverlayMode.Watersheds:
                     uint watershed = result.Watershed[index];
                     if (watershed == 0)
@@ -243,6 +255,18 @@ namespace TerrainLab
                 default:
                     return new Color32(0, 0, 0, 0);
             }
+        }
+
+        public static Color32 GetFlowDirectionColor(byte value)
+        {
+            if (value == byte.MaxValue || value > (byte)TerrainFlowDirection.SouthEast)
+            {
+                return new Color32(0, 0, 0, 0);
+            }
+
+            Color color = Color.HSVToRGB(value / 8f, 0.78f, 0.98f, false);
+            color.a = 0.72f;
+            return color;
         }
 
         private static float LogRatio(uint value, uint maximum)

@@ -53,6 +53,7 @@ internal static class Program
             ValidateDigitizingRaster();
             ValidateEarthElevationModel();
             ValidateElevationPalette();
+            ValidateDataOverlayPalettes();
             ValidateReliefAlgorithm();
             ValidateHydrologyAlgorithm();
             ValidateWaterDynamicsAlgorithm();
@@ -197,6 +198,71 @@ internal static class Program
                 TerrainElevationEncoding.NoData
             }),
             "Legacy WorldBox height-cache values were not migrated to metre DEM.");
+    }
+
+    private static void ValidateDataOverlayPalettes()
+    {
+        Color32 plain = TerrainDataOverlay.GetLandformColor(
+            (byte)TerrainLandform.Plain);
+        Color32 channel = TerrainDataOverlay.GetLandformColor(
+            (byte)TerrainLandform.Channel);
+        Color32 soil = TerrainDataOverlay.GetMaterialColor(
+            (byte)TerrainMaterial.Soil);
+        Color32 ice = TerrainDataOverlay.GetMaterialColor(
+            (byte)TerrainMaterial.Ice);
+        Assert(
+            plain.a > 0 && channel.a > 0 &&
+            (plain.r != channel.r || plain.g != channel.g || plain.b != channel.b),
+            "Landform overlay does not separate semantic classes.");
+        Assert(
+            soil.a > 0 && ice.a > 0 &&
+            (soil.r != ice.r || soil.g != ice.g || soil.b != ice.b),
+            "Material overlay does not separate semantic classes.");
+
+        Assert(
+            TerrainDataOverlay.GetManagedWaterColor(0).a == 0 &&
+            TerrainDataOverlay.GetManagedWaterColor(1).a > 0,
+            "Managed-water mask palette is incorrect.");
+        Color32 shallowStorage = TerrainDataOverlay.GetWaterStorageColor(5);
+        Color32 deepStorage = TerrainDataOverlay.GetWaterStorageColor(255);
+        Assert(
+            TerrainDataOverlay.GetWaterStorageColor(0).a == 0 &&
+            shallowStorage.a > 0 && deepStorage.a > shallowStorage.a &&
+            (shallowStorage.r != deepStorage.r ||
+             shallowStorage.g != deepStorage.g ||
+             shallowStorage.b != deepStorage.b),
+            "Water-storage palette does not preserve zero and depth contrast.");
+
+        Color32 seaContour = TerrainDataOverlay.GetContourColor(
+            0,
+            0,
+            2,
+            1,
+            new short[] { -1, 0 });
+        Color32 flatContour = TerrainDataOverlay.GetContourColor(
+            0,
+            0,
+            2,
+            1,
+            new short[] { 100, 120 });
+        Assert(
+            seaContour.a > 0 && seaContour.b > seaContour.r &&
+            flatContour.a == 0,
+            "DEM contour classification is incorrect.");
+
+        Assert(
+            TerrainReliefOverlay.GetRuggednessColor(0, 100).a == 0 &&
+            TerrainReliefOverlay.GetRuggednessColor(100, 100).a > 0,
+            "Ruggedness palette is incorrect.");
+        Color32 east = TerrainHydrologyOverlay.GetFlowDirectionColor(
+            (byte)TerrainFlowDirection.East);
+        Color32 south = TerrainHydrologyOverlay.GetFlowDirectionColor(
+            (byte)TerrainFlowDirection.South);
+        Assert(
+            TerrainHydrologyOverlay.GetFlowDirectionColor(byte.MaxValue).a == 0 &&
+            east.a > 0 && south.a > 0 &&
+            (east.r != south.r || east.g != south.g || east.b != south.b),
+            "D8 direction palette is incorrect.");
     }
 
     private static void ValidateEarthElevationModel()
@@ -1748,6 +1814,44 @@ internal static class Program
         }
 
         Assert(rangeRejected, "Elevation grid accepted a value above 9000 metres.");
+
+        int rampEndX = Math.Min(4, state.Width - 1);
+        int rampY = Math.Min(1, state.Height - 1);
+        state.ApplyElevationBrush(
+            0,
+            rampY,
+            0,
+            TerrainElevationOperation.Set,
+            0,
+            1);
+        state.ApplyElevationBrush(
+            rampEndX,
+            rampY,
+            0,
+            TerrainElevationOperation.Set,
+            -500,
+            1);
+        short rampEndpointBefore = state.Elevation[
+            rampY * state.Width + rampEndX];
+        TerrainElevationEdit ramp = state.ApplyElevationRamp(
+            0,
+            rampY,
+            rampEndX,
+            rampY,
+            0,
+            1000);
+        int rampMidX = rampEndX / 2;
+        short expectedMidpoint = (short)Math.Round(
+            1000.0 * rampMidX / rampEndX);
+        Assert(
+            ramp.ChangedCellCount > 0 &&
+            state.Elevation[rampY * state.Width + rampEndX] == 1000 &&
+            state.Elevation[rampY * state.Width + rampMidX] == expectedMidpoint,
+            "DEM ramp did not interpolate start and target elevations.");
+        state.ApplyElevationEdit(ramp, false);
+        Assert(
+            state.Elevation[rampY * state.Width + rampEndX] == rampEndpointBefore,
+            "DEM ramp undo did not restore the endpoint.");
 
         state.ApplyElevationBrush(
             0,

@@ -1,6 +1,6 @@
 # TerrainLab WorldBox mod
 
-TerrainLab 1.0 is an NML source mod that adds an in-game GIS workspace without
+TerrainLab 1.1 is an NML source mod that adds an in-game GIS workspace without
 replacing WorldBox's normal save format. Its standalone transparent side icon
 opens an adaptive map toolbar styled from WorldBox's bottom panel and a stock
 internal window. Routine map commands stay in the toolbar, while project/import
@@ -11,7 +11,7 @@ window. Custom GIS data is stored in an adjacent WBXGEO project and a vanilla
 The source mod installs to `<WorldBox>/Mods/TerrainLab`. NML compiles the files
 under `Code` when the game starts.
 
-## Implemented 1.0 surface
+## Implemented 1.1 surface
 
 - signed Int16 elevation in `-20000..9000 m`, sea level `0`, and reserved
   `NODATA=9999`, independent from vanilla terrain morphotypes;
@@ -22,10 +22,14 @@ under `Code` when the game starts.
 - a direct translucent DEM overlay with one pixel per world cell and a fixed
   blue/cyan and yellow/red Turbo scale around zero, with incremental
   refresh during edit, undo, and redo;
-- inspect, set, raise, lower, smooth, brush radius, and 32-operation undo/redo;
+- categorical landform/material overlays, 250 m contours with emphasized
+  1000 m and sea-level lines, and per-cell status inspection;
+- inspect, set/flatten, raise, lower, smooth, sampled elevation, a two-point
+  linear DEM ramp, brush radius, and 32-operation undo/redo;
 - gameplay-safe surface sampling, four-connected fill, line, polygon,
   rectangle, connected-region polygonization, and apply-selection;
-- Horn 3 x 3 slope, aspect, hillshade, ruggedness, and hypsometric overlays;
+- Horn 3 x 3 slope, aspect, hillshade, ruggedness, and hypsometric overlays,
+  including a dedicated ruggedness map layer;
 - Priority-Flood, deterministic D8, UInt32 accumulation, stream extraction,
   stable watershed IDs, and Strahler stream order;
 - bounded live-water routing with finite painted sources, native geyser pulse
@@ -33,6 +37,8 @@ under `Code` when the game starts.
   filling, absolute 0/-5/-150-metre water classes, persistent UInt8 storage,
   evaporation/recharge, gameplay-safe dry-surface restoration, and a
   non-bypassable 50-percent valid-cell ceiling;
+- live managed-water-mask and UInt8 storage overlays that update only changed
+  cells during channel growth, recharge, drying, and evaporation;
 - deterministic integer hydraulic/thermal transport with exact mass balance,
   preview overlays, apply, and undo;
 - optional hydrology, live-water, and erosion payloads in WBXGEO, each protected
@@ -43,7 +49,8 @@ under `Code` when the game starts.
 - a total map budget of 1,884,160 cells with unrestricted aspect ratio;
 - one background scientific job at a time and `256 x 256` overlay chunks;
 - derivative buttons that automatically calculate missing relief, hydrology,
-  and erosion prerequisites before showing the requested world-layer overlay;
+  and erosion prerequisites before showing all stored derivatives, including
+  filled elevation and categorical D8 direction;
 - a two-level adaptive GIS toolbar with red critical actions, gray chapter
   selectors, contextual functional tools, balanced wrapping, colored semantic
   separators, native WorldBox on/off lamps, repeat-click deselection,

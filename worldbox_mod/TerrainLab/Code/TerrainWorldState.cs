@@ -452,6 +452,92 @@ namespace TerrainLab
             return edit;
         }
 
+        public TerrainElevationEdit ApplyElevationRamp(
+            int startX,
+            int startY,
+            int endX,
+            int endY,
+            int radius,
+            short targetElevation)
+        {
+            if (startX < 0 || startX >= Width || startY < 0 || startY >= Height ||
+                endX < 0 || endX >= Width || endY < 0 || endY >= Height)
+            {
+                throw new ArgumentOutOfRangeException(nameof(startX));
+            }
+
+            if (radius < 0 || radius > 64)
+            {
+                throw new ArgumentOutOfRangeException(nameof(radius));
+            }
+
+            if (!TerrainElevationEncoding.IsDataValue(targetElevation))
+            {
+                throw new ArgumentException(
+                    "Elevation must be between -20000 and 9000 metres.",
+                    nameof(targetElevation));
+            }
+
+            short startElevation = Elevation[checked(startY * Width + startX)];
+            if (startElevation == TerrainElevationEncoding.NoData)
+            {
+                throw new InvalidOperationException(
+                    "A DEM ramp cannot start on a NODATA cell.");
+            }
+
+            int[] candidates = TerrainDigitizingRaster.RasterizePolyline(
+                new[]
+                {
+                    new TerrainGridPoint(startX, startY),
+                    new TerrainGridPoint(endX, endY)
+                },
+                Width,
+                Height,
+                radius);
+            double vectorX = endX - startX;
+            double vectorY = endY - startY;
+            double lengthSquared = vectorX * vectorX + vectorY * vectorY;
+            List<int> changedIndices = new List<int>(candidates.Length);
+            List<short> beforeValues = new List<short>(candidates.Length);
+            List<short> afterValues = new List<short>(candidates.Length);
+            for (int offset = 0; offset < candidates.Length; offset++)
+            {
+                int index = candidates[offset];
+                short before = Elevation[index];
+                if (before == TerrainElevationEncoding.NoData)
+                {
+                    continue;
+                }
+
+                int x = index % Width;
+                int y = index / Width;
+                double ratio = lengthSquared <= 0.0
+                    ? 1.0
+                    : ((x - startX) * vectorX + (y - startY) * vectorY) /
+                      lengthSquared;
+                ratio = Math.Max(0.0, Math.Min(1.0, ratio));
+                short after = ClampElevation((long)Math.Round(
+                    startElevation + (targetElevation - startElevation) * ratio));
+                if (after == before)
+                {
+                    continue;
+                }
+
+                changedIndices.Add(index);
+                beforeValues.Add(before);
+                afterValues.Add(after);
+            }
+
+            TerrainElevationEdit edit = new TerrainElevationEdit(
+                ProjectId,
+                changedIndices.ToArray(),
+                beforeValues.ToArray(),
+                afterValues.ToArray(),
+                CaptureWorldCache(changedIndices));
+            ApplyElevationEdit(edit, true);
+            return edit;
+        }
+
         public TerrainElevationEdit ApplyElevationGrid(short[] values)
         {
             if (values == null || values.Length != CellCount)

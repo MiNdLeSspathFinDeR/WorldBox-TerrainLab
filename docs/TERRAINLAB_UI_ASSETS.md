@@ -20,7 +20,7 @@ against screen edges and can be collapsed independently.
 
 ## Implementation status
 
-Version 1.0.0 implements the standalone side button, an adaptive top GIS
+Version 1.1.0 implements the standalone side button, an adaptive top GIS
 toolbar, and a stock WorldBox internal window. The toolbar copies the bottom
 WorldBox panel and button sprites, stretches to the logical canvas width, and
 balances commands across as few rows as the current UI scale permits. Its frame
@@ -45,12 +45,17 @@ damaging, spreading, lava, acid, `grey_goo`, TNT, and mine-like surfaces. These
 operations copy vanilla surface type and frozen state but never overwrite the
 independent Int16 DEM.
 
-Hydrology exposes Priority-Flood/D8, streams, accumulation, fill, watersheds,
-and Strahler order. Erosion exposes integer process parameters, exact mass
-diagnostics, four preview layers, and explicit apply. All analysis is cancellable
-and all raster overlays use `256 x 256` chunks. The internal window now contains
-only project/import details, algorithm parameters, the runtime layer catalog,
-and format/exchange settings; it does not duplicate routine map commands.
+DEM editing also includes a two-click ramp. The first point samples its metric
+height; the second grades every cell in the current brush-width corridor to the
+configured endpoint height. The complete operation occupies one undo record.
+
+Hydrology exposes Priority-Flood/D8, filled elevation, direction, streams,
+accumulation, fill depth, watersheds, and Strahler order. Erosion exposes
+integer process parameters, exact mass diagnostics, four preview layers, and
+explicit apply. All analysis is cancellable and all raster overlays use
+`256 x 256` chunks. The internal window now contains only project/import
+details, algorithm parameters, the runtime layer catalog, and format/exchange
+settings; it does not duplicate routine map commands.
 
 The Analysis chapter also exposes `Live DEM water` with WorldBox's native rain
 icon. It is a repeat-click toggle with a green native activity lamp; the lamp
@@ -72,6 +77,12 @@ Each chunk inherits the gameplay tilemap's Unity layer and sorting layer, so the
 translucent DEM remains above the complete world surface while tool outlines
 remain readable above it.
 
+The same chapter now exposes landform and material categories, 250-metre DEM
+contours with 1000-metre and sea-level emphasis, relief ruggedness, the complete
+Priority-Flood surface, D8 receiver direction, the live managed-water mask, and
+UInt8 water storage. Water overlays consume changed-cell notifications from the
+simulation rather than rebuilding a maximum-size map every 0.2-second tick.
+
 The standalone side button cycles through three levels: off, toolbar only, and
 toolbar plus general settings. Another press from settings closes the complete
 workspace. Closing the settings window with its stock cross performs that same
@@ -91,7 +102,7 @@ are delivered; every toolbar control has a localized tooltip.
 
 ## Runtime button and tooltip audit
 
-The current top toolbar contains 48 controls. Every one is connected to a real
+The current top toolbar contains 57 controls. Every one is connected to a real
 handler; there are no visible placeholder or no-op buttons.
 
 | Surface | Count | Implemented behavior |
@@ -99,10 +110,10 @@ handler; there are no visible placeholder or no-op buttons.
 | Side switch | 1 | Cycles off, toolbar, and toolbar plus settings |
 | Critical and chapter row | 7 | Opens settings, saves, and selects one of five chapters |
 | Project chapter | 6 | WBXGEO export/validation, GeoTIFF export, and three sync commands |
-| Terrain chapter | 7 | Five DEM tools plus undo and redo |
+| Terrain chapter | 8 | Six DEM tools, including a two-point ramp, plus undo and redo |
 | Digitizing chapter | 8 | Six surface tools, apply selection, and cancel |
 | Analysis chapter | 5 | Relief, hydrology, live DEM water, erosion preview, and explicit erosion apply |
-| Derived-layer chapter | 15 | Direct DEM, four relief, five hydrology, four erosion layers, and hide all |
+| Derived-layer chapter | 23 | Four core/DEM, five relief, seven hydrology, two live-water, four erosion layers, and hide all |
 
 The live internal window's module selectors, package imports, radius controls,
 and exchange-folder buttons are also connected. Routine edit, run/cancel, and
@@ -131,10 +142,10 @@ the nearest icon or an ASCII badge:
 
 | Working area | Purpose-drawn files still wanted |
 |---|---|
-| DEM editing and display | `dem_elevation`, `elevation_set`, `elevation_lower`, `elevation_smooth` |
+| DEM editing and display | `dem_elevation`, `dem_contours`, `elevation_set`, `elevation_lower`, `elevation_smooth`, `elevation_ramp` |
 | Surface digitizing | `surface_sample`, `surface_line`, `surface_polygon`, `surface_rectangle`, `surface_polygonize`, `selection_apply`, `digitizing_cancel` |
-| Relief layers | `hypsometry`, `slope`, `aspect`, `hillshade` |
-| Hydrology layers/process | `stream_extract`, `flow_accumulation`, `sink_fill`, `watershed`, `stream_order`, `flood` |
+| Relief layers | `hypsometry`, `slope`, `aspect`, `hillshade`, `ruggedness` |
+| Hydrology layers/process | `filled_dem`, `flow_direction`, `stream_extract`, `flow_accumulation`, `sink_fill`, `watershed`, `stream_order`, `managed_water`, `water_storage`, `flood` |
 | Erosion result | `erosion_net`, `erosion_cut`, `deposition`, `erosion_result`, `erosion_apply` |
 
 The safe-fill control already uses WorldBox's exact bucket metaphor. Analysis
@@ -158,8 +169,10 @@ These are actual runtime boundaries, not merely missing icons:
    buffering, clipping, intersection, and raster-to-vector output.
 5. Real-world CRS assignment, reprojection, GCP georeferencing, raster warping,
    GeoPackage export, and projection-aware scale/measurement tools.
-6. Advanced DEM tools such as flatten, ramp, sampled elevation, contour
-   generation, raster calculator, and explicit sea-level editing.
+6. Advanced DEM algebra and transformations such as raster calculator,
+   resampling, profile graphs, and multi-raster map algebra. Flatten is already
+   the Set tool, sampled elevation is part of the eyedropper, ramp and contours
+   are implemented, and sea level intentionally remains the fixed zero datum.
 7. Advanced hydrology: MFD flow, sink breaching, editable outlets, persistent
    lakes, constrained river vectors, and calibrated water depth/velocity.
 8. Calibrated process modules with rainfall fields, persistent water/sediment,

@@ -10,7 +10,8 @@ namespace TerrainLab
         Hypsometry,
         Slope,
         Aspect,
-        Hillshade
+        Hillshade,
+        Ruggedness
     }
 
     public sealed class TerrainReliefOverlay : MonoBehaviour
@@ -180,9 +181,34 @@ namespace TerrainLab
                 case TerrainReliefOverlayMode.Hillshade:
                     byte shade = result.Hillshade[index];
                     return new Color32(shade, shade, shade, 175);
+                case TerrainReliefOverlayMode.Ruggedness:
+                    return GetRuggednessColor(
+                        result.Ruggedness[index],
+                        result.Statistics.MaximumRuggedness);
                 default:
                     return new Color32(0, 0, 0, 0);
             }
+        }
+
+        public static Color32 GetRuggednessColor(ushort value, ushort maximum)
+        {
+            if (value == ushort.MaxValue || value == 0)
+            {
+                return new Color32(0, 0, 0, 0);
+            }
+
+            float normalized = maximum == 0
+                ? 0f
+                : Mathf.Clamp01(value / (float)maximum);
+            return normalized < 0.5f
+                ? Ramp(
+                    new Color32(250, 220, 80, 85),
+                    new Color32(230, 105, 45, 185),
+                    normalized * 2f)
+                : Ramp(
+                    new Color32(230, 105, 45, 185),
+                    new Color32(110, 35, 45, 230),
+                    (normalized - 0.5f) * 2f);
         }
 
         private static Color32 GetHypsometry(

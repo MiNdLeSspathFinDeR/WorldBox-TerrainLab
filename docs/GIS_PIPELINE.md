@@ -52,7 +52,7 @@ are never rank-normalized.
 
 ## Implemented runtime relief
 
-TerrainLab 1.0 derives four rasters from the authoritative Int16 DEM with a Horn
+TerrainLab 1.1 derives four rasters from the authoritative Int16 DEM with a Horn
 `3 x 3` neighborhood: slope in tenths of a degree, downslope aspect in tenths
 of a degree, hillshade, and local ruggedness. Edge samples are clamped and
 `NODATA` neighbors fall back to the center cell. The calculation is cancellable,
@@ -71,6 +71,16 @@ values from `0` to `9000` occupy the yellow-to-red interval. The fixed scale
 makes a color comparable between projects instead of rescaling it to each
 map's observed extrema. Incremental DEM edits rewrite only affected chunks.
 
+Additional direct displays classify the stored landform and material rasters
+and derive 250-metre contours on demand. Contour edits refresh the touched cells
+and their four neighbors, preserving the one-cell boundary calculation without
+rebuilding unrelated chunks.
+
+The two-point ramp editor samples the first endpoint elevation and linearly
+interpolates to the configured second endpoint. The current circular brush
+radius widens the graded corridor; all affected cells are committed as one
+revision-bound undo operation.
+
 ## Implemented runtime hydrology
 
 The deterministic hydrology module operates over the same DEM:
@@ -87,8 +97,8 @@ The deterministic hydrology module operates over the same DEM:
    Stream cells receive deterministic Strahler order.
 6. Editing the DEM increments its revision and immediately marks previous
    hydrology results stale.
-7. Analysis runs on a background task with cancellation. Five hydrology previews
-   render in `256 x 256` chunks.
+7. Analysis runs on a background task with cancellation. Seven hydrology previews
+   render in `256 x 256` chunks, including filled elevation and D8 direction.
 8. Filled elevation, D8 direction, accumulation, streams, watersheds, and order
    are stored under `modules/hydrology/`, tied to a checksum of elevation and
    landform.
@@ -135,6 +145,10 @@ bounded DEM process without replacing WorldBox's own ocean behavior:
    for the pre-water surface. Uniform configurable evaporation runs every 30
    seconds; routed flow recharges cells, and a zero store restores that surface.
    The mask and store export as `managed_water.tif` and `water_storage.tif`.
+9. The managed mask and UInt8 store are visible as live map overlays. Normal
+   routing and recharge update touched texture cells only; the 30-second climate
+   pass performs a bounded full refresh because evaporation may alter every
+   managed cell.
 
 The selector affects only live channel creation. Stored watershed,
 flow-accumulation, Strahler, and erosion products retain their deterministic D8

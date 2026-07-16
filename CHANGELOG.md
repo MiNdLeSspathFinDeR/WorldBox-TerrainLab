@@ -2,6 +2,18 @@
 
 ## Unreleased
 
+## 1.1.0 - 2026-07-16
+
+- Added map overlays for core landforms, materials, 250-metre contours,
+  managed live water, and persistent UInt8 water storage.
+- Added the previously unexposed ruggedness, filled DEM, and D8 direction
+  rasters to both the adaptive toolbar and internal analysis pages.
+- Added a two-click DEM ramp that interpolates from the sampled start height to
+  the configured endpoint height across the current brush width as one
+  undoable edit.
+- Added localized per-cell values, active-state lamps, incremental contour and
+  live-water refresh, and palette/ramp regression probes.
+
 - Replaced linear vanilla-height expansion with an Earth-like, morphotype-aware
   initial DEM. Ordinary terrain is concentrated below `2000 m`, combined
   mountain/summit cells have a `5000 m` median, and at most five percent reach
