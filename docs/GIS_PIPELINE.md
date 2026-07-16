@@ -123,9 +123,10 @@ bounded DEM process without replacing WorldBox's own ocean behavior:
    the same spill elevation. It does not run an unrestricted flood fill over a
    tilted plane. D-infinity and MFD fronts are capped at 512 queued branches per
    source; all branches consume the same finite integer source budget.
-4. Source volume is integer. A channel cell costs one unit; filling a depression
-   costs more in proportion to its Priority-Flood depth. An ordinary contact has
-   a finite configurable volume.
+4. Source volume is integer. A cell cost combines Priority-Flood depth with a
+   material/feature/moisture resistance term. Clay and an established channel
+   pass flow farther than dry soil, organic cover, rock, or artificial material.
+   An ordinary contact still has a finite configurable volume.
 5. A Harmony postfix observes the native `geyser` building's actual `rain`
    submission to `DropManager.spawnParabolicDrop`. Every real drop adds
    configurable volume at the lowest safe adjacent cell, so a live geyser
@@ -135,20 +136,28 @@ bounded DEM process without replacing WorldBox's own ocean behavior:
    ocean cells do not consume that budget, and hazardous/non-copyable surfaces
    or non-geyser buildings are never converted.
 7. Marine class follows absolute bed elevation on the zero datum: `0..-5 m` is
-   shallow, `-6..-149 m` is shelf, and `-150 m` or lower is deep ocean.
-   Ordinary painted/existing water above zero is restored to land. Water made
-   by the bounded routing process may cross positive terrain only as managed
-   shallow freshwater, preserving inland and geyser-fed rivers without creating
-   a positive-elevation shelf or ocean. Dry negative depressions remain dry
-   until reached by a source.
+   shallow, `-6..-149 m` is shelf, and `-150 m` or lower is deep ocean. Water
+   painted onto a known land substrate or reached by routing first receives a
+   persistent `River` or `Waterbody` class and remains shallow freshwater at any
+   elevation. Unmanaged positive-elevation legacy water is restored to land.
+   Dry negative depressions remain dry until reached by a source.
 8. Managed water stores one UInt8 depth/reserve value and one UInt8 palette code
    for the pre-water surface. Uniform configurable evaporation runs every 30
    seconds; routed flow recharges cells, and a zero store restores that surface.
    The mask and store export as `managed_water.tif` and `water_storage.tif`.
-9. The managed mask and UInt8 store are visible as live map overlays. Normal
-   routing and recharge update touched texture cells only; the 30-second climate
-   pass performs a bounded full refresh because evaporation may alter every
-   managed cell.
+9. Five additional one-byte fields describe river-valley state: persistent
+   hydro feature, moisture, nonlinear erodibility, local Horn slope, and local
+   downslope aspect. Slope maps `0..254` to `0..pi/2` radians; aspect maps the
+   same range to `0..2*pi`; `255` means undefined. This costs five bytes per map
+   cell and avoids persistent floating-point derivative grids.
+10. Every 30-second climate pass updates moisture and erodibility only for wet,
+    hydro-feature, or still-moist cells. Saturated soil/organic material may
+    degrade to sand; saturated convergent alluvium may become gameplay-safe
+    clay. A bounded stream-power proxy may incise an active river by `1..3 m`,
+    guarded against cutting more than 24 m below its local neighbor floor.
+    Routing is rebuilt on the changed DEM while active source volume is retained.
+11. Managed mask, store, hydro feature, moisture, erodibility, local slope, and
+    local aspect are visible as live overlays and export as UInt8 GeoTIFFs.
 
 The selector affects only live channel creation. Stored watershed,
 flow-accumulation, Strahler, and erosion products retain their deterministic D8
@@ -158,9 +167,10 @@ Finite source queues are intentionally runtime-only and are not replenished on
 reload. Managed mask, water store, and dry-surface palette survive reload,
 while native geysers resume through later real pulses. This prevents save/load
 from turning one finite placement into an infinite source. The current model is
-a gameplay drainage and uniform-loss water budget, not a calibrated
-shallow-water or climate solver: it does not yet model velocity, infiltration,
-spatial precipitation, or potential evapotranspiration.
+a gameplay drainage, substrate-evolution, and uniform-loss water budget, not a
+calibrated shallow-water or climate solver. Moisture and resistance are bounded
+state proxies; velocity, physical infiltration, spatial precipitation, and
+potential evapotranspiration are not yet calibrated.
 
 Connected filling follows the seed-and-target-level contract described by
 [GRASS `r.lake`](https://grass.osgeo.org/grass-stable/manuals/r.lake.html).
@@ -174,6 +184,12 @@ and [D8 channel-network](https://saga-gis.sourceforge.io/saga_tool_doc/9.11.1/ta
 tools: first condition the DEM and derive flow connectivity, then extract or
 evolve the channel process. TerrainLab uses its own bounded integer runtime
 implementation rather than embedding SAGA binaries.
+
+The detachment/resistance split follows the same modeling separation exposed by
+[GRASS `r.sim.sediment`](https://grass.osgeo.org/grass-stable/manuals/r.sim.sediment.html):
+terrain, water state, detachment capacity, transport capacity, and roughness
+remain distinct inputs. TerrainLab quantizes those controls and limits local
+incision for game-scale stability.
 
 ## Implemented erosion baseline
 
@@ -207,10 +223,10 @@ calculate, then quantize it back to the authoritative integer grid:
 
 1. `dem.inference`: infer relative elevation from relief shading, contours, and
    semantic terrain masks.
-2. `hydrology.advanced`: MFD flow, sink breaching, editable outlets, persistent
-   lake levels, vector river constraints, and calibrated water depth/velocity.
+2. `hydrology.advanced`: sink breaching, editable outlets, calibrated lake
+   levels, vector river constraints, and physical water depth/velocity.
 3. `erosion.process`: rainfall fields, water/sediment state, transport capacity,
-   spatially variable erodibility, and calibrated timestep/units.
+   and calibrated timestep/units on top of the one-byte erodibility baseline.
 4. `biomes`: classify climate/soil after the terrain process, so erosion changes
    the landscape before biome tiles are assigned.
 5. `projection`: convert continuous elevation, water depth, moisture, and biome

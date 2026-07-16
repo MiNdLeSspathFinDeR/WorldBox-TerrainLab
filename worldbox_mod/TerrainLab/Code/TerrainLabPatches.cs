@@ -114,20 +114,54 @@ namespace TerrainLab
                 new[] { typeof(WorldTile), typeof(string) });
         }
 
-        private static void Postfix(WorldTile pTile, string pPowerID, bool __result)
+        private static void Prefix(
+            WorldTile pTile,
+            string pPowerID,
+            out TerrainSurfaceStamp __state)
+        {
+            __state = default(TerrainSurfaceStamp);
+            if (IsWaterLayer(pPowerID) &&
+                TerrainSurfaceStamp.TryCaptureSafe(
+                    pTile,
+                    out TerrainSurfaceStamp previous,
+                    out _))
+            {
+                __state = previous;
+            }
+        }
+
+        private static void Postfix(
+            WorldTile pTile,
+            string pPowerID,
+            bool __result,
+            TerrainSurfaceStamp __state)
         {
             if (!__result)
             {
                 return;
             }
 
-            bool waterLayer =
-                string.Equals(pPowerID, "tile_deep_ocean", StringComparison.Ordinal) ||
-                string.Equals(pPowerID, "tile_close_ocean", StringComparison.Ordinal) ||
-                string.Equals(pPowerID, "tile_shallow_waters", StringComparison.Ordinal);
+            bool waterLayer = IsWaterLayer(pPowerID);
             TerrainLabRuntime.Instance?.WaterDynamics.NotifySurfaceLayerPainted(
                 pTile,
-                waterLayer);
+                waterLayer,
+                __state);
+        }
+
+        private static bool IsWaterLayer(string powerId)
+        {
+            return string.Equals(
+                       powerId,
+                       "tile_deep_ocean",
+                       StringComparison.Ordinal) ||
+                   string.Equals(
+                       powerId,
+                       "tile_close_ocean",
+                       StringComparison.Ordinal) ||
+                   string.Equals(
+                       powerId,
+                       "tile_shallow_waters",
+                       StringComparison.Ordinal);
         }
     }
 }

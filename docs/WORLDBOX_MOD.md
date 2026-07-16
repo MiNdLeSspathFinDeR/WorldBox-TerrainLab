@@ -18,7 +18,7 @@ the local game assemblies and copies only TerrainLab source, locales, metadata,
 and resources. It uses normal `dotnet` and file-copy operations; it does not
 compile temporary PowerShell interop assemblies.
 
-## TerrainLab 1.1 workspace
+## TerrainLab 1.2 workspace
 
 The top toolbar keeps routine commands over the map. It stretches with the
 logical canvas, evenly distributes buttons, and wraps into the minimum balanced
@@ -96,13 +96,13 @@ water-layer contact receives a finite integer budget and follows the dedicated
 Priority-Flood drainage rank. The Parameters page offers D8, D-infinity, and
 MFD channel routing: respectively one receiver, at most two triangular-facet
 receivers, or every strict downslope neighbor. Flats use the stable
-Priority-Flood receiver. Water type is determined by absolute bed elevation on
+Priority-Flood receiver. Marine water type is determined by bed elevation on
 the zero-metre datum: `0..-5 m` is shallow water, `-6..-149 m` is shelf, and
-`-150 m` or lower is deep ocean. Ordinary water above zero is restored to land;
-only bounded process-created freshwater may cross positive terrain, and it is
-always represented as shallow water. A dry negative DEM cell is never made
-water merely because its absolute elevation is below zero; it must be reached
-by an active source. The simulation
+`-150 m` or lower is deep ocean. Water painted onto land or created by a live
+source first receives a persistent `River` or `Waterbody` attribute, so
+freshwater remains shallow at any absolute elevation. A dry negative DEM cell
+is never made water merely because it lies below zero; it must be reached by an
+active source. The simulation
 cannot convert more than the configured 1-50 percent of valid DEM cells, never
 overwrites hazardous surfaces or ordinary buildings, pauses with WorldBox and
 modal windows, and does not count the pre-existing ocean against its limit. The
@@ -123,10 +123,21 @@ budget extension point for later precipitation, PET, infiltration, and climate
 rasters, not a calibrated climate model. Disabling the toggle stops routing and
 climate updates but leaves valid current WorldBox water visible.
 
-The Layers chapter can display the managed-water mask and UInt8 reserve above
-the world. Routing and recharge update only touched texture cells; the
-30-second evaporation pass refreshes the complete active water layer because it
-may change every managed cell.
+Each reached freshwater cell also stores UInt8 moisture and nonlinear
+erodibility plus compact local Horn slope and downslope aspect. The angular
+fields decode to radians but occupy one byte per cell. Material controls flow
+resistance, retention, drying, and detachment: saturated soil or organic cover
+can degrade into sand, and low-energy saturated alluvium can become a
+gameplay-safe clay substrate. Active river cells use a bounded stream-power
+rule to lower the local Int16 DEM bed by `1..3 m` per climate step, with a local
+guard 24 m below the current neighbor floor. Routing is rebuilt after a cut
+while source head and remaining volume are retained, so subsequent geyser
+pulses follow the evolving valley.
+
+The Layers chapter can display the managed-water mask, UInt8 reserve,
+river/waterbody class, moisture, erodibility, local slope, and local aspect
+above the world. Routing updates touched cells; the 30-second climate pass
+refreshes dynamic water layers because it may alter moisture, substrate, or DEM.
 
 ### Erosion
 
@@ -162,9 +173,10 @@ WorldBox writes `map.wbox` first; TerrainLab then writes
 `terrainlab.wbxgeo` beside it by temporary-file replacement. WBXGEO embeds the
 same vanilla map plus core GIS arrays and optional hydrology, live-water, and
 erosion modules.
-Live-water configuration, its managed UInt8 mask, and its UInt8 store use the
-separate optional `hydrology.water_dynamics` module; both rasters export to
-GeoTIFF.
+Live-water configuration and all eight state rasters use optional
+`hydrology.water_dynamics` schema `1.3.0`. The managed mask, store,
+river/waterbody class, moisture, erodibility, local slope, and local aspect also
+export to GeoTIFF; restore-surface codes remain package-internal.
 Unknown optional module data survives load/save. Invalid optional data is
 dropped without blocking the core project or vanilla map.
 

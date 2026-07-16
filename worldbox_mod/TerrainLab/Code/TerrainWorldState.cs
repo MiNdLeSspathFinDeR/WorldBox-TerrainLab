@@ -84,7 +84,8 @@ namespace TerrainLab
         Ice = 4,
         Lava = 5,
         Organic = 6,
-        Artificial = 7
+        Artificial = 7,
+        Clay = 8
     }
 
     public enum TerrainElevationOperation
@@ -595,6 +596,52 @@ namespace TerrainLab
             return edit;
         }
 
+        internal TerrainElevationEdit ApplyElevationValues(
+            int[] candidateIndices,
+            short[] candidateValues)
+        {
+            if (candidateIndices == null || candidateValues == null ||
+                candidateIndices.Length != candidateValues.Length)
+            {
+                throw new ArgumentException(
+                    "Sparse elevation indices and values must have the same size.");
+            }
+
+            List<int> changedIndices = new List<int>(candidateIndices.Length);
+            List<short> beforeValues = new List<short>(candidateIndices.Length);
+            List<short> afterValues = new List<short>(candidateIndices.Length);
+            HashSet<int> seen = new HashSet<int>();
+            for (int offset = 0; offset < candidateIndices.Length; offset++)
+            {
+                int index = candidateIndices[offset];
+                short after = candidateValues[offset];
+                if (index < 0 || index >= CellCount || !seen.Add(index) ||
+                    !TerrainElevationEncoding.IsStoredValue(after))
+                {
+                    continue;
+                }
+
+                short before = Elevation[index];
+                if (before == after)
+                {
+                    continue;
+                }
+
+                changedIndices.Add(index);
+                beforeValues.Add(before);
+                afterValues.Add(after);
+            }
+
+            TerrainElevationEdit edit = new TerrainElevationEdit(
+                ProjectId,
+                changedIndices.ToArray(),
+                beforeValues.ToArray(),
+                afterValues.ToArray(),
+                CaptureWorldCache(changedIndices));
+            ApplyElevationEdit(edit, true);
+            return edit;
+        }
+
         public void ApplyElevationEdit(TerrainElevationEdit edit, bool useAfterValues)
         {
             if (edit == null)
@@ -880,6 +927,28 @@ namespace TerrainLab
             IsDirty = false;
         }
 
+        internal void MarkSemanticLayersChanged()
+        {
+            Revision++;
+            IsDirty = true;
+        }
+
+        internal void RefreshSemanticCellFromWorld(int index)
+        {
+            if (!MatchesCurrentWorld() || index < 0 || index >= CellCount)
+            {
+                return;
+            }
+
+            byte previousLandform = Landform[index];
+            byte previousMaterial = Material[index];
+            ClassifyTile(index, GetCurrentTiles()[index]);
+            if (previousLandform != Landform[index] || previousMaterial != Material[index])
+            {
+                MarkSemanticLayersChanged();
+            }
+        }
+
         public void RefreshSemanticsFromWorld()
         {
             if (!MatchesCurrentWorld())
@@ -892,8 +961,27 @@ namespace TerrainLab
             for (int index = 0; index < tiles.Length; index++)
             {
                 byte previousLandform = Landform[index];
+                byte previousMaterial = Material[index];
                 ClassifyTile(index, tiles[index]);
+                TerrainHydroFeature feature = WaterDynamics == null ||
+                                               WaterDynamics.HydroFeature == null ||
+                                               index >= WaterDynamics.HydroFeature.Length
+                    ? TerrainHydroFeature.None
+                    : TerrainRiverValleyModel.NormalizeFeature(
+                        WaterDynamics.HydroFeature[index]);
+                if (feature != TerrainHydroFeature.None)
+                {
+                    Landform[index] = (byte)(feature == TerrainHydroFeature.River
+                        ? TerrainLandform.Channel
+                        : TerrainLandform.Depression);
+                    if (previousMaterial != (byte)TerrainMaterial.Unknown)
+                    {
+                        Material[index] = previousMaterial;
+                    }
+                }
+
                 hydrologySourceChanged |= previousLandform != Landform[index];
+                hydrologySourceChanged |= previousMaterial != Material[index];
             }
 
             if (hydrologySourceChanged)

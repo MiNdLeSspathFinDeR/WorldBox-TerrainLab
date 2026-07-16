@@ -57,6 +57,7 @@ internal static class Program
             ValidateReliefAlgorithm();
             ValidateHydrologyAlgorithm();
             ValidateWaterDynamicsAlgorithm();
+            ValidateRiverValleyModel();
             ValidateGeoTiff(testRoot);
             ValidateFileSync(testRoot);
             ValidateFileSyncRollback(testRoot);
@@ -210,6 +211,8 @@ internal static class Program
             (byte)TerrainMaterial.Soil);
         Color32 ice = TerrainDataOverlay.GetMaterialColor(
             (byte)TerrainMaterial.Ice);
+        Color32 clay = TerrainDataOverlay.GetMaterialColor(
+            (byte)TerrainMaterial.Clay);
         Assert(
             plain.a > 0 && channel.a > 0 &&
             (plain.r != channel.r || plain.g != channel.g || plain.b != channel.b),
@@ -218,6 +221,10 @@ internal static class Program
             soil.a > 0 && ice.a > 0 &&
             (soil.r != ice.r || soil.g != ice.g || soil.b != ice.b),
             "Material overlay does not separate semantic classes.");
+        Assert(
+            clay.a > 0 &&
+            (clay.r != soil.r || clay.g != soil.g || clay.b != soil.b),
+            "Material overlay does not render clay separately.");
 
         Assert(
             TerrainDataOverlay.GetManagedWaterColor(0).a == 0 &&
@@ -232,6 +239,21 @@ internal static class Program
              shallowStorage.g != deepStorage.g ||
              shallowStorage.b != deepStorage.b),
             "Water-storage palette does not preserve zero and depth contrast.");
+        Assert(
+            TerrainDataOverlay.GetHydroFeatureColor(0).a == 0 &&
+            TerrainDataOverlay.GetHydroFeatureColor(
+                (byte)TerrainHydroFeature.River).a > 0 &&
+            TerrainDataOverlay.GetMoistureColor(0).a == 0 &&
+            TerrainDataOverlay.GetMoistureColor(255).a > 0 &&
+            TerrainDataOverlay.GetErodibilityColor(0).a == 0 &&
+            TerrainDataOverlay.GetErodibilityColor(200).a > 0 &&
+            TerrainDataOverlay.GetLocalSlopeColor(
+                TerrainRiverValleyModel.NoDirection).a == 0 &&
+            TerrainDataOverlay.GetLocalSlopeColor(100).a > 0 &&
+            TerrainDataOverlay.GetLocalAspectColor(
+                TerrainRiverValleyModel.NoDirection).a == 0 &&
+            TerrainDataOverlay.GetLocalAspectColor(100).a > 0,
+            "River-valley diagnostic palettes are incomplete.");
 
         Color32 seaContour = TerrainDataOverlay.GetContourColor(
             0,
@@ -682,6 +704,14 @@ internal static class Program
             new TerrainSurfaceStamp("soil_low", string.Empty, false));
         water.RestoreSurfaceCodes[2] = 1;
         water.RestoreSurfaceCodes[7] = 1;
+        TerrainRiverValleyModel.ActivateCell(state, water, 2);
+        TerrainRiverValleyModel.ActivateCell(state, water, 7);
+        water.HydroFeature[2] = (byte)TerrainHydroFeature.River;
+        water.HydroFeature[7] = (byte)TerrainHydroFeature.Waterbody;
+        water.Moisture[2] = 181;
+        water.Moisture[7] = 229;
+        water.Erodibility[2] = 144;
+        water.Erodibility[7] = 11;
         state.EnsureWaterDynamics();
 
         string gisDirectory = TerrainGisExporter.Export(
@@ -691,12 +721,24 @@ internal static class Program
             "GIS manifest was not created.");
         JObject gisManifest = JObject.Parse(
             File.ReadAllText(Path.Combine(gisDirectory, "terrainlab-gis.json")));
-        Assert(gisManifest["layers"].Count() == 17,
+        Assert(gisManifest["layers"].Count() == 22,
             "GIS export did not include every ready layer.");
         Assert(File.Exists(Path.Combine(gisDirectory, "managed_water.tif")),
             "GIS export omitted the managed-water mask.");
         Assert(File.Exists(Path.Combine(gisDirectory, "water_storage.tif")),
             "GIS export omitted dynamic-water storage.");
+        foreach (string fileName in new[]
+        {
+            "hydro_feature.tif",
+            "moisture.tif",
+            "erodibility.tif",
+            "local_slope.tif",
+            "local_aspect.tif"
+        })
+        {
+            Assert(File.Exists(Path.Combine(gisDirectory, fileName)),
+                "GIS export omitted " + fileName + ".");
+        }
         Assert((string)gisManifest["vertical_unit"] == "metre" &&
                (short)gisManifest["sea_level"] == state.SeaLevel,
             "GIS export lost the vertical reference.");
@@ -733,6 +775,11 @@ internal static class Program
             loaded.WaterDynamics.ManagedCellCount == 2 &&
             loaded.WaterDynamics.ManagedMask.SequenceEqual(water.ManagedMask) &&
             loaded.WaterDynamics.WaterStorage.SequenceEqual(water.WaterStorage) &&
+            loaded.WaterDynamics.HydroFeature.SequenceEqual(water.HydroFeature) &&
+            loaded.WaterDynamics.Moisture.SequenceEqual(water.Moisture) &&
+            loaded.WaterDynamics.Erodibility.SequenceEqual(water.Erodibility) &&
+            loaded.WaterDynamics.LocalSlope.SequenceEqual(water.LocalSlope) &&
+            loaded.WaterDynamics.LocalAspect.SequenceEqual(water.LocalAspect) &&
             loaded.WaterDynamics.RestoreSurfaceCodes.SequenceEqual(
                 water.RestoreSurfaceCodes) &&
             loaded.WaterDynamics.RestoreSurfacePalette.SequenceEqual(
@@ -943,6 +990,17 @@ internal static class Program
                 "modules/hydrology.water_dynamics/water_storage.u8")?.Delete();
             archive.GetEntry(
                 "modules/hydrology.water_dynamics/restore_surface.u8")?.Delete();
+            foreach (string entryPath in new[]
+            {
+                "modules/hydrology.water_dynamics/hydro_feature.u8",
+                "modules/hydrology.water_dynamics/moisture.u8",
+                "modules/hydrology.water_dynamics/erodibility.u8",
+                "modules/hydrology.water_dynamics/local_slope.u8",
+                "modules/hydrology.water_dynamics/local_aspect.u8"
+            })
+            {
+                archive.GetEntry(entryPath)?.Delete();
+            }
 
             JObject manifest = JObject.Parse(
                 ReadArchiveText(archive, "manifest.json"));
@@ -954,7 +1012,17 @@ internal static class Program
                     (string)item["id"] ==
                         "hydrology.water_dynamics.water_storage" ||
                     (string)item["id"] ==
-                        "hydrology.water_dynamics.restore_surface")
+                        "hydrology.water_dynamics.restore_surface" ||
+                    ((string)item["id"])?.StartsWith(
+                        "hydrology.water_dynamics.hydro_feature") == true ||
+                    ((string)item["id"])?.StartsWith(
+                        "hydrology.water_dynamics.moisture") == true ||
+                    ((string)item["id"])?.StartsWith(
+                        "hydrology.water_dynamics.erodibility") == true ||
+                    ((string)item["id"])?.StartsWith(
+                        "hydrology.water_dynamics.local_slope") == true ||
+                    ((string)item["id"])?.StartsWith(
+                        "hydrology.water_dynamics.local_aspect") == true)
                 .ToList()
                 .ForEach(item => item.Remove());
             ReplaceArchiveEntry(
@@ -990,8 +1058,11 @@ internal static class Program
                 .All(value =>
                     value == TerrainWaterDepthModel.ShallowStorageUnits) &&
             migrated.WaterDynamics.RestoreSurfaceCodes.All(value => value == 0) &&
+            migrated.WaterDynamics.HydroFeature
+                .Where((_, index) => expectedMask[index] != 0)
+                .All(value => value != (byte)TerrainHydroFeature.None) &&
             migrated.WaterDynamics.Parameters.EvaporationPerClimateStep == 1,
-            "Water schema 1.1 did not receive safe 1.2 defaults.");
+            "Water schema 1.1 did not receive safe river-valley defaults.");
     }
 
     private static void ValidateHydrologyAlgorithm()
@@ -1162,6 +1233,22 @@ internal static class Program
             first.Step(100, _ => true).Single().Index == firstPath[0],
             "A renewed source did not refill its dried origin.");
 
+        TerrainWaterSimulation preservedSource = new TerrainWaterSimulation(
+            routing,
+            new byte[count],
+            new byte[count],
+            finiteParameters);
+        preservedSource.AddSource(source, elevation[source], 20);
+        preservedSource.Step(1, _ => true);
+        TerrainWaterSourceSnapshot snapshot = preservedSource
+            .CaptureActiveSources()
+            .Single();
+        Assert(
+            snapshot.Origin == source &&
+            snapshot.RemainingVolume == preservedSource.PendingVolume &&
+            snapshot.RemainingVolume > 0,
+            "Active source volume cannot survive a routing rebuild.");
+
         TerrainWaterSimulation repeated = new TerrainWaterSimulation(
             routing,
             new byte[count],
@@ -1317,6 +1404,99 @@ internal static class Program
             dried.SequenceEqual(new[] { 0 }) &&
             storage.SequenceEqual(new byte[] { 0, 145, 0 }),
             "Dynamic-water evaporation balance is inconsistent.");
+    }
+
+    private static void ValidateRiverValleyModel()
+    {
+        const int width = 7;
+        const int height = 5;
+        int count = width * height;
+        short[] elevation = new short[count];
+        for (int y = 0; y < height; y++)
+        {
+            for (int x = 0; x < width; x++)
+            {
+                elevation[y * width + x] = (short)(600 - x * 40 +
+                    Math.Abs(y - height / 2) * 8);
+            }
+        }
+
+        TerrainWorldState state = TerrainWorldState.CreateFromLayers(
+            "river-valley-probe",
+            DateTime.UtcNow,
+            width,
+            height,
+            0,
+            elevation,
+            Enumerable.Repeat((byte)TerrainLandform.Plain, count).ToArray(),
+            Enumerable.Repeat((byte)TerrainMaterial.Soil, count).ToArray());
+        TerrainWaterState water = state.EnsureWaterDynamics();
+        int channel = height / 2 * width + 2;
+        TerrainHydroFeature channelFeature = TerrainRiverValleyModel.ActivateCell(
+            state,
+            water,
+            channel);
+        Assert(channelFeature == TerrainHydroFeature.River,
+            "A steep freshwater cell was not classified as a river.");
+        Assert(
+            !double.IsNaN(TerrainRiverValleyModel.DecodeSlopeRadians(
+                water.LocalSlope[channel])) &&
+            !double.IsNaN(TerrainRiverValleyModel.DecodeAspectRadians(
+                water.LocalAspect[channel])),
+            "Compact local slope/aspect values did not decode to radians.");
+
+        short[] flatElevation = Enumerable.Repeat((short)100, 9).ToArray();
+        TerrainWorldState flatState = TerrainWorldState.CreateFromLayers(
+            "waterbody-probe",
+            DateTime.UtcNow,
+            3,
+            3,
+            0,
+            flatElevation,
+            Enumerable.Repeat((byte)TerrainLandform.Plain, 9).ToArray(),
+            Enumerable.Repeat((byte)TerrainMaterial.Soil, 9).ToArray());
+        TerrainWaterState flatWater = flatState.EnsureWaterDynamics();
+        Assert(
+            TerrainRiverValleyModel.ActivateCell(flatState, flatWater, 4, 3) ==
+            TerrainHydroFeature.Waterbody,
+            "A flat impounded cell was not classified as a waterbody.");
+
+        Assert(
+            TerrainRiverValleyModel.GetFlowResistance(
+                (byte)TerrainMaterial.Clay,
+                (byte)TerrainHydroFeature.River,
+                220) <
+            TerrainRiverValleyModel.GetFlowResistance(
+                (byte)TerrainMaterial.Soil,
+                (byte)TerrainHydroFeature.River,
+                220),
+            "Clay is not acting as the low-permeability flow bed.");
+
+        water.ManagedMask[channel] = 1;
+        water.WaterStorage[channel] = byte.MaxValue;
+        water.Moisture[channel] = 220;
+        water.Erodibility[channel] = 230;
+        state.EnsureWaterDynamics();
+        TerrainRiverEvolution evolution = TerrainRiverValleyModel.Step(
+            state,
+            water,
+            32);
+        Assert(evolution.SandIndices.Contains(channel),
+            "Saturated erodible soil did not degrade into alluvium.");
+        Assert(evolution.IncisionIndices.Contains(channel),
+            "A high-energy river did not incise its local DEM channel.");
+        int incisionOffset = Array.IndexOf(evolution.IncisionIndices, channel);
+        Assert(
+            incisionOffset >= 0 &&
+            evolution.IncisionElevations[incisionOffset] < elevation[channel],
+            "River incision did not lower the bed elevation.");
+
+        TerrainRiverValleyModel.ClearCell(water, channel);
+        Assert(
+            water.HydroFeature[channel] == (byte)TerrainHydroFeature.None &&
+            water.Moisture[channel] == 0 &&
+            water.LocalSlope[channel] == TerrainRiverValleyModel.NoDirection,
+            "Explicit river-valley clearing left stale dynamic attributes.");
     }
 
     private static void ValidateWaterRoutingAlgorithms()
@@ -1900,6 +2080,11 @@ internal static class Program
                 "modules/hydrology.water_dynamics/managed_water.u8",
                 "modules/hydrology.water_dynamics/water_storage.u8",
                 "modules/hydrology.water_dynamics/restore_surface.u8",
+                "modules/hydrology.water_dynamics/hydro_feature.u8",
+                "modules/hydrology.water_dynamics/moisture.u8",
+                "modules/hydrology.water_dynamics/erodibility.u8",
+                "modules/hydrology.water_dynamics/local_slope.u8",
+                "modules/hydrology.water_dynamics/local_aspect.u8",
                 "modules/erosion.hydraulic/analysis.json",
                 "modules/erosion.hydraulic/result_elevation.i16",
                 "modules/erosion.hydraulic/net_change.i32"
@@ -1934,7 +2119,7 @@ internal static class Program
                     "Hydrology layer catalog is incomplete.");
                 Assert(
                     manifest["layers"].Count(layer =>
-                        (string)layer["module"] == "hydrology.water_dynamics") == 3,
+                        (string)layer["module"] == "hydrology.water_dynamics") == 8,
                     "Water dynamics layer catalog is incomplete.");
                 Assert(
                     manifest["layers"].Count(layer =>

@@ -1,6 +1,6 @@
 # TerrainLab WorldBox mod
 
-TerrainLab 1.1 is an NML source mod that adds an in-game GIS workspace without
+TerrainLab 1.2 is an NML source mod that adds an in-game GIS workspace without
 replacing WorldBox's normal save format. Its standalone transparent side icon
 opens an adaptive map toolbar styled from WorldBox's bottom panel and a stock
 internal window. Routine map commands stay in the toolbar, while project/import
@@ -11,7 +11,7 @@ window. Custom GIS data is stored in an adjacent WBXGEO project and a vanilla
 The source mod installs to `<WorldBox>/Mods/TerrainLab`. NML compiles the files
 under `Code` when the game starts.
 
-## Implemented 1.1 surface
+## Implemented 1.2 surface
 
 - signed Int16 elevation in `-20000..9000 m`, sea level `0`, and reserved
   `NODATA=9999`, independent from vanilla terrain morphotypes;
@@ -37,8 +37,12 @@ under `Code` when the game starts.
   filling, absolute 0/-5/-150-metre water classes, persistent UInt8 storage,
   evaporation/recharge, gameplay-safe dry-surface restoration, and a
   non-bypassable 50-percent valid-cell ceiling;
-- live managed-water-mask and UInt8 storage overlays that update only changed
-  cells during channel growth, recharge, drying, and evaporation;
+- persistent river/waterbody semantics at any elevation, compact UInt8
+  moisture, erodibility, local slope/aspect, material resistance and retention,
+  soil-to-sand-to-clay evolution, and bounded local DEM channel incision;
+- live managed-water, storage, hydro-feature, moisture, erodibility, local
+  slope, and local aspect overlays that update during growth, recharge, drying,
+  erosion, and evaporation;
 - deterministic integer hydraulic/thermal transport with exact mass balance,
   preview overlays, apply, and undo;
 - optional hydrology, live-water, and erosion payloads in WBXGEO, each protected

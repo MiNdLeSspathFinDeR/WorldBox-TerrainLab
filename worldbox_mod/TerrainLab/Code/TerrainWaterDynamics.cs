@@ -202,6 +202,16 @@ namespace TerrainLab
 
         public byte[] WaterStorage { get; internal set; }
 
+        public byte[] HydroFeature { get; internal set; }
+
+        public byte[] Moisture { get; internal set; }
+
+        public byte[] Erodibility { get; internal set; }
+
+        public byte[] LocalSlope { get; internal set; }
+
+        public byte[] LocalAspect { get; internal set; }
+
         public byte[] RestoreSurfaceCodes { get; internal set; }
 
         public List<TerrainSurfaceStamp> RestoreSurfacePalette { get; internal set; } =
@@ -228,6 +238,11 @@ namespace TerrainLab
             {
                 ManagedMask = new byte[cellCount],
                 WaterStorage = new byte[cellCount],
+                HydroFeature = new byte[cellCount],
+                Moisture = new byte[cellCount],
+                Erodibility = new byte[cellCount],
+                LocalSlope = TerrainRiverValleyModel.CreateNoDataLayer(cellCount),
+                LocalAspect = TerrainRiverValleyModel.CreateNoDataLayer(cellCount),
                 RestoreSurfaceCodes = new byte[cellCount]
             };
         }
@@ -242,6 +257,31 @@ namespace TerrainLab
             if (WaterStorage == null || WaterStorage.Length != cellCount)
             {
                 WaterStorage = new byte[cellCount];
+            }
+
+            if (HydroFeature == null || HydroFeature.Length != cellCount)
+            {
+                HydroFeature = new byte[cellCount];
+            }
+
+            if (Moisture == null || Moisture.Length != cellCount)
+            {
+                Moisture = new byte[cellCount];
+            }
+
+            if (Erodibility == null || Erodibility.Length != cellCount)
+            {
+                Erodibility = new byte[cellCount];
+            }
+
+            if (LocalSlope == null || LocalSlope.Length != cellCount)
+            {
+                LocalSlope = TerrainRiverValleyModel.CreateNoDataLayer(cellCount);
+            }
+
+            if (LocalAspect == null || LocalAspect.Length != cellCount)
+            {
+                LocalAspect = TerrainRiverValleyModel.CreateNoDataLayer(cellCount);
             }
 
             if (RestoreSurfaceCodes == null || RestoreSurfaceCodes.Length != cellCount)
@@ -261,6 +301,8 @@ namespace TerrainLab
             int count = 0;
             for (int index = 0; index < ManagedMask.Length; index++)
             {
+                HydroFeature[index] = (byte)TerrainRiverValleyModel.NormalizeFeature(
+                    HydroFeature[index]);
                 if (ManagedMask[index] == 0)
                 {
                     WaterStorage[index] = 0;
@@ -290,7 +332,18 @@ namespace TerrainLab
         internal void CaptureRestoreSurface(int index, TerrainSurfaceStamp stamp)
         {
             if (index < 0 || index >= RestoreSurfaceCodes.Length ||
-                RestoreSurfaceCodes[index] != 0 ||
+                 RestoreSurfaceCodes[index] != 0 ||
+                string.IsNullOrWhiteSpace(stamp.MainTypeId))
+            {
+                return;
+            }
+
+            SetRestoreSurface(index, stamp);
+        }
+
+        internal void SetRestoreSurface(int index, TerrainSurfaceStamp stamp)
+        {
+            if (index < 0 || index >= RestoreSurfaceCodes.Length ||
                 string.IsNullOrWhiteSpace(stamp.MainTypeId))
             {
                 return;
@@ -921,6 +974,25 @@ namespace TerrainLab
         public int SourceIndex { get; }
     }
 
+    public readonly struct TerrainWaterSourceSnapshot
+    {
+        public TerrainWaterSourceSnapshot(
+            int origin,
+            int headElevation,
+            long remainingVolume)
+        {
+            Origin = origin;
+            HeadElevation = headElevation;
+            RemainingVolume = Math.Max(0L, remainingVolume);
+        }
+
+        public int Origin { get; }
+
+        public int HeadElevation { get; }
+
+        public long RemainingVolume { get; }
+    }
+
     public sealed class TerrainWaterSimulation
     {
         private const int MaximumSources = 256;
@@ -931,6 +1003,9 @@ namespace TerrainLab
         private readonly TerrainWaterRouting _routing;
         private readonly byte[] _waterMask;
         private readonly byte[] _managedMask;
+        private readonly byte[] _material;
+        private readonly byte[] _hydroFeature;
+        private readonly byte[] _moisture;
         private readonly Dictionary<int, WaterSource> _sourceLookup =
             new Dictionary<int, WaterSource>();
         private readonly List<WaterSource> _sources = new List<WaterSource>();
@@ -948,7 +1023,10 @@ namespace TerrainLab
             byte[] waterMask,
             byte[] managedMask,
             TerrainWaterParameters parameters,
-            int seaLevel = 0)
+            int seaLevel = 0,
+            byte[] material = null,
+            byte[] hydroFeature = null,
+            byte[] moisture = null)
         {
             _routing = routing ?? throw new ArgumentNullException(nameof(routing));
             if (waterMask == null || waterMask.Length != routing.CellCount ||
@@ -959,6 +1037,16 @@ namespace TerrainLab
 
             _waterMask = waterMask;
             _managedMask = managedMask;
+            _material = material != null && material.Length == routing.CellCount
+                ? material
+                : null;
+            _hydroFeature = hydroFeature != null &&
+                            hydroFeature.Length == routing.CellCount
+                ? hydroFeature
+                : null;
+            _moisture = moisture != null && moisture.Length == routing.CellCount
+                ? moisture
+                : null;
             _seaLevel = seaLevel;
             _parameters = (parameters ?? new TerrainWaterParameters()).Normalize();
             for (int index = 0; index < managedMask.Length; index++)
@@ -987,6 +1075,17 @@ namespace TerrainLab
             .Sum(source => source.Budget);
 
         public IReadOnlyList<int> RechargedCells => _rechargedCells;
+
+        public IReadOnlyList<TerrainWaterSourceSnapshot> CaptureActiveSources()
+        {
+            return _sources
+                .Where(source => source.CanAdvance)
+                .Select(source => new TerrainWaterSourceSnapshot(
+                    source.Origin,
+                    source.HeadElevation,
+                    source.Budget))
+                .ToArray();
+        }
 
         public void UpdateParameters(TerrainWaterParameters parameters)
         {
@@ -1017,6 +1116,18 @@ namespace TerrainLab
             {
                 _waterMask[index] = 1;
             }
+        }
+
+        public bool MarkExternalManagedWater(int index)
+        {
+            if (index < 0 || index >= _waterMask.Length)
+            {
+                return false;
+            }
+
+            bool added = _managedMask[index] == 0;
+            MarkManagedWater(index);
+            return added;
         }
 
         public bool MarkExternalDry(int index)
@@ -1366,7 +1477,13 @@ namespace TerrainLab
         private int GetCellCost(int index)
         {
             int depthUnits = _routing.GetFillDepth(index) / _routing.VerticalUnit;
-            return 1 + Math.Min(63, depthUnits);
+            int resistanceCost = _material == null
+                ? 0
+                : TerrainRiverValleyModel.GetFlowResistance(
+                    _material[index],
+                    _hydroFeature?[index] ?? 0,
+                    _moisture?[index] ?? 0) / 96;
+            return 1 + Math.Min(63, depthUnits) + resistanceCost;
         }
 
         private TerrainWaterCellChange CreateChange(
@@ -1682,10 +1799,15 @@ namespace TerrainLab
         private const string ManagedMaskPath = "managed_water.u8";
         private const string WaterStoragePath = "water_storage.u8";
         private const string RestoreSurfacePath = "restore_surface.u8";
+        private const string HydroFeaturePath = "hydro_feature.u8";
+        private const string MoisturePath = "moisture.u8";
+        private const string ErodibilityPath = "erodibility.u8";
+        private const string LocalSlopePath = "local_slope.u8";
+        private const string LocalAspectPath = "local_aspect.u8";
 
         public string Id => "hydrology.water_dynamics";
 
-        public string SchemaVersion => "1.2.0";
+        public string SchemaVersion => "1.3.0";
 
         public bool IsRequired => false;
 
@@ -1723,6 +1845,40 @@ namespace TerrainLab
                 RestoreSurfacePath,
                 "uint8",
                 water.RestoreSurfaceCodes);
+            context.WriteLayerBytes(
+                "hydrology.water_dynamics.hydro_feature",
+                "hydrology.river_waterbody_class",
+                HydroFeaturePath,
+                "uint8",
+                water.HydroFeature,
+                byte.MaxValue);
+            context.WriteLayerBytes(
+                "hydrology.water_dynamics.moisture",
+                "hydrology.soil_moisture",
+                MoisturePath,
+                "uint8",
+                water.Moisture);
+            context.WriteLayerBytes(
+                "hydrology.water_dynamics.erodibility",
+                "hydrology.dynamic_erodibility",
+                ErodibilityPath,
+                "uint8",
+                water.Erodibility,
+                byte.MaxValue);
+            context.WriteLayerBytes(
+                "hydrology.water_dynamics.local_slope",
+                "hydrology.local_slope_radians_encoded",
+                LocalSlopePath,
+                "uint8",
+                water.LocalSlope,
+                TerrainRiverValleyModel.NoDirection);
+            context.WriteLayerBytes(
+                "hydrology.water_dynamics.local_aspect",
+                "hydrology.local_aspect_radians_encoded",
+                LocalAspectPath,
+                "uint8",
+                water.LocalAspect,
+                TerrainRiverValleyModel.NoDirection);
         }
 
         public void ReadPackage(
@@ -1794,6 +1950,51 @@ namespace TerrainLab
                     }
                 }
             }
+
+            if (version.Minor >= 3)
+            {
+                water.HydroFeature = ReadLayer(
+                    context,
+                    "hydrology.water_dynamics.hydro_feature",
+                    state.CellCount);
+                water.Moisture = ReadLayer(
+                    context,
+                    "hydrology.water_dynamics.moisture",
+                    state.CellCount);
+                water.Erodibility = ReadLayer(
+                    context,
+                    "hydrology.water_dynamics.erodibility",
+                    state.CellCount);
+                water.LocalSlope = ReadLayer(
+                    context,
+                    "hydrology.water_dynamics.local_slope",
+                    state.CellCount);
+                water.LocalAspect = ReadLayer(
+                    context,
+                    "hydrology.water_dynamics.local_aspect",
+                    state.CellCount);
+                for (int index = 0; index < state.CellCount; index++)
+                {
+                    if (water.HydroFeature[index] >
+                            (byte)TerrainHydroFeature.Waterbody ||
+                        water.Erodibility[index] == byte.MaxValue)
+                    {
+                        throw new InvalidDataException(
+                            "River-valley layers contain an invalid value.");
+                    }
+                }
+            }
+            else
+            {
+                for (int index = 0; index < state.CellCount; index++)
+                {
+                    if (water.ManagedMask[index] != 0)
+                    {
+                        TerrainRiverValleyModel.ActivateCell(state, water, index);
+                    }
+                }
+            }
+
             water.TotalInjectedVolume = Math.Max(0, metadata.TotalInjectedVolume);
             water.TotalConsumedVolume = Math.Max(0, metadata.TotalConsumedVolume);
             water.GeyserPulseCount = Math.Max(0, metadata.GeyserPulseCount);

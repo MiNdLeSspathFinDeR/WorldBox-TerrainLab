@@ -242,6 +242,8 @@ namespace TerrainLab
                 TerrainLabRuntime.Instance.StateChanged += HandleRuntimeStateChanged;
                 TerrainLabRuntime.Instance.WaterDynamics.CellsChanged +=
                     HandleWaterCellsChanged;
+                TerrainLabRuntime.Instance.WaterDynamics.ElevationChanged +=
+                    HandleWaterElevationChanged;
             }
 
             _initialized = true;
@@ -954,6 +956,41 @@ namespace TerrainLab
                 "V",
                 delegate { ShowDataOverlay(TerrainDataOverlayMode.WaterStorage); },
                 "terrain_lab_data_overlay_water_storage");
+            CreateToolbarOverlayButton(
+                row,
+                "water_hydro_feature",
+                "layer_add_vector",
+                "R",
+                delegate { ShowDataOverlay(TerrainDataOverlayMode.HydroFeature); },
+                "terrain_lab_data_overlay_hydro_feature");
+            CreateToolbarOverlayButton(
+                row,
+                "water_moisture",
+                "layer_add_raster",
+                "M",
+                delegate { ShowDataOverlay(TerrainDataOverlayMode.Moisture); },
+                "terrain_lab_data_overlay_moisture");
+            CreateToolbarOverlayButton(
+                row,
+                "water_erodibility",
+                "layer_style",
+                "E",
+                delegate { ShowDataOverlay(TerrainDataOverlayMode.Erodibility); },
+                "terrain_lab_data_overlay_erodibility");
+            CreateToolbarOverlayButton(
+                row,
+                "water_local_slope",
+                "layer_filter",
+                "S",
+                delegate { ShowDataOverlay(TerrainDataOverlayMode.LocalSlope); },
+                "terrain_lab_data_overlay_local_slope");
+            CreateToolbarOverlayButton(
+                row,
+                "water_local_aspect",
+                "visibility_on",
+                "A",
+                delegate { ShowDataOverlay(TerrainDataOverlayMode.LocalAspect); },
+                "terrain_lab_data_overlay_local_aspect");
             CreateToolbarSeparator(row);
             CreateToolbarOverlayButton(
                 row,
@@ -1574,6 +1611,16 @@ namespace TerrainLab
                         return "water_managed";
                     case TerrainDataOverlayMode.WaterStorage:
                         return "water_storage";
+                    case TerrainDataOverlayMode.HydroFeature:
+                        return "water_hydro_feature";
+                    case TerrainDataOverlayMode.Moisture:
+                        return "water_moisture";
+                    case TerrainDataOverlayMode.Erodibility:
+                        return "water_erodibility";
+                    case TerrainDataOverlayMode.LocalSlope:
+                        return "water_local_slope";
+                    case TerrainDataOverlayMode.LocalAspect:
+                        return "water_local_aspect";
                 }
             }
 
@@ -4057,6 +4104,16 @@ namespace TerrainLab
                     return "terrain_lab_data_overlay_managed_water";
                 case TerrainDataOverlayMode.WaterStorage:
                     return "terrain_lab_data_overlay_water_storage";
+                case TerrainDataOverlayMode.HydroFeature:
+                    return "terrain_lab_data_overlay_hydro_feature";
+                case TerrainDataOverlayMode.Moisture:
+                    return "terrain_lab_data_overlay_moisture";
+                case TerrainDataOverlayMode.Erodibility:
+                    return "terrain_lab_data_overlay_erodibility";
+                case TerrainDataOverlayMode.LocalSlope:
+                    return "terrain_lab_data_overlay_local_slope";
+                case TerrainDataOverlayMode.LocalAspect:
+                    return "terrain_lab_data_overlay_local_aspect";
                 default:
                     return "terrain_lab_toolbar_hide_overlays";
             }
@@ -4095,9 +4152,47 @@ namespace TerrainLab
                     return string.Format(
                         LM.Get("terrain_lab_water_storage_value_format"),
                         state.WaterDynamics.WaterStorage[index]);
+                case TerrainDataOverlayMode.HydroFeature:
+                    TerrainHydroFeature feature =
+                        TerrainRiverValleyModel.NormalizeFeature(
+                            state.WaterDynamics.HydroFeature[index]);
+                    return LM.Get("terrain_lab_hydro_feature_" +
+                                  feature.ToString().ToLowerInvariant());
+                case TerrainDataOverlayMode.Moisture:
+                    return string.Format(
+                        LM.Get("terrain_lab_moisture_value_format"),
+                        state.WaterDynamics.Moisture[index]);
+                case TerrainDataOverlayMode.Erodibility:
+                    return string.Format(
+                        LM.Get("terrain_lab_erodibility_value_format"),
+                        state.WaterDynamics.Erodibility[index]);
+                case TerrainDataOverlayMode.LocalSlope:
+                    return GetLocalAngleValue(
+                        state.WaterDynamics.LocalSlope[index],
+                        true);
+                case TerrainDataOverlayMode.LocalAspect:
+                    return GetLocalAngleValue(
+                        state.WaterDynamics.LocalAspect[index],
+                        false);
                 default:
                     return string.Empty;
             }
+        }
+
+        private static string GetLocalAngleValue(byte value, bool slope)
+        {
+            double radians = slope
+                ? TerrainRiverValleyModel.DecodeSlopeRadians(value)
+                : TerrainRiverValleyModel.DecodeAspectRadians(value);
+            if (double.IsNaN(radians))
+            {
+                return LM.Get("terrain_lab_value_nodata");
+            }
+
+            return string.Format(
+                LM.Get("terrain_lab_local_angle_value_format"),
+                radians,
+                radians * 180.0 / Math.PI);
         }
 
         private static string GetHydrologyOverlayLocalizationKey(
@@ -4730,6 +4825,21 @@ namespace TerrainLab
         {
             TerrainWorldState state = TerrainLabRuntime.Instance?.State;
             _dataOverlay?.UpdateCells(state, indices);
+        }
+
+        private void HandleWaterElevationChanged(TerrainElevationEdit edit)
+        {
+            TerrainWorldState state = TerrainLabRuntime.Instance?.State;
+            if (state == null || edit == null || edit.ChangedCellCount == 0)
+            {
+                return;
+            }
+
+            _elevationOverlay?.UpdateCells(state, edit);
+            _dataOverlay?.UpdateCells(state, edit.Indices);
+            _reliefOverlay?.Clear();
+            _hydrologyOverlay?.Clear();
+            _erosionOverlay?.Clear();
         }
 
         private void ShowWindow()
@@ -5932,6 +6042,8 @@ namespace TerrainLab
                 TerrainLabRuntime.Instance.StateChanged -= HandleRuntimeStateChanged;
                 TerrainLabRuntime.Instance.WaterDynamics.CellsChanged -=
                     HandleWaterCellsChanged;
+                TerrainLabRuntime.Instance.WaterDynamics.ElevationChanged -=
+                    HandleWaterElevationChanged;
             }
 
             if (_sideButton != null)

@@ -34,6 +34,8 @@ namespace TerrainLab
 
         public event Action<IReadOnlyList<int>> CellsChanged;
 
+        public event Action<TerrainElevationEdit> ElevationChanged;
+
         public string LastError { get; private set; }
 
         public bool Enabled => _state?.WaterDynamics?.Enabled == true;
@@ -319,6 +321,17 @@ namespace TerrainLab
 
         public void NotifySurfaceLayerPainted(WorldTile tile, bool waterLayer)
         {
+            NotifySurfaceLayerPainted(
+                tile,
+                waterLayer,
+                default(TerrainSurfaceStamp));
+        }
+
+        public void NotifySurfaceLayerPainted(
+            WorldTile tile,
+            bool waterLayer,
+            TerrainSurfaceStamp previousSurface)
+        {
             if (tile == null || _state == null ||
                 tile.x < 0 || tile.x >= _state.Width ||
                 tile.y < 0 || tile.y >= _state.Height)
@@ -329,6 +342,53 @@ namespace TerrainLab
             int index = checked(tile.y * _state.Width + tile.x);
             if (waterLayer)
             {
+                TerrainWaterState water = _state.WaterDynamics;
+                if (water == null)
+                {
+                    water = TerrainWaterState.Create(_state.CellCount);
+                    _state.WaterDynamics = water;
+                }
+
+                TerrainHydroFeature existingFeature =
+                    TerrainRiverValleyModel.NormalizeFeature(
+                        water.HydroFeature[index]);
+                bool previousSurfaceKnown =
+                    !string.IsNullOrWhiteSpace(previousSurface.MainTypeId);
+                bool freshwater = existingFeature != TerrainHydroFeature.None ||
+                                  _state.Elevation[index] > _state.SeaLevel ||
+                                  previousSurfaceKnown &&
+                                  !IsWaterSurface(previousSurface);
+                byte substrateMaterial = _state.Material[index];
+                if (freshwater)
+                {
+                    TerrainSurfaceStamp restore = previousSurfaceKnown &&
+                                                  !IsWaterSurface(previousSurface)
+                        ? previousSurface
+                        : GetDefaultRestoreSurface(
+                            substrateMaterial,
+                            _state.Landform[index]);
+                    water.SetRestoreSurface(index, restore);
+                    int fillDepth = _routing?.GetFillDepth(index) ?? 0;
+                    TerrainHydroFeature feature = TerrainRiverValleyModel.ActivateCell(
+                        _state,
+                        water,
+                        index,
+                        fillDepth);
+                    bool added = water.ManagedMask[index] == 0;
+                    water.ManagedMask[index] = 1;
+                    water.WaterStorage[index] = (byte)Math.Max(
+                        water.WaterStorage[index],
+                        TerrainWaterDepthModel.ShallowStorageUnits);
+                    _simulation?.MarkExternalManagedWater(index);
+                    water.ManagedCellCount = _simulation?.ManagedCellCount ??
+                                             water.ManagedCellCount + (added ? 1 : 0);
+                    water.IsDirty = true;
+                    if (SetHydroSemantic(index, feature, substrateMaterial))
+                    {
+                        _state.MarkSemanticLayersChanged();
+                    }
+                }
+
                 if (!TryReconcileWaterSurface(
                     _state,
                     new[] { index },
@@ -339,6 +399,19 @@ namespace TerrainLab
                     return;
                 }
 
+                if (freshwater)
+                {
+                    TerrainHydroFeature feature =
+                        TerrainRiverValleyModel.NormalizeFeature(
+                            water.HydroFeature[index]);
+                    if (SetHydroSemantic(index, feature, substrateMaterial))
+                    {
+                        _state.MarkSemanticLayersChanged();
+                    }
+
+                    _routingRevision = _state.Revision;
+                }
+
                 if (!Enabled || !IsWater(tile))
                 {
                     return;
@@ -347,33 +420,45 @@ namespace TerrainLab
             else
             {
                 _autoDriedSurfaces.Remove(index);
-                if (!Enabled)
+                TerrainWaterState water = _state.WaterDynamics;
+                if (IsWater(tile))
                 {
+                    _simulation?.MarkExternalWater(index);
                     return;
                 }
+
+                bool changed = false;
+                if (_simulation != null)
+                {
+                    changed = _simulation.MarkExternalDry(index);
+                }
+                else if (water?.ManagedMask != null && water.ManagedMask[index] != 0)
+                {
+                    water.ManagedMask[index] = 0;
+                    water.ManagedCellCount = Math.Max(0, water.ManagedCellCount - 1);
+                    changed = true;
+                }
+
+                if (water != null)
+                {
+                    changed |= TerrainRiverValleyModel.NormalizeFeature(
+                        water.HydroFeature[index]) != TerrainHydroFeature.None;
+                    water.ClearManagedStorage(index);
+                    TerrainRiverValleyModel.ClearCell(water, index);
+                    water.ManagedCellCount = _simulation?.ManagedCellCount ??
+                                             water.ManagedCellCount;
+                    water.IsDirty |= changed;
+                }
+
+                _state.RefreshSemanticCellFromWorld(index);
+                _routingRevision = _state.Revision;
+                NotifyCellsChanged(new[] { index });
+                return;
             }
 
             index = GetTileIndex(tile);
             if (index < 0)
             {
-                return;
-            }
-
-            if (!waterLayer)
-            {
-                if (IsWater(tile))
-                {
-                    _simulation.MarkExternalWater(index);
-                }
-                else if (_simulation.MarkExternalDry(index))
-                {
-                    _state.WaterDynamics.ClearManagedStorage(index);
-                    _state.WaterDynamics.ManagedCellCount =
-                        _simulation.ManagedCellCount;
-                    _state.WaterDynamics.IsDirty = true;
-                    NotifyCellsChanged(new[] { index });
-                }
-
                 return;
             }
 
@@ -483,7 +568,29 @@ namespace TerrainLab
 
             if (_simulation == null || _routingRevision != _state.Revision)
             {
-                BuildSimulation(seedExistingContacts: false);
+                if (_simulation == null)
+                {
+                    BuildSimulation(seedExistingContacts: false);
+                }
+                else
+                {
+                    RebuildSimulationPreservingSources();
+                }
+            }
+        }
+
+        private void RebuildSimulationPreservingSources()
+        {
+            IReadOnlyList<TerrainWaterSourceSnapshot> sources =
+                _simulation?.CaptureActiveSources() ??
+                Array.Empty<TerrainWaterSourceSnapshot>();
+            BuildSimulation(seedExistingContacts: false);
+            foreach (TerrainWaterSourceSnapshot source in sources)
+            {
+                _simulation.AddSource(
+                    source.Origin,
+                    source.HeadElevation,
+                    source.RemainingVolume);
             }
         }
 
@@ -537,7 +644,10 @@ namespace TerrainLab
                 currentWater,
                 water.ManagedMask,
                 water.Parameters,
-                _state.SeaLevel);
+                _state.SeaLevel,
+                _state.Material,
+                water.HydroFeature,
+                water.Moisture);
             ReclassifyExistingWater(currentWater, null);
             water.ManagedCellCount = _simulation.ManagedCellCount;
             _routingRevision = _state.Revision;
@@ -622,29 +732,6 @@ namespace TerrainLab
                     continue;
                 }
 
-                if (_state.Elevation[waterIndex] > _state.SeaLevel)
-                {
-                    if (IsWater(tile) && tile.building == null)
-                    {
-                        TerrainSurfaceStamp drySurface = new TerrainSurfaceStamp(
-                            "soil_low",
-                            string.Empty,
-                            false);
-                        _autoDriedSurfaces[waterIndex] = drySurface;
-                        _state.ApplySurfaceCells(
-                            new[] { waterIndex },
-                            drySurface);
-                        _simulation.MarkExternalDry(waterIndex);
-                        _state.WaterDynamics.ClearManagedStorage(waterIndex);
-                        _state.WaterDynamics.ManagedCellCount =
-                            _simulation.ManagedCellCount;
-                        _state.WaterDynamics.IsDirty = true;
-                        _routingRevision = _state.Revision;
-                    }
-
-                    continue;
-                }
-
                 _simulation.MarkExternalWater(waterIndex);
                 int head = Math.Max(_state.SeaLevel, _state.Elevation[waterIndex]);
                 ContactCandidate best = FindBestContact(waterIndex, head);
@@ -712,45 +799,55 @@ namespace TerrainLab
 
         private void ApplyChanges(IReadOnlyList<TerrainWaterCellChange> changes)
         {
-            long consumed = 0L;
             TerrainWaterState water = _state.WaterDynamics;
-            foreach (TerrainWaterCellChange change in changes)
+            byte[] substrateMaterials = new byte[changes.Count];
+            TerrainHydroFeature[] features = new TerrainHydroFeature[changes.Count];
+            int[] indices = new int[changes.Count];
+            for (int offset = 0; offset < changes.Count; offset++)
             {
+                TerrainWaterCellChange change = changes[offset];
+                int index = change.Index;
+                indices[offset] = index;
+                substrateMaterials[offset] = _state.Material[index];
                 water.CaptureRestoreSurface(
-                    change.Index,
-                    TerrainSurfaceStamp.Capture(_tiles[change.Index]));
-                water.WaterStorage[change.Index] = TerrainWaterDepthModel.GetStorage(
-                    change.DepthMetres);
+                    index,
+                    TerrainSurfaceStamp.Capture(_tiles[index]));
+                int fillDepth = _routing.GetFillDepth(index);
+                TerrainHydroFeature feature = TerrainRiverValleyModel.ActivateCell(
+                    _state,
+                    water,
+                    index,
+                    fillDepth);
+                features[offset] = feature;
+                int storedDepth = feature == TerrainHydroFeature.Waterbody
+                    ? Math.Max(
+                        TerrainWaterDepthModel.ShallowStorageUnits,
+                        Math.Min(TerrainWaterDepthModel.ShelfStorageUnits, fillDepth))
+                    : TerrainWaterDepthModel.ShallowStorageUnits;
+                water.WaterStorage[index] = TerrainWaterDepthModel.GetStorage(storedDepth);
             }
 
-            foreach (IGrouping<TerrainWaterDepthClass, TerrainWaterCellChange> group in
-                     changes.GroupBy(item => item.DepthClass))
+            _state.ApplySurfaceCells(
+                indices,
+                new TerrainSurfaceStamp("shallow_waters", string.Empty, false));
+            bool semanticChanged = false;
+            for (int offset = 0; offset < indices.Length; offset++)
             {
-                string tileTypeId;
-                switch (group.Key)
-                {
-                    case TerrainWaterDepthClass.Deep:
-                        tileTypeId = "deep_ocean";
-                        break;
-                    case TerrainWaterDepthClass.Shelf:
-                        tileTypeId = "close_ocean";
-                        break;
-                    default:
-                        tileTypeId = "shallow_waters";
-                        break;
-                }
+                semanticChanged |= SetHydroSemantic(
+                    indices[offset],
+                    features[offset],
+                    substrateMaterials[offset]);
+            }
 
-                int[] indices = group.Select(item => item.Index).ToArray();
-                _state.ApplySurfaceCells(
-                    indices,
-                    new TerrainSurfaceStamp(tileTypeId, string.Empty, false));
-                consumed = SaturatingAdd(consumed, group.Sum(item => (long)item.Cost));
+            if (semanticChanged)
+            {
+                _state.MarkSemanticLayersChanged();
             }
 
             water.ManagedCellCount = _simulation.ManagedCellCount;
             water.TotalConsumedVolume = SaturatingAdd(
                 water.TotalConsumedVolume,
-                consumed);
+                changes.Sum(item => (long)item.Cost));
             water.IsDirty = true;
             _routingRevision = _state.Revision;
         }
@@ -809,73 +906,143 @@ namespace TerrainLab
             _nextClimateTime = Time.unscaledTime + ClimateIntervalSeconds;
             TerrainWaterState water = _state.WaterDynamics;
             int evaporation = water.Parameters.EvaporationPerClimateStep;
-            if (evaporation <= 0 || water.ManagedCellCount == 0)
+            bool changed = false;
+            if (evaporation > 0 && water.ManagedCellCount > 0)
+            {
+                _driedCells.Clear();
+                TerrainWaterBalance.ApplyEvaporation(
+                    water.ManagedMask,
+                    water.WaterStorage,
+                    evaporation,
+                    _driedCells);
+                changed = true;
+
+                Dictionary<TerrainSurfaceStamp, List<int>> restoreGroups =
+                    new Dictionary<TerrainSurfaceStamp, List<int>>();
+                List<int> clearedCells = new List<int>(_driedCells.Count);
+                Dictionary<int, byte> substrateMaterials =
+                    new Dictionary<int, byte>(_driedCells.Count);
+                foreach (int index in _driedCells)
+                {
+                    if (index < 0 || index >= _tiles.Length ||
+                        water.ManagedMask[index] == 0)
+                    {
+                        continue;
+                    }
+
+                    WorldTile tile = _tiles[index];
+                    if (tile?.building != null)
+                    {
+                        water.WaterStorage[index] =
+                            TerrainWaterDepthModel.ShallowStorageUnits;
+                        continue;
+                    }
+
+                    substrateMaterials[index] = _state.Material[index];
+                    if (!IsWater(tile))
+                    {
+                        clearedCells.Add(index);
+                        continue;
+                    }
+
+                    TerrainSurfaceStamp restore = GetRestoreSurface(water, index);
+                    if (!restoreGroups.TryGetValue(restore, out List<int> indices))
+                    {
+                        indices = new List<int>();
+                        restoreGroups.Add(restore, indices);
+                    }
+
+                    indices.Add(index);
+                    clearedCells.Add(index);
+                }
+
+                foreach (KeyValuePair<TerrainSurfaceStamp, List<int>> group in restoreGroups)
+                {
+                    _state.ApplySurfaceCells(group.Value.ToArray(), group.Key);
+                }
+
+                bool semanticChanged = false;
+                foreach (int index in clearedCells)
+                {
+                    _simulation.MarkExternalDry(index);
+                    water.ClearManagedStorage(index);
+                    TerrainHydroFeature feature =
+                        TerrainRiverValleyModel.NormalizeFeature(
+                            water.HydroFeature[index]);
+                    semanticChanged |= SetHydroSemantic(
+                        index,
+                        feature,
+                        substrateMaterials[index]);
+                }
+
+                if (semanticChanged)
+                {
+                    _state.MarkSemanticLayersChanged();
+                }
+            }
+
+            TerrainRiverEvolution evolution = TerrainRiverValleyModel.Step(
+                _state,
+                water,
+                Math.Max(64, water.Parameters.CellsPerTick * 2));
+            changed |= ApplyRiverEvolution(evolution);
+            water.ManagedCellCount = _simulation.ManagedCellCount;
+            water.IsDirty |= changed;
+            _routingRevision = _state.Revision;
+            return changed;
+        }
+
+        private bool ApplyRiverEvolution(TerrainRiverEvolution evolution)
+        {
+            if (evolution == null || !evolution.HasChanges)
             {
                 return false;
             }
 
-            _driedCells.Clear();
-            TerrainWaterBalance.ApplyEvaporation(
-                water.ManagedMask,
-                water.WaterStorage,
-                evaporation,
-                _driedCells);
-            if (_driedCells.Count == 0)
+            TerrainWaterState water = _state.WaterDynamics;
+            TerrainSurfaceStamp alluvium = new TerrainSurfaceStamp(
+                "sand",
+                string.Empty,
+                false);
+            bool semanticChanged = false;
+            foreach (int index in evolution.SandIndices)
             {
-                water.IsDirty = true;
-                return true;
+                water.SetRestoreSurface(index, alluvium);
+                semanticChanged |= SetHydroSemantic(
+                    index,
+                    TerrainRiverValleyModel.NormalizeFeature(
+                        water.HydroFeature[index]),
+                    (byte)TerrainMaterial.Sand);
             }
 
-            Dictionary<TerrainSurfaceStamp, List<int>> restoreGroups =
-                new Dictionary<TerrainSurfaceStamp, List<int>>();
-            List<int> clearedCells = new List<int>(_driedCells.Count);
-            foreach (int index in _driedCells)
+            foreach (int index in evolution.ClayIndices)
             {
-                if (index < 0 || index >= _tiles.Length ||
-                    water.ManagedMask[index] == 0)
-                {
-                    continue;
-                }
-
-                WorldTile tile = _tiles[index];
-                if (tile?.building != null)
-                {
-                    water.WaterStorage[index] =
-                        TerrainWaterDepthModel.ShallowStorageUnits;
-                    continue;
-                }
-
-                if (!IsWater(tile))
-                {
-                    clearedCells.Add(index);
-                    continue;
-                }
-
-                TerrainSurfaceStamp restore = GetRestoreSurface(water, index);
-                if (!restoreGroups.TryGetValue(restore, out List<int> indices))
-                {
-                    indices = new List<int>();
-                    restoreGroups.Add(restore, indices);
-                }
-
-                indices.Add(index);
-                clearedCells.Add(index);
+                water.SetRestoreSurface(index, alluvium);
+                semanticChanged |= SetHydroSemantic(
+                    index,
+                    TerrainRiverValleyModel.NormalizeFeature(
+                        water.HydroFeature[index]),
+                    (byte)TerrainMaterial.Clay);
             }
 
-            foreach (KeyValuePair<TerrainSurfaceStamp, List<int>> group in restoreGroups)
+            if (semanticChanged)
             {
-                _state.ApplySurfaceCells(group.Value.ToArray(), group.Key);
+                _state.MarkSemanticLayersChanged();
             }
 
-            foreach (int index in clearedCells)
+            if (evolution.IncisionIndices.Length > 0)
             {
-                _simulation.MarkExternalDry(index);
-                water.ClearManagedStorage(index);
+                TerrainElevationEdit edit = _state.ApplyElevationValues(
+                    evolution.IncisionIndices,
+                    evolution.IncisionElevations);
+                if (edit.ChangedCellCount > 0)
+                {
+                    NotifyElevationChanged(edit);
+                    RebuildSimulationPreservingSources();
+                }
             }
 
-            water.ManagedCellCount = _simulation.ManagedCellCount;
             water.IsDirty = true;
-            _routingRevision = _state.Revision;
             return true;
         }
 
@@ -890,6 +1057,88 @@ namespace TerrainLab
             }
 
             return new TerrainSurfaceStamp("soil_low", string.Empty, false);
+        }
+
+        private bool SetHydroSemantic(
+            int index,
+            TerrainHydroFeature feature,
+            byte substrateMaterial)
+        {
+            if (index < 0 || index >= _state.CellCount ||
+                feature == TerrainHydroFeature.None)
+            {
+                return false;
+            }
+
+            byte targetLandform = (byte)(feature == TerrainHydroFeature.River
+                ? TerrainLandform.Channel
+                : TerrainLandform.Depression);
+            byte targetMaterial = substrateMaterial == (byte)TerrainMaterial.Unknown
+                ? _state.Material[index]
+                : substrateMaterial;
+            bool changed = _state.Landform[index] != targetLandform ||
+                           _state.Material[index] != targetMaterial;
+            _state.Landform[index] = targetLandform;
+            _state.Material[index] = targetMaterial;
+            return changed;
+        }
+
+        private static bool IsWaterSurface(TerrainSurfaceStamp surface)
+        {
+            string id = surface.MainTypeId ?? string.Empty;
+            return id.Contains("shallow_waters") ||
+                   id.Contains("close_ocean") ||
+                   id.Contains("deep_ocean");
+        }
+
+        private static TerrainSurfaceStamp GetDefaultRestoreSurface(
+            byte material,
+            byte landform)
+        {
+            string mainTypeId;
+            switch ((TerrainMaterial)material)
+            {
+                case TerrainMaterial.Sand:
+                case TerrainMaterial.Clay:
+                    mainTypeId = "sand";
+                    break;
+                case TerrainMaterial.Rock:
+                    TerrainLandform form = (TerrainLandform)landform;
+                    mainTypeId = form == TerrainLandform.Summit
+                        ? "mountains"
+                        : form == TerrainLandform.Mountain ||
+                          form == TerrainLandform.Cliff
+                            ? "hills"
+                            : "soil_high";
+                    break;
+                default:
+                    mainTypeId = (TerrainLandform)landform == TerrainLandform.Upland ||
+                                 (TerrainLandform)landform == TerrainLandform.Hill
+                        ? "soil_high"
+                        : "soil_low";
+                    break;
+            }
+
+            TerrainSurfaceStamp result = new TerrainSurfaceStamp(
+                mainTypeId,
+                string.Empty,
+                false);
+            return result.TryResolve(out _, out _, out _)
+                ? result
+                : new TerrainSurfaceStamp("soil_low", string.Empty, false);
+        }
+
+        private void NotifyElevationChanged(TerrainElevationEdit edit)
+        {
+            try
+            {
+                ElevationChanged?.Invoke(edit);
+            }
+            catch (Exception exception)
+            {
+                Debug.LogError(
+                    "[TerrainLab] River elevation listener failed: " + exception);
+            }
         }
 
         private void ReconcileWaterSurface(
@@ -914,6 +1163,8 @@ namespace TerrainLab
                 new Dictionary<TerrainSurfaceStamp, List<int>>();
             List<int> dried = new List<int>();
             List<int> rewetted = new List<int>();
+            Dictionary<int, byte> substrateMaterials =
+                new Dictionary<int, byte>();
             bool storageChanged = false;
             int candidateCount = changedIndices?.Count ?? _tiles.Length;
             for (int offset = 0; offset < candidateCount; offset++)
@@ -932,6 +1183,15 @@ namespace TerrainLab
                 }
 
                 short elevation = _state.Elevation[index];
+                TerrainHydroFeature hydroFeature = water == null
+                    ? TerrainHydroFeature.None
+                    : TerrainRiverValleyModel.NormalizeFeature(
+                        water.HydroFeature[index]);
+                if (hydroFeature != TerrainHydroFeature.None)
+                {
+                    substrateMaterials[index] = _state.Material[index];
+                }
+
                 if (!IsWater(tile))
                 {
                     if (!_autoDriedSurfaces.TryGetValue(
@@ -971,22 +1231,28 @@ namespace TerrainLab
                 }
 
                 bool managed = water != null && water.ManagedMask[index] != 0;
+                bool freshwater = managed ||
+                                  hydroFeature != TerrainHydroFeature.None;
                 TerrainSurfaceStamp target;
-                bool marine = TerrainWaterDepthModel.TryClassifyElevation(
-                    elevation,
-                    _state.SeaLevel,
-                    out TerrainWaterDepthClass depthClass);
-                if (!marine && !managed)
+                TerrainWaterDepthClass depthClass =
+                    TerrainWaterDepthClass.Shallow;
+                bool marine = !freshwater &&
+                              TerrainWaterDepthModel.TryClassifyElevation(
+                                  elevation,
+                                  _state.SeaLevel,
+                                  out depthClass);
+                if (!marine && !freshwater)
                 {
-                    target = managed
-                        ? GetRestoreSurface(water, index)
-                        : new TerrainSurfaceStamp("soil_low", string.Empty, false);
+                    target = new TerrainSurfaceStamp(
+                        "soil_low",
+                        string.Empty,
+                        false);
                     _autoDriedSurfaces[index] = target;
                     dried.Add(index);
                 }
                 else
                 {
-                    if (!marine)
+                    if (freshwater)
                     {
                         depthClass = TerrainWaterDepthClass.Shallow;
                     }
@@ -998,7 +1264,11 @@ namespace TerrainLab
                         : TerrainWaterDepthModel.ShallowStorageUnits;
                     if (managed)
                     {
-                        byte storage = TerrainWaterDepthModel.GetStorage(depth);
+                        byte storage = freshwater
+                            ? (byte)Math.Max(
+                                TerrainWaterDepthModel.ShallowStorageUnits,
+                                water.WaterStorage[index])
+                            : TerrainWaterDepthModel.GetStorage(depth);
                         if (water.WaterStorage[index] != storage)
                         {
                             water.WaterStorage[index] = storage;
@@ -1044,6 +1314,22 @@ namespace TerrainLab
             foreach (KeyValuePair<TerrainSurfaceStamp, List<int>> group in groups)
             {
                 _state.ApplySurfaceCells(group.Value.ToArray(), group.Key);
+            }
+
+            bool semanticChanged = false;
+            foreach (KeyValuePair<int, byte> substrate in substrateMaterials)
+            {
+                TerrainHydroFeature feature = TerrainRiverValleyModel.NormalizeFeature(
+                    water.HydroFeature[substrate.Key]);
+                semanticChanged |= SetHydroSemantic(
+                    substrate.Key,
+                    feature,
+                    substrate.Value);
+            }
+
+            if (semanticChanged)
+            {
+                _state.MarkSemanticLayersChanged();
             }
 
             foreach (int index in rewetted)

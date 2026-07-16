@@ -238,7 +238,7 @@ one module; it does not invalidate the core project.
 
 ### Live water module
 
-TerrainLab implements optional module `hydrology.water_dynamics` schema `1.2.0`.
+TerrainLab implements optional module `hydrology.water_dynamics` schema `1.3.0`.
 `state.json` stores whether routing is enabled, normalized integer parameters,
 managed-cell count, injected/consumed volume counters, and observed native
 geyser pulse count. Parameter `routing_algorithm` is one of `d8`, `dinf`, or
@@ -249,15 +249,22 @@ geyser pulse count. Parameter `routing_algorithm` is one of `d8`, `dinf`, or
 | `hydrology.water_dynamics.managed_mask` | UInt8 | `255` | `1` for water cells created and budgeted by TerrainLab, `0` otherwise |
 | `hydrology.water_dynamics.water_storage` | UInt8 | none | Saturating local water depth/reserve; `0` is dry |
 | `hydrology.water_dynamics.restore_surface` | UInt8 | none | One-based index into the saved pre-water surface palette; `0` is fallback |
+| `hydrology.water_dynamics.hydro_feature` | UInt8 | `255` | Persistent `0` none, `1` river, `2` waterbody class, including dry channels |
+| `hydrology.water_dynamics.moisture` | UInt8 | none | Dynamic substrate moisture from dry `0` to saturated `255` |
+| `hydrology.water_dynamics.erodibility` | UInt8 | `255` | Dynamic detachment coefficient; `0` is not initialized and valid values end at `254` |
+| `hydrology.water_dynamics.local_slope` | UInt8 | `255` | Horn slope: `0..254` maps to `0..pi/2` radians |
+| `hydrology.water_dynamics.local_aspect` | UInt8 | `255` | Downslope aspect: `0..254` maps to `0..2*pi` radians |
 
 The loader requires exact project ID, dimensions, layer length, SHA-256, binary
-mask values, mutually consistent storage/restore rasters, and a managed-cell
-count matching the raster. Invalid data drops only this optional module. Source
-queues and remaining finite volume are not serialized: loading restores managed
-water, storage, and its pre-water surface but does not inject another ordinary
-source budget. Valid `1.0.x` and `1.1.x` payloads migrate with shallow default
-storage and a safe fallback dry surface. Later native geyser pulses can continue
-replenishing a source. The configured flood percentage is normalized to `1..50`, and runtime
+mask and hydro-feature values, mutually consistent storage/restore rasters, and
+a managed-cell count matching the raster. Invalid data drops only this optional
+module. Source queues and remaining finite volume are not serialized: loading
+restores managed water, dry hydro features, dynamic substrate fields, and the
+pre-water surface but does not inject another ordinary source budget. Valid
+`1.0.x` and `1.1.x` payloads migrate with shallow default storage and safe
+river/waterbody values; `1.2.x` adds those values to its existing water balance.
+Later native geyser pulses can continue replenishing a source. The configured
+flood percentage is normalized to `1..50`, and runtime
 code always enforces the same hard 50-percent ceiling over valid DEM cells.
 The algorithm choice controls only new live-water channel fronts; analytical
 hydrology and erosion remain on their independently versioned D8 graphs.

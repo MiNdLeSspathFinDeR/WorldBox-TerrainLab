@@ -20,7 +20,7 @@ against screen edges and can be collapsed independently.
 
 ## Implementation status
 
-Version 1.1.0 implements the standalone side button, an adaptive top GIS
+Version 1.2.0 implements the standalone side button, an adaptive top GIS
 toolbar, and a stock WorldBox internal window. The toolbar copies the bottom
 WorldBox panel and button sprites, stretches to the logical canvas width, and
 balances commands across as few rows as the current UI scale permits. Its frame
@@ -83,6 +83,11 @@ Priority-Flood surface, D8 receiver direction, the live managed-water mask, and
 UInt8 water storage. Water overlays consume changed-cell notifications from the
 simulation rather than rebuilding a maximum-size map every 0.2-second tick.
 
+Five river-valley diagnostics now follow the water controls: persistent
+river/waterbody class, moisture, erodibility, compact local slope, and compact
+local aspect. They reuse the existing raster/vector/style/filter/visibility
+sprites with distinct badges until purpose-drawn water-process icons arrive.
+
 The standalone side button cycles through three levels: off, toolbar only, and
 toolbar plus general settings. Another press from settings closes the complete
 workspace. Closing the settings window with its stock cross performs that same
@@ -102,7 +107,7 @@ are delivered; every toolbar control has a localized tooltip.
 
 ## Runtime button and tooltip audit
 
-The current top toolbar contains 57 controls. Every one is connected to a real
+The current top toolbar contains 62 controls. Every one is connected to a real
 handler; there are no visible placeholder or no-op buttons.
 
 | Surface | Count | Implemented behavior |
@@ -113,7 +118,7 @@ handler; there are no visible placeholder or no-op buttons.
 | Terrain chapter | 8 | Six DEM tools, including a two-point ramp, plus undo and redo |
 | Digitizing chapter | 8 | Six surface tools, apply selection, and cancel |
 | Analysis chapter | 5 | Relief, hydrology, live DEM water, erosion preview, and explicit erosion apply |
-| Derived-layer chapter | 23 | Four core/DEM, five relief, seven hydrology, two live-water, four erosion layers, and hide all |
+| Derived-layer chapter | 28 | Four core/DEM, five relief, seven hydrology, seven live-water, four erosion layers, and hide all |
 
 The live internal window's module selectors, package imports, radius controls,
 and exchange-folder buttons are also connected. Routine edit, run/cancel, and
@@ -145,7 +150,7 @@ the nearest icon or an ASCII badge:
 | DEM editing and display | `dem_elevation`, `dem_contours`, `elevation_set`, `elevation_lower`, `elevation_smooth`, `elevation_ramp` |
 | Surface digitizing | `surface_sample`, `surface_line`, `surface_polygon`, `surface_rectangle`, `surface_polygonize`, `selection_apply`, `digitizing_cancel` |
 | Relief layers | `hypsometry`, `slope`, `aspect`, `hillshade`, `ruggedness` |
-| Hydrology layers/process | `filled_dem`, `flow_direction`, `stream_extract`, `flow_accumulation`, `sink_fill`, `watershed`, `stream_order`, `managed_water`, `water_storage`, `flood` |
+| Hydrology layers/process | `filled_dem`, `flow_direction`, `stream_extract`, `flow_accumulation`, `sink_fill`, `watershed`, `stream_order`, `managed_water`, `water_storage`, `hydro_feature`, `moisture`, `erodibility`, `local_slope`, `local_aspect`, `flood` |
 | Erosion result | `erosion_net`, `erosion_cut`, `deposition`, `erosion_result`, `erosion_apply` |
 
 The safe-fill control already uses WorldBox's exact bucket metaphor. Analysis
@@ -173,10 +178,10 @@ These are actual runtime boundaries, not merely missing icons:
    resampling, profile graphs, and multi-raster map algebra. Flatten is already
    the Set tool, sampled elevation is part of the eyedropper, ramp and contours
    are implemented, and sea level intentionally remains the fixed zero datum.
-7. Advanced hydrology: MFD flow, sink breaching, editable outlets, persistent
-   lakes, constrained river vectors, and calibrated water depth/velocity.
-8. Calibrated process modules with rainfall fields, persistent water/sediment,
-   variable erodibility, physical units, process stepping, and reset.
+7. Advanced hydrology: sink breaching, editable outlets, calibrated persistent
+   lake levels, constrained river vectors, and physical water depth/velocity.
+8. Calibrated process modules with rainfall fields, persistent sediment,
+   physical erodibility/roughness units, explicit process stepping, and reset.
 9. A QGIS plugin or live transport. Version 1.0 implements the documented file
    protocol only; vector sync and silent conflict policies are not exposed.
 

@@ -851,6 +851,47 @@ namespace TerrainLab
                             "0",
                             "uint8");
                     }
+
+                    WriteOptionalWaterLayer(
+                        stagingDirectory,
+                        state,
+                        layers,
+                        "hydrology.water_dynamics.hydro_feature",
+                        "hydro_feature.tif",
+                        state.WaterDynamics.HydroFeature,
+                        "255");
+                    WriteOptionalWaterLayer(
+                        stagingDirectory,
+                        state,
+                        layers,
+                        "hydrology.water_dynamics.moisture",
+                        "moisture.tif",
+                        state.WaterDynamics.Moisture,
+                        string.Empty);
+                    WriteOptionalWaterLayer(
+                        stagingDirectory,
+                        state,
+                        layers,
+                        "hydrology.water_dynamics.erodibility",
+                        "erodibility.tif",
+                        state.WaterDynamics.Erodibility,
+                        "255");
+                    WriteOptionalWaterLayer(
+                        stagingDirectory,
+                        state,
+                        layers,
+                        "hydrology.water_dynamics.local_slope",
+                        "local_slope.tif",
+                        state.WaterDynamics.LocalSlope,
+                        "255");
+                    WriteOptionalWaterLayer(
+                        stagingDirectory,
+                        state,
+                        layers,
+                        "hydrology.water_dynamics.local_aspect",
+                        "local_aspect.tif",
+                        state.WaterDynamics.LocalAspect,
+                        "255");
                 }
 
                 if (state.Erosion != null && state.Erosion.IsCurrent(state))
@@ -936,6 +977,32 @@ namespace TerrainLab
                 NoData = noData,
                 Sha256 = ComputeFileSha256(path)
             });
+        }
+
+        private static void WriteOptionalWaterLayer(
+            string directory,
+            TerrainWorldState state,
+            ICollection<TerrainGisLayerManifest> layers,
+            string id,
+            string fileName,
+            byte[] values,
+            string noData)
+        {
+            if (values?.Length != state.CellCount)
+            {
+                return;
+            }
+
+            WriteLayer(
+                directory,
+                state,
+                layers,
+                id,
+                fileName,
+                values,
+                TerrainTiffSampleKind.UInt8,
+                noData,
+                "uint8");
         }
 
         internal static string ComputeFileSha256(string path)

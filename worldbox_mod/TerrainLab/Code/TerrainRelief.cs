@@ -176,6 +176,51 @@ namespace TerrainLab
                     ? TerrainLayerAvailability.Ready
                     : TerrainLayerAvailability.Missing,
                 false));
+            layers.Add(new TerrainLayerInfo(
+                "hydrology.water_dynamics.hydro_feature",
+                "hydrology",
+                "uint8",
+                byte.MaxValue,
+                state.WaterDynamics?.HydroFeature?.Length == state.CellCount
+                    ? TerrainLayerAvailability.Ready
+                    : TerrainLayerAvailability.Missing,
+                false));
+            layers.Add(new TerrainLayerInfo(
+                "hydrology.water_dynamics.moisture",
+                "hydrology",
+                "uint8",
+                null,
+                state.WaterDynamics?.Moisture?.Length == state.CellCount
+                    ? TerrainLayerAvailability.Ready
+                    : TerrainLayerAvailability.Missing,
+                false));
+            layers.Add(new TerrainLayerInfo(
+                "hydrology.water_dynamics.erodibility",
+                "hydrology",
+                "uint8",
+                byte.MaxValue,
+                state.WaterDynamics?.Erodibility?.Length == state.CellCount
+                    ? TerrainLayerAvailability.Ready
+                    : TerrainLayerAvailability.Missing,
+                false));
+            layers.Add(new TerrainLayerInfo(
+                "hydrology.water_dynamics.local_slope",
+                "hydrology",
+                "uint8/radians",
+                TerrainRiverValleyModel.NoDirection,
+                state.WaterDynamics?.LocalSlope?.Length == state.CellCount
+                    ? TerrainLayerAvailability.Ready
+                    : TerrainLayerAvailability.Missing,
+                false));
+            layers.Add(new TerrainLayerInfo(
+                "hydrology.water_dynamics.local_aspect",
+                "hydrology",
+                "uint8/radians",
+                TerrainRiverValleyModel.NoDirection,
+                state.WaterDynamics?.LocalAspect?.Length == state.CellCount
+                    ? TerrainLayerAvailability.Ready
+                    : TerrainLayerAvailability.Missing,
+                false));
 
             TerrainLayerAvailability erosion = GetAvailability(
                 state.Erosion != null,

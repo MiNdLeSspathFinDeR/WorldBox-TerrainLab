@@ -2,6 +2,30 @@
 
 ## Unreleased
 
+## 1.2.0 - 2026-07-16
+
+- Added persistent `River` and `Waterbody` cell semantics independent of sea
+  level, so inland water remains freshwater at positive or negative DEM values
+  and dry channels retain their identity for later recharge.
+- Added compact UInt8 moisture, nonlinear erodibility, local Horn slope, and
+  downslope-aspect fields. Slope and aspect decode to radians without adding
+  floating-point arrays to the project state.
+- Added material-aware routing resistance and water retention. Saturated soil
+  and organic cover degrade to sand; low-energy saturated alluvium can form a
+  gameplay-safe clay substrate with higher retention and lower erodibility.
+- Added bounded stream-power incision. Active rivers may lower their local Int16
+  DEM bed by one to three metres per climate step, no more than 24 metres below
+  the current local neighbor floor.
+- Rebuilds live routing after incision while preserving every active source's
+  origin, head, and remaining finite volume, allowing geysers to continue down
+  the newly cut valley.
+- Added live overlays, localized inspection values, layer-catalog entries, and
+  GeoTIFF exports for hydro feature, moisture, erodibility, local slope, and
+  local aspect.
+- Advanced `hydrology.water_dynamics` to schema `1.3.0`; older payloads migrate
+  managed cells into safe river/waterbody defaults, while dry hydro features
+  and their dynamic fields now survive WBXGEO round trips.
+
 ## 1.1.0 - 2026-07-16
 
 - Added map overlays for core landforms, materials, 250-metre contours,

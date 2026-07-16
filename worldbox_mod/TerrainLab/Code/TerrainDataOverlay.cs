@@ -11,7 +11,12 @@ namespace TerrainLab
         Material,
         Contours,
         ManagedWater,
-        WaterStorage
+        WaterStorage,
+        HydroFeature,
+        Moisture,
+        Erodibility,
+        LocalSlope,
+        LocalAspect
     }
 
     public sealed class TerrainDataOverlay : MonoBehaviour
@@ -92,10 +97,7 @@ namespace TerrainLab
 
         public void UpdateCells(TerrainWorldState state, IReadOnlyList<int> indices)
         {
-            if (!References(state) ||
-                (Mode != TerrainDataOverlayMode.ManagedWater &&
-                 Mode != TerrainDataOverlayMode.WaterStorage &&
-                 Mode != TerrainDataOverlayMode.Contours))
+            if (!References(state))
             {
                 return;
             }
@@ -297,6 +299,8 @@ namespace TerrainLab
                     return new Color32(54, 154, 72, 180);
                 case TerrainMaterial.Artificial:
                     return new Color32(213, 74, 181, 210);
+                case TerrainMaterial.Clay:
+                    return new Color32(166, 92, 71, 205);
                 default:
                     return new Color32(105, 105, 105, 90);
             }
@@ -326,6 +330,94 @@ namespace TerrainLab
                     new Color32(25, 100, 235, 210),
                     new Color32(205, 55, 185, 235),
                     (ratio - 0.59f) / 0.41f);
+        }
+
+        public static Color32 GetHydroFeatureColor(byte value)
+        {
+            switch (TerrainRiverValleyModel.NormalizeFeature(value))
+            {
+                case TerrainHydroFeature.River:
+                    return new Color32(25, 220, 245, 225);
+                case TerrainHydroFeature.Waterbody:
+                    return new Color32(42, 90, 235, 220);
+                default:
+                    return new Color32(0, 0, 0, 0);
+            }
+        }
+
+        public static Color32 GetMoistureColor(byte value)
+        {
+            if (value == 0)
+            {
+                return new Color32(0, 0, 0, 0);
+            }
+
+            float ratio = value / (float)byte.MaxValue;
+            return ratio < 0.5f
+                ? Lerp(
+                    new Color32(181, 120, 54, 105),
+                    new Color32(46, 190, 155, 185),
+                    ratio * 2f)
+                : Lerp(
+                    new Color32(46, 190, 155, 185),
+                    new Color32(26, 82, 238, 230),
+                    (ratio - 0.5f) * 2f);
+        }
+
+        public static Color32 GetErodibilityColor(byte value)
+        {
+            if (value == 0 || value == byte.MaxValue)
+            {
+                return new Color32(0, 0, 0, 0);
+            }
+
+            float ratio = value / (float)TerrainRiverValleyModel.MaximumEncodedValue;
+            return ratio < 0.5f
+                ? Lerp(
+                    new Color32(43, 145, 78, 125),
+                    new Color32(245, 214, 54, 195),
+                    ratio * 2f)
+                : Lerp(
+                    new Color32(245, 214, 54, 195),
+                    new Color32(225, 50, 38, 230),
+                    (ratio - 0.5f) * 2f);
+        }
+
+        public static Color32 GetLocalSlopeColor(byte value)
+        {
+            if (value == TerrainRiverValleyModel.NoDirection)
+            {
+                return new Color32(0, 0, 0, 0);
+            }
+
+            float ratio = value / (float)TerrainRiverValleyModel.MaximumEncodedValue;
+            return ratio < 0.5f
+                ? Lerp(
+                    new Color32(36, 157, 88, 110),
+                    new Color32(247, 214, 55, 195),
+                    ratio * 2f)
+                : Lerp(
+                    new Color32(247, 214, 55, 195),
+                    new Color32(210, 42, 35, 230),
+                    (ratio - 0.5f) * 2f);
+        }
+
+        public static Color32 GetLocalAspectColor(byte value)
+        {
+            if (value == TerrainRiverValleyModel.NoDirection)
+            {
+                return new Color32(0, 0, 0, 0);
+            }
+
+            Color color = Color.HSVToRGB(
+                value / (float)TerrainRiverValleyModel.MaximumEncodedValue,
+                0.82f,
+                1f);
+            return new Color32(
+                (byte)Mathf.RoundToInt(color.r * byte.MaxValue),
+                (byte)Mathf.RoundToInt(color.g * byte.MaxValue),
+                (byte)Mathf.RoundToInt(color.b * byte.MaxValue),
+                205);
         }
 
         public static Color32 GetContourColor(
@@ -390,6 +482,16 @@ namespace TerrainLab
                     return state.WaterDynamics?.ManagedMask?.Length == state.CellCount;
                 case TerrainDataOverlayMode.WaterStorage:
                     return state.WaterDynamics?.WaterStorage?.Length == state.CellCount;
+                case TerrainDataOverlayMode.HydroFeature:
+                    return state.WaterDynamics?.HydroFeature?.Length == state.CellCount;
+                case TerrainDataOverlayMode.Moisture:
+                    return state.WaterDynamics?.Moisture?.Length == state.CellCount;
+                case TerrainDataOverlayMode.Erodibility:
+                    return state.WaterDynamics?.Erodibility?.Length == state.CellCount;
+                case TerrainDataOverlayMode.LocalSlope:
+                    return state.WaterDynamics?.LocalSlope?.Length == state.CellCount;
+                case TerrainDataOverlayMode.LocalAspect:
+                    return state.WaterDynamics?.LocalAspect?.Length == state.CellCount;
                 default:
                     return true;
             }
@@ -422,6 +524,16 @@ namespace TerrainLab
                     return GetManagedWaterColor(state.WaterDynamics.ManagedMask[index]);
                 case TerrainDataOverlayMode.WaterStorage:
                     return GetWaterStorageColor(state.WaterDynamics.WaterStorage[index]);
+                case TerrainDataOverlayMode.HydroFeature:
+                    return GetHydroFeatureColor(state.WaterDynamics.HydroFeature[index]);
+                case TerrainDataOverlayMode.Moisture:
+                    return GetMoistureColor(state.WaterDynamics.Moisture[index]);
+                case TerrainDataOverlayMode.Erodibility:
+                    return GetErodibilityColor(state.WaterDynamics.Erodibility[index]);
+                case TerrainDataOverlayMode.LocalSlope:
+                    return GetLocalSlopeColor(state.WaterDynamics.LocalSlope[index]);
+                case TerrainDataOverlayMode.LocalAspect:
+                    return GetLocalAspectColor(state.WaterDynamics.LocalAspect[index]);
                 default:
                     return new Color32(0, 0, 0, 0);
             }
