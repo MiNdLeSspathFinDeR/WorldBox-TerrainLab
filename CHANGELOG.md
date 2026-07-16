@@ -2,6 +2,22 @@
 
 ## Unreleased
 
+## 1.3.0 - 2026-07-17
+
+- Live channel growth now materializes up to three consecutive receiver cells
+  per routing operation. Each fragment is a connected straight or turning
+  triplet for D8, D-infinity, and MFD instead of immediate sibling pixels.
+- Removed obstacle bypass from blocked channel fronts. A route now ends at its
+  last reachable cell or takes another receiver adjacent to that cell; it can
+  no longer jump across an unavailable gameplay tile and leave detached water.
+  Every triplet member still pays its own depth/resistance cost and obeys the
+  per-tick and flooded-area limits.
+- Added native WorldBox hover tooltips to every numeric DEM, brush, hydrology,
+  erosion, and live-water parameter. English and Russian text explains the
+  control in plain language, its valid range, and the effect of increasing it.
+- Advanced `hydrology.water_dynamics` to schema `1.6.0` to identify connected
+  triplet routing. The stored raster layout remains compatible with `1.5.x`.
+
 ## 1.2.4 - 2026-07-17
 
 - Water-state rasters are now initialized when a world is attached, so every

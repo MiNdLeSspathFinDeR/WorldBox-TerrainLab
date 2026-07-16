@@ -18,7 +18,7 @@ the local game assemblies and copies only TerrainLab source, locales, metadata,
 and resources. It uses normal `dotnet` and file-copy operations; it does not
 compile temporary PowerShell interop assemblies.
 
-## TerrainLab 1.2 workspace
+## TerrainLab 1.3 workspace
 
 The top toolbar keeps routine commands over the map. It stretches with the
 logical canvas, evenly distributes buttons, and wraps into the minimum balanced
@@ -178,7 +178,7 @@ WorldBox writes `map.wbox` first; TerrainLab then writes
 same vanilla map plus core GIS arrays and optional hydrology, live-water, and
 erosion modules.
 Live-water configuration and all eight state rasters use optional
-`hydrology.water_dynamics` schema `1.5.0`. The managed mask, store,
+`hydrology.water_dynamics` schema `1.6.0`. The managed mask, store,
 river/waterbody class, moisture, erodibility, local slope, and local aspect also
 export to GeoTIFF; restore-surface codes remain package-internal.
 Unknown optional module data survives load/save. Invalid optional data is

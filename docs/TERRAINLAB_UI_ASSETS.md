@@ -20,7 +20,7 @@ against screen edges and can be collapsed independently.
 
 ## Implementation status
 
-Version 1.2.4 implements the standalone side button, an adaptive top GIS
+Version 1.3.0 implements the standalone side button, an adaptive top GIS
 toolbar, and a stock WorldBox internal window. The toolbar copies the bottom
 WorldBox panel and button sprites, stretches to the logical canvas width, and
 balances commands across as few rows as the current UI scale permits. Its frame
@@ -70,6 +70,10 @@ managed-cell/source diagnostics plus geyser, injected-volume, and
 consumed-volume counters. A segmented `D8 | D-infinity | MFD` selector changes
 only future live channel routing and
 highlights the active method; each option has a method-specific hover summary.
+Channel operations create connected three-cell line/corner fragments whenever
+budget, obstacles, and the per-tick limit permit. Every numeric parameter label
+and value field uses the native WorldBox tooltip and explains its range, the
+effect of increasing it, and any performance tradeoff in English and Russian.
 
 The Layers chapter also exposes the authoritative Int16 DEM directly, without
 requiring relief analysis. It renders one point-filtered texture pixel per world
@@ -139,7 +143,9 @@ and a command-specific description. The internal `CreateActionButton` API makes
 both keys mandatory, so a newly added button cannot compile without an explicit
 tooltip. English and Russian locale files have matching key sets. Tooltips state
 what data changes, required input, repeat-click behavior, and whether an action
-is a preview or writes the authoritative DEM.
+is a preview or writes the authoritative DEM. Numeric labels and input fields
+also use the game's native `TipButton`; their descriptions state valid ranges
+and explain what a larger value does in non-specialist language.
 
 ## Current icon coverage
 

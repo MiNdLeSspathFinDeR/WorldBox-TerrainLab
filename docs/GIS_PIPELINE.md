@@ -125,12 +125,17 @@ bounded DEM process without replacing WorldBox's own ocean behavior:
    triangular facets and divides flow between at most two adjacent cells; MFD
    distributes flow among every strict downslope neighbor with Freeman's slope
    exponent `1.1`. Flats fall back to the Priority-Flood receiver.
-3. The selected routing front first creates managed shallow channels, then interleaves
-   local filling only among cells in the same positive-depth depression and at
-   the same spill elevation. It does not run an unrestricted flood fill over a
-   tilted plane. D-infinity and MFD fronts are capped at 512 queued branches per
-   source; all branches consume the same finite integer source budget.
-4. Source volume is integer. A cell cost combines Priority-Flood depth with a
+3. The selected routing front first creates managed shallow channels as up to
+   three consecutive receiver cells. The strongest route therefore appears as
+   one connected straight or turning triplet instead of several sibling pixels.
+   A blocked receiver is discarded without searching beyond it, so a channel
+   cannot jump across an unavailable gameplay cell. Secondary D-infinity and
+   MFD receivers remain queued as later branches, capped at 512 fronts per
+   source. Local depression filling is interleaved only among adjacent cells at
+   the same positive-depth spill elevation; it never runs an unrestricted flood
+   fill over a tilted plane.
+4. Source volume is integer. Every member of a triplet is charged separately;
+   a cell cost combines Priority-Flood depth with a
    material/feature/moisture resistance term. Clay and an established channel
    pass flow farther than dry soil, organic cover, rock, or artificial material.
    An ordinary contact still has a finite configurable volume.

@@ -1396,6 +1396,10 @@ internal static class Program
             .ToArray();
         Assert(firstPath.Length == 3 && first.ManagedCellCount == 3,
             "Finite water source did not consume exactly its volume.");
+        AssertConnectedChannelTriplet(
+            firstPath,
+            width,
+            "D8 finite-source channel");
         Assert(first.Step(100, _ => true).Count == 0,
             "Exhausted finite water source continued spreading.");
         Assert(firstPath.All(index => elevation[index] != TerrainElevationEncoding.NoData),
@@ -1439,6 +1443,41 @@ internal static class Program
             .ToArray();
         Assert(firstPath.SequenceEqual(repeatedPath),
             "D8 water routing is not deterministic.");
+
+        TerrainWaterSimulation queuedTriplet = new TerrainWaterSimulation(
+            routing,
+            new byte[count],
+            new byte[count],
+            finiteParameters);
+        queuedTriplet.AddSource(source, elevation[source], 10);
+        Assert(
+            queuedTriplet.Step(4, _ => true).Count == 4 &&
+            queuedTriplet.RechargedCells.Count == 0,
+            "A directly materialized triplet left stale recharge fronts.");
+
+        TerrainWaterReceiver[] blockedReceivers = new TerrainWaterReceiver[8];
+        int blockedReceiverCount = routing.GetReceivers(
+            source,
+            TerrainWaterRoutingAlgorithm.D8,
+            blockedReceivers);
+        Assert(blockedReceiverCount == 1,
+            "D8 obstacle test did not find a unique receiver.");
+        int blockedReceiver = blockedReceivers[0].Index;
+        TerrainWaterSimulation blocked = new TerrainWaterSimulation(
+            routing,
+            new byte[count],
+            new byte[count],
+            finiteParameters);
+        blocked.AddSource(source, elevation[source], 3);
+        int[] blockedPath = blocked.Step(
+                3,
+                index => index != blockedReceiver)
+            .Select(change => change.Index)
+            .ToArray();
+        Assert(
+            blockedPath.SequenceEqual(new[] { source }) &&
+            !blocked.IsWater(blockedReceiver),
+            "A blocked D8 channel jumped across an unavailable cell.");
 
         const int basinWidth = 7;
         const int basinHeight = 7;
@@ -1751,8 +1790,14 @@ internal static class Program
             .ToArray();
         Assert(
             dinfPath.Length == 3 &&
-            dinfPath.Skip(1).All(dinfDirectReceivers.Contains),
-            "D-infinity channel fronts did not materialize both weighted branches.");
+            dinfDirectReceivers.Contains(dinfPath[1]) &&
+            routing.DrainageRank[dinfPath[2]] <
+            routing.DrainageRank[dinfPath[1]],
+            "D-infinity did not continue through its strongest receiver.");
+        AssertConnectedChannelTriplet(
+            dinfPath,
+            width,
+            "D-infinity channel");
 
         int mfdCount = routing.GetReceivers(
             center,
@@ -1786,9 +1831,14 @@ internal static class Program
             .ToArray();
         Assert(
             mfdPath.Length == 3 &&
-            mfdPath.Skip(1).Distinct().Count() == 2 &&
-            mfdPath.Skip(1).All(mfdDirectReceivers.Contains),
-            "MFD channel fronts did not materialize distinct weighted branches.");
+            mfdDirectReceivers.Contains(mfdPath[1]) &&
+            routing.DrainageRank[mfdPath[2]] <
+            routing.DrainageRank[mfdPath[1]],
+            "MFD did not continue through its strongest receiver.");
+        AssertConnectedChannelTriplet(
+            mfdPath,
+            width,
+            "MFD channel");
 
         TerrainWaterParameters mfdParameters = new TerrainWaterParameters
         {
@@ -1797,6 +1847,26 @@ internal static class Program
         string serialized = JsonConvert.SerializeObject(mfdParameters);
         Assert(serialized.Contains("\"routing_algorithm\":\"mfd\""),
             "The live-water routing algorithm is not stored by stable string ID.");
+    }
+
+    private static void AssertConnectedChannelTriplet(
+        IReadOnlyList<int> path,
+        int width,
+        string context)
+    {
+        Assert(path.Count == 3, context + " is not a three-cell fragment.");
+        for (int index = 1; index < path.Count; index++)
+        {
+            int previousX = path[index - 1] % width;
+            int previousY = path[index - 1] / width;
+            int currentX = path[index] % width;
+            int currentY = path[index] / width;
+            int dx = Math.Abs(currentX - previousX);
+            int dy = Math.Abs(currentY - previousY);
+            Assert(
+                dx <= 1 && dy <= 1 && dx + dy > 0,
+                context + " contains a disconnected cell jump.");
+        }
     }
 
     private static void ValidateGeoTiff(string testRoot)
@@ -2328,6 +2398,11 @@ internal static class Program
                     manifest["modules"].Any(module =>
                         (string)module["id"] == "hydrology.water_dynamics"),
                     "Water dynamics module descriptor is missing.");
+                Assert(
+                    (string)manifest["modules"].Single(module =>
+                        (string)module["id"] == "hydrology.water_dynamics")
+                        ["schema_version"] == "1.6.0",
+                    "Water dynamics schema does not identify triplet routing.");
                 Assert(
                     manifest["modules"].Any(module =>
                         (string)module["id"] == "erosion.hydraulic"),

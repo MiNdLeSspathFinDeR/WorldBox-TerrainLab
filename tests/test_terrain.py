@@ -1,5 +1,7 @@
+import json
 import unittest
 import zlib
+from pathlib import Path
 
 import numpy as np
 from PIL import Image, ImageDraw
@@ -17,9 +19,39 @@ from imagetomap.utils import json_loads
 
 
 WATER_TILES = {"deep_ocean", "close_ocean", "shallow_waters"}
+ROOT = Path(__file__).resolve().parents[1]
+
+PARAMETER_TOOLTIP_KEYS = (
+    "terrain_lab_elevation_value",
+    "terrain_lab_elevation_step",
+    "terrain_lab_brush_radius",
+    "terrain_lab_hydrology_threshold",
+    "terrain_lab_erosion_iterations",
+    "terrain_lab_erosion_flow_strength",
+    "terrain_lab_erosion_thermal_strength",
+    "terrain_lab_erosion_talus",
+    "terrain_lab_water_maximum_flood_percent",
+    "terrain_lab_water_initial_source_volume",
+    "terrain_lab_water_geyser_pulse_volume",
+    "terrain_lab_water_cells_per_tick",
+    "terrain_lab_water_evaporation_per_climate_step",
+)
 
 
 class TerrainConversionTests(unittest.TestCase):
+    def test_mod_parameter_tooltips_are_complete_and_localized(self) -> None:
+        locale_directory = ROOT / "worldbox_mod" / "TerrainLab" / "Locales"
+        locales = {
+            name: json.loads((locale_directory / name).read_text(encoding="utf-8"))
+            for name in ("en.json", "ru.json")
+        }
+
+        self.assertEqual(set(locales["en.json"]), set(locales["ru.json"]))
+        for locale in locales.values():
+            for key in PARAMETER_TOOLTIP_KEYS:
+                self.assertTrue(locale[key])
+                self.assertTrue(locale[f"{key}_description"])
+
     def test_elevation_nodata_is_reserved(self) -> None:
         self.assertEqual(ELEVATION_NODATA, 9999)
         self.assertEqual((ELEVATION_MINIMUM, ELEVATION_MAXIMUM), (-20000, 9000))

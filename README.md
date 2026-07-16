@@ -3,7 +3,7 @@ TerrainLab combines an adaptive image-to-map converter with an extensible GIS
 project layer for WorldBox.
 
 > [!IMPORTANT]
-> TerrainLab 1.2 keeps WorldBox compatibility first: WBXGEO and scientific
+> TerrainLab 1.3 keeps WorldBox compatibility first: WBXGEO and scientific
 > layers are additive, while every normal save retains its vanilla `map.wbox`.
 
 ## Table of contents
@@ -27,7 +27,8 @@ project layer for WorldBox.
    Turbo height display, Earth-like morphotype-aware initial elevations with a
    metric `1000 m/cell` default and spatial grade limiting,
    relief derivatives, Priority-Flood/D8, watersheds, Strahler order,
-   selectable D8/D-infinity/MFD live-water channels, absolute 0/-5/-150 m water
+   selectable D8/D-infinity/MFD live-water channels grown as connected
+   three-cell line/corner fragments, absolute 0/-5/-150 m water
    classes, persistent river/waterbody zones, geyser-fed recharge, moisture,
    material resistance, soil degradation, bounded DEM channel incision,
    deterministic erosion, two-point DEM grading, contours, categorical core

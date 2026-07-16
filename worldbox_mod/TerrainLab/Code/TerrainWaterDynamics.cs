@@ -998,6 +998,7 @@ namespace TerrainLab
         private const int MaximumSources = 256;
         private const int MaximumChannelFrontsPerSource = 512;
         private const int ChannelCellsPerBasinCell = 3;
+        private const int ChannelTripletSize = 3;
         private const double MinimumFlowPriority = 1e-12;
 
         private readonly TerrainWaterRouting _routing;
@@ -1225,19 +1226,17 @@ namespace TerrainLab
                     continue;
                 }
 
-                TerrainWaterCellChange? change = Advance(source, canFlood);
-                if (change.HasValue)
-                {
-                    changes.Add(change.Value);
-                }
+                Advance(source, canFlood, changes, maximumChanges);
             }
 
             return changes;
         }
 
-        private TerrainWaterCellChange? Advance(
+        private void Advance(
             WaterSource source,
-            Func<int, bool> canFlood)
+            Func<int, bool> canFlood,
+            List<TerrainWaterCellChange> changes,
+            int maximumChanges)
         {
             if ((source.Channel.Count == 0 ||
                  source.ChannelCellsSinceBasin >= ChannelCellsPerBasinCell) &&
@@ -1246,28 +1245,35 @@ namespace TerrainLab
                 TerrainWaterCellChange? basinChange = AdvanceBasin(source, canFlood);
                 if (basinChange.HasValue || source.Channel.Count == 0)
                 {
-                    return basinChange;
+                    if (basinChange.HasValue)
+                    {
+                        changes.Add(basinChange.Value);
+                    }
+
+                    return;
                 }
             }
 
             if (source.Channel.Count == 0)
             {
                 source.Budget = 0;
-                return null;
+                return;
             }
 
-            return AdvanceChannel(source, canFlood);
+            AdvanceChannel(source, canFlood, changes, maximumChanges);
         }
 
-        private TerrainWaterCellChange? AdvanceChannel(
+        private void AdvanceChannel(
             WaterSource source,
-            Func<int, bool> canFlood)
+            Func<int, bool> canFlood,
+            List<TerrainWaterCellChange> changes,
+            int maximumChanges)
         {
             for (int skip = 0; skip < 64; skip++)
             {
                 if (!source.Channel.TryPop(out ChannelFront front))
                 {
-                    return null;
+                    return;
                 }
 
                 int candidate = front.Index;
@@ -1288,18 +1294,11 @@ namespace TerrainLab
                 if (_routing.Elevation[candidate] > source.HeadElevation)
                 {
                     source.Channel.Push(front);
-                    return null;
+                    return;
                 }
 
                 if (canFlood != null && !canFlood(candidate))
                 {
-                    int alternative = FindAlternativeReceiver(source, candidate);
-                    if (alternative < 0)
-                    {
-                        continue;
-                    }
-
-                    TryEnqueueChannel(source, alternative, front.Priority);
                     continue;
                 }
 
@@ -1307,18 +1306,123 @@ namespace TerrainLab
                 if (source.Budget < cost || LimitReached)
                 {
                     source.Channel.Push(front);
-                    return null;
+                    return;
+                }
+
+                MaterializeChannelTriplet(
+                    source,
+                    candidate,
+                    front.Priority,
+                    canFlood,
+                    changes,
+                    maximumChanges);
+                return;
+            }
+        }
+
+        private void MaterializeChannelTriplet(
+            WaterSource source,
+            int first,
+            double firstPriority,
+            Func<int, bool> canFlood,
+            List<TerrainWaterCellChange> changes,
+            int maximumChanges)
+        {
+            int current = first;
+            double priority = firstPriority;
+            for (int part = 0;
+                 part < ChannelTripletSize && changes.Count < maximumChanges;
+                 part++)
+            {
+                int cost = GetCellCost(current);
+                if (_waterMask[current] != 0 ||
+                    _routing.Elevation[current] > source.HeadElevation ||
+                    canFlood != null && !canFlood(current) ||
+                    source.Budget < cost ||
+                    LimitReached)
+                {
+                    break;
                 }
 
                 source.Budget -= cost;
-                MarkManagedWater(candidate);
-                EnqueueBasin(source, candidate);
-                EnqueueReceivers(source, candidate, front.Priority);
+                MarkManagedWater(current);
+                EnqueueBasin(source, current);
                 source.ChannelCellsSinceBasin++;
-                return CreateChange(candidate, cost, source.Origin);
+                changes.Add(CreateChange(current, cost, source.Origin));
+
+                int receiver = -1;
+                double receiverPriority = 0.0;
+                bool continueTriplet =
+                    part + 1 < ChannelTripletSize &&
+                    changes.Count < maximumChanges &&
+                    !LimitReached &&
+                    TrySelectTripletReceiver(
+                        source,
+                        current,
+                        priority,
+                        canFlood,
+                        out receiver,
+                        out receiverPriority);
+                if (continueTriplet)
+                {
+                    source.ChannelSeen.Add(receiver);
+                }
+
+                EnqueueReceivers(
+                    source,
+                    current,
+                    priority,
+                    continueTriplet ? receiver : -1);
+                if (!continueTriplet)
+                {
+                    break;
+                }
+
+                current = receiver;
+                priority = receiverPriority;
+            }
+        }
+
+        private bool TrySelectTripletReceiver(
+            WaterSource source,
+            int current,
+            double parentPriority,
+            Func<int, bool> canFlood,
+            out int selected,
+            out double selectedPriority)
+        {
+            selected = -1;
+            selectedPriority = 0.0;
+            int count = _routing.GetReceivers(
+                current,
+                _parameters.RoutingAlgorithm,
+                _receiverBuffer);
+            SortReceiversByWeight(_receiverBuffer, count);
+            for (int index = 0; index < count; index++)
+            {
+                TerrainWaterReceiver receiver = _receiverBuffer[index];
+                int candidate = receiver.Index;
+                if (source.ChannelSeen.Contains(candidate) ||
+                    _waterMask[candidate] != 0 ||
+                    _routing.Elevation[candidate] > source.HeadElevation ||
+                    canFlood != null && !canFlood(candidate) ||
+                    source.Budget < GetCellCost(candidate))
+                {
+                    continue;
+                }
+
+                double priority = parentPriority * receiver.Weight;
+                if (double.IsNaN(priority) || priority <= 0.0)
+                {
+                    continue;
+                }
+
+                selected = candidate;
+                selectedPriority = Math.Max(MinimumFlowPriority, priority);
+                return true;
             }
 
-            return null;
+            return false;
         }
 
         private TerrainWaterCellChange? AdvanceBasin(
@@ -1384,37 +1488,11 @@ namespace TerrainLab
             });
         }
 
-        private int FindAlternativeReceiver(WaterSource source, int current)
-        {
-            int best = -1;
-            _routing.ForEachNeighbor(current, delegate(int neighbor)
-            {
-                if (_routing.Elevation[neighbor] == TerrainElevationEncoding.NoData ||
-                    _routing.Elevation[neighbor] > source.HeadElevation ||
-                    source.ChannelSeen.Contains(neighbor) ||
-                    _routing.DrainageRank[neighbor] >=
-                    _routing.DrainageRank[current] ||
-                    _routing.FilledElevation[neighbor] > _routing.FilledElevation[current])
-                {
-                    return;
-                }
-
-                if (best < 0 ||
-                    _routing.FilledElevation[neighbor] < _routing.FilledElevation[best] ||
-                    _routing.FilledElevation[neighbor] == _routing.FilledElevation[best] &&
-                    (_routing.Elevation[neighbor] < _routing.Elevation[best] ||
-                     _routing.Elevation[neighbor] == _routing.Elevation[best] && neighbor < best))
-                {
-                    best = neighbor;
-                }
-            });
-            return best;
-        }
-
         private void EnqueueReceivers(
             WaterSource source,
             int current,
-            double parentPriority)
+            double parentPriority,
+            int excludedReceiver = -1)
         {
             int count = _routing.GetReceivers(
                 current,
@@ -1424,6 +1502,11 @@ namespace TerrainLab
             for (int index = 0; index < count; index++)
             {
                 TerrainWaterReceiver receiver = _receiverBuffer[index];
+                if (receiver.Index == excludedReceiver)
+                {
+                    continue;
+                }
+
                 double priority = parentPriority * receiver.Weight;
                 if (double.IsNaN(priority) || priority <= 0.0)
                 {
@@ -1807,7 +1890,7 @@ namespace TerrainLab
 
         public string Id => "hydrology.water_dynamics";
 
-        public string SchemaVersion => "1.5.0";
+        public string SchemaVersion => "1.6.0";
 
         public bool IsRequired => false;
 

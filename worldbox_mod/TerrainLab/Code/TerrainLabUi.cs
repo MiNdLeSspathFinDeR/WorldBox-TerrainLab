@@ -1979,7 +1979,7 @@ namespace TerrainLab
             Transform radiusRow = CreateActionRow(
                 _moduleContent,
                 "TerrainLabElevationRadius");
-            CreateTextLabel(
+            Text radiusLabel = CreateTextLabel(
                 radiusRow,
                 "TerrainLabElevationRadiusLabel",
                 LM.Get("terrain_lab_brush_radius"),
@@ -1989,6 +1989,9 @@ namespace TerrainLab
                 TextAnchor.MiddleLeft,
                 NeutralText,
                 78f);
+            ConfigureParameterTooltip(
+                radiusLabel.gameObject,
+                "terrain_lab_brush_radius");
             CreateActionButton(
                 radiusRow,
                 "-",
@@ -2008,6 +2011,9 @@ namespace TerrainLab
                 TextAnchor.MiddleCenter,
                 Color.white,
                 40f);
+            ConfigureParameterTooltip(
+                _brushRadiusText.gameObject,
+                "terrain_lab_brush_radius");
             CreateActionButton(
                 radiusRow,
                 "+",
@@ -2688,7 +2694,7 @@ namespace TerrainLab
             Transform radiusRow = CreateActionRow(
                 _moduleContent,
                 "TerrainLabElevationRadius");
-            CreateTextLabel(
+            Text radiusLabel = CreateTextLabel(
                 radiusRow,
                 "TerrainLabElevationRadiusLabel",
                 LM.Get("terrain_lab_brush_radius"),
@@ -2698,6 +2704,9 @@ namespace TerrainLab
                 TextAnchor.MiddleLeft,
                 NeutralText,
                 78f);
+            ConfigureParameterTooltip(
+                radiusLabel.gameObject,
+                "terrain_lab_brush_radius");
             CreateActionButton(
                 radiusRow,
                 "-",
@@ -2717,6 +2726,9 @@ namespace TerrainLab
                 TextAnchor.MiddleCenter,
                 Color.white,
                 40f);
+            ConfigureParameterTooltip(
+                _brushRadiusText.gameObject,
+                "terrain_lab_brush_radius");
             CreateActionButton(
                 radiusRow,
                 "+",
@@ -3772,7 +3784,7 @@ namespace TerrainLab
             int characterLimit = 6)
         {
             Transform row = CreateActionRow(_moduleContent, objectName);
-            CreateTextLabel(
+            Text label = CreateTextLabel(
                 row,
                 objectName + "Label",
                 LM.Get(labelKey),
@@ -3782,6 +3794,7 @@ namespace TerrainLab
                 TextAnchor.MiddleLeft,
                 NeutralText,
                 78f);
+            ConfigureParameterTooltip(label.gameObject, labelKey);
 
             TextInput input = TextInput.Instantiate(row, false);
             input.Setup(value, valueChanged);
@@ -3790,6 +3803,7 @@ namespace TerrainLab
             input.input.characterLimit = characterLimit;
             input.text.resizeTextMinSize = 8;
             input.text.resizeTextMaxSize = 11;
+            ConfigureParameterTooltip(input.gameObject, labelKey);
 
             LayoutElement element = input.GetComponent<LayoutElement>();
             if (element == null)
@@ -3799,6 +3813,24 @@ namespace TerrainLab
 
             element.preferredWidth = 120f;
             element.preferredHeight = 26f;
+        }
+
+        private static void ConfigureParameterTooltip(
+            GameObject target,
+            string labelKey)
+        {
+            TipButton tooltip = target.GetComponent<TipButton>();
+            if (tooltip == null)
+            {
+                tooltip = target.AddComponent<TipButton>();
+            }
+
+            tooltip.enabled = true;
+            tooltip.type = "tip";
+            tooltip.textOnClick = labelKey;
+            tooltip.textOnClickDescription = labelKey + "_description";
+            tooltip.text_description_2 = string.Empty;
+            tooltip.hoverAction = tooltip.showTooltipDefault;
         }
 
         private void SelectEditorTool(TerrainEditorTool tool)

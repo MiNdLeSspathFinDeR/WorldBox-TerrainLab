@@ -241,7 +241,7 @@ one module; it does not invalidate the core project.
 
 ### Live water module
 
-TerrainLab implements optional module `hydrology.water_dynamics` schema `1.5.0`.
+TerrainLab implements optional module `hydrology.water_dynamics` schema `1.6.0`.
 `state.json` stores whether routing is enabled, normalized integer parameters,
 managed-cell count, injected/consumed volume counters, and observed native
 geyser pulse count. Parameter `routing_algorithm` is one of `d8`, `dinf`, or
@@ -270,6 +270,9 @@ Schema `1.3.x` local slope and aspect values are recalculated with the core
 metric cell size during load. Schema `1.5.x` expands erodibility, local slope,
 and local aspect from active valleys to every valid DEM cell; older payloads
 receive those values deterministically during load.
+Schema `1.6.x` identifies connected triplet channel routing and does not add or
+remove stored fields. Each operation follows up to three consecutive receivers;
+blocked cells terminate that route without a non-adjacent bypass.
 Later native geyser pulses can continue replenishing a source. The configured
 flood percentage is normalized to `1..50`, and runtime
 code always enforces the same hard 50-percent ceiling over valid DEM cells.
