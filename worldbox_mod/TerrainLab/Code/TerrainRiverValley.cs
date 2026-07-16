@@ -199,11 +199,38 @@ namespace TerrainLab
             out byte aspect,
             out int convergence)
         {
+            CalculateLocalTerrain(
+                width,
+                height,
+                elevation,
+                index,
+                TerrainSpatialScale.MinimumHorizontalMetresPerCell,
+                out slope,
+                out aspect,
+                out convergence);
+        }
+
+        public static void CalculateLocalTerrain(
+            int width,
+            int height,
+            short[] elevation,
+            int index,
+            double horizontalMetresPerCell,
+            out byte slope,
+            out byte aspect,
+            out int convergence)
+        {
             int count = checked(width * height);
             if (width <= 0 || height <= 0 || elevation == null ||
                 elevation.Length != count || index < 0 || index >= count)
             {
                 throw new ArgumentException("Local terrain window does not match the DEM.");
+            }
+
+            if (!TerrainSpatialScale.IsValid(horizontalMetresPerCell))
+            {
+                throw new ArgumentOutOfRangeException(
+                    nameof(horizontalMetresPerCell));
             }
 
             short center = elevation[index];
@@ -228,10 +255,12 @@ namespace TerrainLab
 
             double dzdx =
                 (northEast + 2.0 * east + southEast -
-                 northWest - 2.0 * west - southWest) / 8.0;
+                 northWest - 2.0 * west - southWest) /
+                (8.0 * horizontalMetresPerCell);
             double dzdy =
                 (northWest + 2.0 * north + northEast -
-                 southWest - 2.0 * south - southEast) / 8.0;
+                 southWest - 2.0 * south - southEast) /
+                (8.0 * horizontalMetresPerCell);
             double gradient = Math.Sqrt(dzdx * dzdx + dzdy * dzdy);
             double slopeRadians = Math.Atan(gradient);
             slope = (byte)Math.Max(
@@ -290,6 +319,7 @@ namespace TerrainLab
                 state.Height,
                 state.Elevation,
                 index,
+                state.HorizontalMetresPerCell,
                 out byte slope,
                 out byte aspect,
                 out int convergence);
@@ -377,6 +407,7 @@ namespace TerrainLab
                     state.Height,
                     state.Elevation,
                     index,
+                    state.HorizontalMetresPerCell,
                     out byte slope,
                     out byte aspect,
                     out int convergence);

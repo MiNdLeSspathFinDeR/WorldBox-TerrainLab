@@ -1807,7 +1807,7 @@ namespace TerrainLab
 
         public string Id => "hydrology.water_dynamics";
 
-        public string SchemaVersion => "1.3.0";
+        public string SchemaVersion => "1.4.0";
 
         public bool IsRequired => false;
 
@@ -1992,6 +1992,36 @@ namespace TerrainLab
                     {
                         TerrainRiverValleyModel.ActivateCell(state, water, index);
                     }
+                }
+            }
+
+            if (version.Minor < 4)
+            {
+                for (int index = 0; index < state.CellCount; index++)
+                {
+                    bool active = water.ManagedMask[index] != 0 ||
+                                  water.Moisture[index] != 0 ||
+                                  TerrainRiverValleyModel.NormalizeFeature(
+                                      water.HydroFeature[index]) !=
+                                  TerrainHydroFeature.None;
+                    if (!active)
+                    {
+                        water.LocalSlope[index] =
+                            TerrainRiverValleyModel.NoDirection;
+                        water.LocalAspect[index] =
+                            TerrainRiverValleyModel.NoDirection;
+                        continue;
+                    }
+
+                    TerrainRiverValleyModel.CalculateLocalTerrain(
+                        state.Width,
+                        state.Height,
+                        state.Elevation,
+                        index,
+                        state.HorizontalMetresPerCell,
+                        out water.LocalSlope[index],
+                        out water.LocalAspect[index],
+                        out _);
                 }
             }
 

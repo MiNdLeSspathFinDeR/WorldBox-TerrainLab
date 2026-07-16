@@ -276,16 +276,16 @@ namespace TerrainLab
                 _topToolbar.SetActive(_workspaceVisible);
             }
 
-            if (_mapStatusBar != null && _mapStatusBar.activeSelf != _workspaceVisible)
-            {
-                _mapStatusBar.SetActive(_workspaceVisible);
-            }
+            UpdateMapStatusBarVisibility();
 
             UpdateSideButtonState();
 
             if (_workspaceVisible)
             {
-                UpdateMapStatusBar();
+                if (_mapStatusBar != null && _mapStatusBar.activeSelf)
+                {
+                    UpdateMapStatusBar();
+                }
                 UpdateAnalysisProgress();
                 UpdateToolbarState();
             }
@@ -1365,6 +1365,7 @@ namespace TerrainLab
                 UpdateToolbarSectionVisibility();
                 UpdateAdaptiveToolbarLayout(true);
                 UpdateToolbarState();
+                UpdateMapStatusBarVisibility();
                 return;
             }
 
@@ -1378,6 +1379,7 @@ namespace TerrainLab
             UpdateToolbarSectionVisibility();
             UpdateAdaptiveToolbarLayout(true);
             UpdateToolbarState();
+            UpdateMapStatusBarVisibility();
         }
 
         private static ToolbarSection GetToolbarSection(TerrainEditorTool tool)
@@ -3800,6 +3802,7 @@ namespace TerrainLab
             {
                 _editor.SetTool(TerrainEditorTool.None);
                 UpdateToolbarState();
+                UpdateMapStatusBarVisibility();
                 SetStatus(LM.Get("terrain_lab_status_tool_deselected"), false);
                 return;
             }
@@ -3814,6 +3817,7 @@ namespace TerrainLab
 
             _editor.SetTool(tool);
             UpdateToolbarState();
+            UpdateMapStatusBarVisibility();
             SetStatus(
                 string.Format(
                     LM.Get("terrain_lab_selected_format"),
@@ -4911,14 +4915,7 @@ namespace TerrainLab
                 }
             }
 
-            if (_mapStatusBar != null)
-            {
-                _mapStatusBar.SetActive(visible);
-                if (visible)
-                {
-                    _mapStatusBar.transform.SetAsLastSibling();
-                }
-            }
+            UpdateMapStatusBarVisibility();
 
             if (!visible && _window != null &&
                 _window.gameObject.activeInHierarchy)
@@ -4944,7 +4941,29 @@ namespace TerrainLab
             if (visible)
             {
                 UpdateToolbarState();
-                UpdateMapStatusBar();
+                if (_mapStatusBar != null && _mapStatusBar.activeSelf)
+                {
+                    UpdateMapStatusBar();
+                }
+            }
+        }
+
+        private void UpdateMapStatusBarVisibility()
+        {
+            if (_mapStatusBar == null)
+            {
+                return;
+            }
+
+            bool visible = _workspaceVisible && _editor != null &&
+                           _editor.Tool == TerrainEditorTool.Inspect;
+            if (_mapStatusBar.activeSelf != visible)
+            {
+                _mapStatusBar.SetActive(visible);
+                if (visible)
+                {
+                    _mapStatusBar.transform.SetAsLastSibling();
+                }
             }
         }
 

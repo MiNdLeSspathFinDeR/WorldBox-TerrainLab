@@ -277,6 +277,7 @@ namespace TerrainLab
             DateTime calculatedUtc,
             int width,
             int height,
+            double horizontalMetresPerCell,
             ushort[] slopeTenths,
             ushort[] aspectTenths,
             byte[] hillshade,
@@ -289,6 +290,7 @@ namespace TerrainLab
             CalculatedUtc = calculatedUtc;
             Width = width;
             Height = height;
+            HorizontalMetresPerCell = horizontalMetresPerCell;
             SlopeTenths = slopeTenths;
             AspectTenths = aspectTenths;
             Hillshade = hillshade;
@@ -308,6 +310,8 @@ namespace TerrainLab
 
         public int Height { get; }
 
+        public double HorizontalMetresPerCell { get; }
+
         public ushort[] SlopeTenths { get; }
 
         public ushort[] AspectTenths { get; }
@@ -323,6 +327,8 @@ namespace TerrainLab
             return state != null &&
                    string.Equals(ProjectId, state.ProjectId, StringComparison.Ordinal) &&
                    Width == state.Width && Height == state.Height &&
+                   Math.Abs(HorizontalMetresPerCell -
+                       state.HorizontalMetresPerCell) < 1e-9 &&
                    SourceRevision == state.Revision;
         }
     }
@@ -330,7 +336,7 @@ namespace TerrainLab
     public static class TerrainReliefAnalyzer
     {
         public const string AlgorithmId = "horn-3x3-relief";
-        public const string AlgorithmVersion = "1.0.0";
+        public const string AlgorithmVersion = "1.1.0";
 
         public static TerrainReliefResult Analyze(
             TerrainWorldState state,
@@ -348,6 +354,7 @@ namespace TerrainLab
                 state.Width,
                 state.Height,
                 state.Elevation,
+                state.HorizontalMetresPerCell,
                 reportProgress,
                 cancellationToken);
         }
@@ -361,6 +368,27 @@ namespace TerrainLab
             Action<int> reportProgress = null,
             CancellationToken cancellationToken = default(CancellationToken))
         {
+            return Analyze(
+                projectId,
+                sourceRevision,
+                width,
+                height,
+                elevation,
+                TerrainSpatialScale.MinimumHorizontalMetresPerCell,
+                reportProgress,
+                cancellationToken);
+        }
+
+        public static TerrainReliefResult Analyze(
+            string projectId,
+            long sourceRevision,
+            int width,
+            int height,
+            short[] elevation,
+            double horizontalMetresPerCell,
+            Action<int> reportProgress = null,
+            CancellationToken cancellationToken = default(CancellationToken))
+        {
             int count = checked(width * height);
             if (string.IsNullOrWhiteSpace(projectId))
             {
@@ -370,6 +398,13 @@ namespace TerrainLab
             if (elevation == null || elevation.Length != count)
             {
                 throw new ArgumentException("Relief DEM does not match the canvas.", nameof(elevation));
+            }
+
+            if (!TerrainSpatialScale.IsValid(horizontalMetresPerCell))
+            {
+                throw new ArgumentOutOfRangeException(
+                    nameof(horizontalMetresPerCell),
+                    "Relief cell size must be between 1 and 1000000 metres.");
             }
 
             ushort[] slope = new ushort[count];
@@ -424,10 +459,12 @@ namespace TerrainLab
 
                     double dzdx =
                         (northEast + 2.0 * east + southEast -
-                         northWest - 2.0 * west - southWest) / 8.0;
+                         northWest - 2.0 * west - southWest) /
+                        (8.0 * horizontalMetresPerCell);
                     double dzdy =
                         (northWest + 2.0 * north + northEast -
-                         southWest - 2.0 * south - southEast) / 8.0;
+                         southWest - 2.0 * south - southEast) /
+                        (8.0 * horizontalMetresPerCell);
                     double gradient = Math.Sqrt(dzdx * dzdx + dzdy * dzdy);
                     ushort slopeTenths = (ushort)Math.Min(
                         900,
@@ -487,6 +524,7 @@ namespace TerrainLab
                 DateTime.UtcNow,
                 width,
                 height,
+                horizontalMetresPerCell,
                 slope,
                 aspect,
                 hillshade,

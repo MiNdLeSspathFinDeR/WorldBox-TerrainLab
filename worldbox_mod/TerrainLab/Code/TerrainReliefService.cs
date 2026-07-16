@@ -65,6 +65,7 @@ namespace TerrainLab
                 long revision = state.Revision;
                 int width = state.Width;
                 int height = state.Height;
+                double horizontalMetresPerCell = state.HorizontalMetresPerCell;
                 short[] elevation = (short[])state.Elevation.Clone();
                 _task = Task.Run(
                     () => TerrainReliefAnalyzer.Analyze(
@@ -73,6 +74,7 @@ namespace TerrainLab
                         width,
                         height,
                         elevation,
+                        horizontalMetresPerCell,
                         value =>
                         {
                             if (Volatile.Read(ref _generation) == generation)

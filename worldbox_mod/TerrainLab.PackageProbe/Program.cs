@@ -111,6 +111,27 @@ internal static class Program
         Assert(result.Ruggedness[center] == 1, "Ruggedness is incorrect.");
         Assert(result.Hillshade[center] <= 254, "Hillshade uses the NODATA token.");
 
+        short[] kilometrePlane =
+        {
+            0, 567, 1134,
+            0, 567, 1134,
+            0, 567, 1134
+        };
+        TerrainReliefResult physical = TerrainReliefAnalyzer.Analyze(
+            "physical-relief-probe",
+            0,
+            width,
+            height,
+            kilometrePlane,
+            TerrainSpatialScale.DefaultHorizontalMetresPerCell);
+        Assert(
+            physical.SlopeTenths[center] >= 290 &&
+            physical.SlopeTenths[center] <= 300,
+            "A 567 metre rise over one kilometre was not converted to a physical slope.");
+        Assert(
+            Math.Abs(physical.HorizontalMetresPerCell - 1000d) < 1e-9,
+            "Relief result lost its horizontal cell scale.");
+
         eastRisingPlane[0] = TerrainElevationEncoding.NoData;
         TerrainReliefResult masked = TerrainReliefAnalyzer.Analyze(
             "relief-probe",
@@ -444,6 +465,56 @@ internal static class Program
                 6,
                 100) > -7000,
             "A tied raw-height bin crossed the five-percent extreme budget.");
+
+        const int regularizedWidth = 9;
+        const int regularizedHeight = 9;
+        short[] generated = new short[regularizedWidth * regularizedHeight];
+        TerrainEarthElevationProfile[] profiles = Enumerable.Repeat(
+            TerrainEarthElevationProfile.Lowland,
+            generated.Length).ToArray();
+        int peak = regularizedHeight / 2 * regularizedWidth +
+                   regularizedWidth / 2;
+        generated[peak] = 9000;
+        profiles[peak] = TerrainEarthElevationProfile.Mountain;
+        TerrainEarthElevationModel.RegularizeGeneratedSurface(
+            regularizedWidth,
+            regularizedHeight,
+            generated,
+            profiles);
+        Assert(
+            generated[peak] <=
+                TerrainSpatialScale.GeneratedMaximumCardinalRiseMetres,
+            "Generated DEM retained an isolated one-cell elevation spike.");
+        TerrainReliefResult generatedRelief = TerrainReliefAnalyzer.Analyze(
+            "regularized-earth-probe",
+            0,
+            regularizedWidth,
+            regularizedHeight,
+            generated,
+            TerrainSpatialScale.DefaultHorizontalMetresPerCell);
+        Assert(
+            generatedRelief.Statistics.MaximumSlopeTenths <= 400,
+            "Generated Earth-like DEM still contains near-vertical slopes.");
+
+        short[] coastal = { 8000, -5, -149, -11000 };
+        TerrainEarthElevationProfile[] coastalProfiles =
+        {
+            TerrainEarthElevationProfile.Mountain,
+            TerrainEarthElevationProfile.ShallowWater,
+            TerrainEarthElevationProfile.Shelf,
+            TerrainEarthElevationProfile.DeepOcean
+        };
+        TerrainEarthElevationModel.RegularizeGeneratedSurface(
+            coastal.Length,
+            1,
+            coastal,
+            coastalProfiles);
+        Assert(
+            coastal[0] <= TerrainSpatialScale.GeneratedMaximumCoastalMagnitudeMetres &&
+            coastal[1] >= -5 && coastal[1] <= 0 &&
+            coastal[2] >= -149 && coastal[2] <= -6 &&
+            coastal[3] <= -150,
+            "Generated coastal regularization broke marine depth classes.");
     }
 
     private static void ValidateDigitizingRaster()
@@ -543,6 +614,26 @@ internal static class Program
             }
         }
 
+        TerrainEarthElevationProfile[] generatedProfiles = Enumerable.Repeat(
+            TerrainEarthElevationProfile.Lowland,
+            count).ToArray();
+        int generatedPeak = height / 2 * width + width / 2;
+        elevation[generatedPeak] = TerrainElevationEncoding.Maximum;
+        generatedProfiles[generatedPeak] =
+            TerrainEarthElevationProfile.Mountain;
+        Stopwatch regularizationWatch = Stopwatch.StartNew();
+        TerrainEarthElevationModel.RegularizeGeneratedSurface(
+            width,
+            height,
+            elevation,
+            generatedProfiles);
+        regularizationWatch.Stop();
+        Assert(
+            elevation[generatedPeak] - elevation[generatedPeak - 1] <=
+                TerrainSpatialScale.GeneratedMaximumCardinalRiseMetres,
+            "Maximum-grid generated DEM regularization retained a spike.");
+        generatedProfiles = null;
+
         TerrainWorldState state = TerrainWorldState.CreateFromLayers(
             "maximum-grid-stress",
             DateTime.UtcNow,
@@ -600,6 +691,10 @@ internal static class Program
             "Maximum-grid live-water routing is invalid.");
         Process process = Process.GetCurrentProcess();
         process.Refresh();
+        Console.WriteLine(
+            "Maximum-grid DEM regularization: {0:N0} cells, {1:0.00}s.",
+            count,
+            regularizationWatch.Elapsed.TotalSeconds);
         Console.WriteLine(
             "Maximum-grid stress: {0:N0} cells, {1:0.00}s, retained managed delta " +
             "{2:N1} MiB, process peak {3:N1} MiB.",
@@ -670,7 +765,8 @@ internal static class Program
             0,
             elevation,
             landform,
-            material);
+            material,
+            750d);
 
         SavedMap savedMap = (SavedMap)FormatterServices.GetUninitializedObject(typeof(SavedMap));
         savedMap.width = 1;
@@ -742,8 +838,15 @@ internal static class Program
         Assert((string)gisManifest["vertical_unit"] == "metre" &&
                (short)gisManifest["sea_level"] == state.SeaLevel,
             "GIS export lost the vertical reference.");
+        Assert(
+            Math.Abs((double)gisManifest["horizontal_metres_per_cell"] -
+                state.HorizontalMetresPerCell) < 1e-9,
+            "GIS export lost the horizontal cell scale.");
         Assert(((string)gisManifest["crs_wkt"]).StartsWith("ENGCRS["),
             "GIS manifest does not contain WKT2 ENGCRS.");
+        Assert(((string)gisManifest["crs_wkt"]).Contains(
+                "LENGTHUNIT[\"metre\",1]"),
+            "GIS manifest CRS does not use metres.");
         Assert(
             TerrainGeoTiff.ReadInt16(
                 Path.Combine(gisDirectory, "elevation.tif"),
@@ -757,7 +860,7 @@ internal static class Program
 
         string packagePath = WbxGeoPackage.GetSidecarPath(testRoot);
         Assert(File.Exists(packagePath), "Package was not created.");
-        ValidateArchive(packagePath, count);
+        ValidateArchive(packagePath, count, state.HorizontalMetresPerCell);
 
         Assert(
             WbxGeoPackage.TryLoad(
@@ -769,6 +872,10 @@ internal static class Program
             "Package reload failed: " + loadError);
         Assert(loaded.Elevation[5] == TerrainElevationEncoding.NoData, "NODATA changed.");
         Assert(loaded.Width == width && loaded.Height == height, "Dimensions changed.");
+        Assert(
+            Math.Abs(loaded.HorizontalMetresPerCell -
+                state.HorizontalMetresPerCell) < 1e-9,
+            "WBXGEO horizontal cell scale changed during reload.");
         Assert(loaded.Hydrology != null, "Hydrology module did not survive package reload.");
         Assert(
             loaded.WaterDynamics != null &&
@@ -796,6 +903,7 @@ internal static class Program
             registry,
             testRoot,
             water.ManagedMask);
+        ValidateLegacyHorizontalScale(packagePath, baseMap, testRoot);
         Assert(
             loaded.Hydrology.FlowDirection[5] == byte.MaxValue &&
             loaded.Hydrology.FlowAccumulation[5] == 0 &&
@@ -1063,6 +1171,45 @@ internal static class Program
                 .All(value => value != (byte)TerrainHydroFeature.None) &&
             migrated.WaterDynamics.Parameters.EvaporationPerClimateStep == 1,
             "Water schema 1.1 did not receive safe river-valley defaults.");
+    }
+
+    private static void ValidateLegacyHorizontalScale(
+        string packagePath,
+        string baseMap,
+        string testRoot)
+    {
+        string legacyPackage = Path.Combine(
+            testRoot,
+            "core-schema-1.0-scale.wbxgeo");
+        File.Copy(packagePath, legacyPackage);
+        using (ZipArchive archive = ZipFile.Open(
+            legacyPackage,
+            ZipArchiveMode.Update))
+        {
+            JObject manifest = JObject.Parse(
+                ReadArchiveText(archive, "manifest.json"));
+            manifest["schema_version"] = "1.0.0";
+            manifest["canvas"]["cell_size"] = 1d;
+            manifest["crs"]["horizontal_unit"] = "worldbox_tile";
+            ReplaceArchiveEntry(
+                archive,
+                "manifest.json",
+                Encoding.UTF8.GetBytes(
+                    manifest.ToString(Formatting.Indented)));
+        }
+
+        Assert(
+            WbxGeoPackage.TryLoad(
+                legacyPackage,
+                baseMap,
+                null,
+                out TerrainWorldState migrated,
+                out string error),
+            "WBXGEO 1.0 horizontal scale migration failed: " + error);
+        Assert(
+            Math.Abs(migrated.HorizontalMetresPerCell -
+                TerrainSpatialScale.DefaultHorizontalMetresPerCell) < 1e-9,
+            "Legacy worldbox_tile scale was not migrated to metres.");
     }
 
     private static void ValidateHydrologyAlgorithm()
@@ -1429,7 +1576,8 @@ internal static class Program
             0,
             elevation,
             Enumerable.Repeat((byte)TerrainLandform.Plain, count).ToArray(),
-            Enumerable.Repeat((byte)TerrainMaterial.Soil, count).ToArray());
+            Enumerable.Repeat((byte)TerrainMaterial.Soil, count).ToArray(),
+            100d);
         TerrainWaterState water = state.EnsureWaterDynamics();
         int channel = height / 2 * width + 2;
         TerrainHydroFeature channelFeature = TerrainRiverValleyModel.ActivateCell(
@@ -1627,11 +1775,25 @@ internal static class Program
 
         Assert(TerrainGeoTiff.ReadInt16(path, 3, 2).SequenceEqual(values),
             "GeoTIFF Int16 round-trip changed values or row order.");
+        AssertThrows<InvalidDataException>(
+            () => TerrainGeoTiff.ReadInt16(path, 3, 2, 500d),
+            "GeoTIFF with a mismatched metric cell size was accepted.");
         Assert(ReadFirstTiffInt16(path) == 20,
             "GeoTIFF does not store the north row first.");
         Assert(File.Exists(Path.ChangeExtension(path, ".tfw")) &&
                File.Exists(Path.ChangeExtension(path, ".prj")),
             "GeoTIFF sidecars are missing.");
+        string[] worldFile = File.ReadAllLines(
+            Path.ChangeExtension(path, ".tfw"));
+        Assert(
+            worldFile.Length == 6 && worldFile[0] == "1000" &&
+            worldFile[3] == "-1000" && worldFile[4] == "500" &&
+            worldFile[5] == "1500",
+            "GeoTIFF world file lost the metric cell scale.");
+        Assert(
+            File.ReadAllText(Path.ChangeExtension(path, ".prj")).Contains(
+                "LENGTHUNIT[\"metre\",1]"),
+            "GeoTIFF engineering CRS does not use metres.");
 
         short[] tall = Enumerable.Range(0, 600)
             .Select(value => (short)(value - 300))
@@ -1761,7 +1923,8 @@ internal static class Program
             TerrainTiffSampleKind.Int16,
             "9999",
             state.ProjectId,
-            "core.elevation");
+            "core.elevation",
+            state.HorizontalMetresPerCell);
     }
 
     private static void ValidateFileSyncRollback(string testRoot)
@@ -2057,7 +2220,10 @@ internal static class Program
             "Lower operation crossed the -20000-metre DEM floor.");
     }
 
-    private static void ValidateArchive(string packagePath, int expectedCells)
+    private static void ValidateArchive(
+        string packagePath,
+        int expectedCells,
+        double expectedHorizontalMetresPerCell)
     {
         using (ZipArchive archive = ZipFile.OpenRead(packagePath))
         {
@@ -2097,11 +2263,18 @@ internal static class Program
             using (StreamReader reader = new StreamReader(archive.GetEntry("manifest.json").Open()))
             {
                 JObject manifest = JObject.Parse(reader.ReadToEnd());
+                Assert((string)manifest["schema_version"] == "1.1.0",
+                    "Wrong WBXGEO core schema version.");
                 Assert((string)manifest["vertical_reference"]["storage_type"] == "int16", "Not Int16.");
                 Assert((int)manifest["vertical_reference"]["nodata"] == 9999, "Wrong NODATA.");
                 Assert((string)manifest["vertical_reference"]["unit"] == "metre",
                     "Wrong vertical unit.");
                 Assert((int)manifest["canvas"]["cell_count"] == expectedCells, "Wrong cell count.");
+                Assert(
+                    Math.Abs((double)manifest["canvas"]["cell_size"] -
+                        expectedHorizontalMetresPerCell) < 1e-9 &&
+                    (string)manifest["crs"]["horizontal_unit"] == "metre",
+                    "Wrong WBXGEO horizontal scale.");
                 Assert(
                     manifest["modules"].Any(module => (string)module["id"] == "hydrology"),
                     "Hydrology module descriptor is missing.");

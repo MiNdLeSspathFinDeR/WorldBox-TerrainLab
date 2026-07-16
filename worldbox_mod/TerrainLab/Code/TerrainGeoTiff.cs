@@ -38,7 +38,9 @@ namespace TerrainLab
             TerrainTiffSampleKind sampleKind,
             string noData,
             string projectId,
-            string layerId)
+            string layerId,
+            double horizontalMetresPerCell =
+                TerrainSpatialScale.DefaultHorizontalMetresPerCell)
         {
             int count = checked(width * height);
             if (string.IsNullOrWhiteSpace(path))
@@ -54,6 +56,13 @@ namespace TerrainLab
             if (values == null || values.Length != count)
             {
                 throw new ArgumentException("GeoTIFF layer does not match the canvas.", nameof(values));
+            }
+
+            if (!TerrainSpatialScale.IsValid(horizontalMetresPerCell))
+            {
+                throw new ArgumentOutOfRangeException(
+                    nameof(horizontalMetresPerCell),
+                    "GeoTIFF cell size must be between 1 and 1000000 metres.");
             }
 
             ValidateArrayType(values, sampleKind);
@@ -80,11 +89,12 @@ namespace TerrainLab
             string description = JsonConvert.SerializeObject(new
             {
                 format = "terrainlab-geotiff",
-                schema_version = "1.0.0",
+                schema_version = "1.1.0",
                 project_id = projectId,
                 layer_id = layerId,
                 origin = "south-west",
-                file_row_order = "north-to-south"
+                file_row_order = "north-to-south",
+                horizontal_metres_per_cell = horizontalMetresPerCell
             }, Formatting.None);
 
             List<TiffEntry> entries = new List<TiffEntry>
@@ -104,8 +114,17 @@ namespace TerrainLab
                 TiffEntry.InlineShort(284, 1),
                 TiffEntry.InlineShort(296, 1),
                 TiffEntry.InlineShort(339, IsSigned(sampleKind) ? (ushort)2 : (ushort)1),
-                new TiffEntry(33550, TypeDouble, DoubleBytes(1.0, 1.0, 0.0)),
-                new TiffEntry(33922, TypeDouble, DoubleBytes(0.0, 0.0, 0.0, 0.0, height, 0.0)),
+                new TiffEntry(33550, TypeDouble, DoubleBytes(
+                    horizontalMetresPerCell,
+                    horizontalMetresPerCell,
+                    0.0)),
+                new TiffEntry(33922, TypeDouble, DoubleBytes(
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    height * horizontalMetresPerCell,
+                    0.0)),
                 new TiffEntry(34735, TypeShort, UInt16Bytes(geoKeys)),
                 new TiffEntry(34737, TypeAscii, geoAscii),
                 new TiffEntry(42113, TypeAscii, Ascii(noData ?? string.Empty))
@@ -176,7 +195,11 @@ namespace TerrainLab
                 }
 
                 ReplaceFile(temporaryPath, path);
-                WriteSidecars(path, height, projectId);
+                WriteSidecars(
+                    path,
+                    height,
+                    projectId,
+                    horizontalMetresPerCell);
             }
             finally
             {
@@ -196,7 +219,8 @@ namespace TerrainLab
         public static short[] ReadInt16(
             string path,
             int expectedWidth,
-            int expectedHeight)
+            int expectedHeight,
+            double? expectedHorizontalMetresPerCell = null)
         {
             if (string.IsNullOrWhiteSpace(path) || !File.Exists(path))
             {
@@ -206,6 +230,14 @@ namespace TerrainLab
             if (!TerrainMapLimits.TryValidate(expectedWidth, expectedHeight, out string limitError))
             {
                 throw new InvalidDataException(limitError);
+            }
+
+            if (expectedHorizontalMetresPerCell.HasValue &&
+                !TerrainSpatialScale.IsValid(
+                    expectedHorizontalMetresPerCell.Value))
+            {
+                throw new ArgumentOutOfRangeException(
+                    nameof(expectedHorizontalMetresPerCell));
             }
 
             using (FileStream stream = new FileStream(
@@ -264,6 +296,24 @@ namespace TerrainLab
                         height,
                         expectedWidth,
                         expectedHeight));
+                }
+
+                if (expectedHorizontalMetresPerCell.HasValue)
+                {
+                    double expectedScale = expectedHorizontalMetresPerCell.Value;
+                    double[] pixelScale = ReadDoubleArray(
+                        entries,
+                        stream,
+                        33550,
+                        3);
+                    double tolerance = Math.Max(1e-9, expectedScale * 1e-9);
+                    if (Math.Abs(pixelScale[0] - expectedScale) > tolerance ||
+                        Math.Abs(pixelScale[1] - expectedScale) > tolerance ||
+                        Math.Abs(pixelScale[2]) > tolerance)
+                    {
+                        throw new InvalidDataException(
+                            "GeoTIFF metric cell size does not match the active project.");
+                    }
                 }
 
                 if (ReadSingleUInt(entries, stream, 258) != 16 ||
@@ -380,7 +430,11 @@ namespace TerrainLab
             }
         }
 
-        private static void WriteSidecars(string tiffPath, int height, string projectId)
+        private static void WriteSidecars(
+            string tiffPath,
+            int height,
+            string projectId,
+            double horizontalMetresPerCell)
         {
             string stem = Path.Combine(
                 Path.GetDirectoryName(tiffPath),
@@ -389,18 +443,24 @@ namespace TerrainLab
                 stem + ".tfw",
                 string.Join(Environment.NewLine, new[]
                 {
-                    "1.0",
+                    FormatWorldFileNumber(horizontalMetresPerCell),
                     "0.0",
                     "0.0",
-                    "-1.0",
-                    "0.5",
-                    (height - 0.5).ToString("0.0", CultureInfo.InvariantCulture)
+                    FormatWorldFileNumber(-horizontalMetresPerCell),
+                    FormatWorldFileNumber(horizontalMetresPerCell * 0.5d),
+                    FormatWorldFileNumber(
+                        (height - 0.5d) * horizontalMetresPerCell)
                 }) + Environment.NewLine,
                 new UTF8Encoding(false));
             File.WriteAllText(
                 stem + ".prj",
                 GetCrsWkt(projectId) + Environment.NewLine,
                 new UTF8Encoding(false));
+        }
+
+        private static string FormatWorldFileNumber(double value)
+        {
+            return value.ToString("0.##########", CultureInfo.InvariantCulture);
         }
 
         internal static string GetCrsWkt(string projectId)
@@ -411,8 +471,8 @@ namespace TerrainLab
             return
                 "ENGCRS[\"" + name +
                 "\",EDATUM[\"WorldBox local datum\"],CS[Cartesian,2]," +
-                "AXIS[\"easting (X)\",east,ORDER[1],LENGTHUNIT[\"worldbox_tile\",1]]," +
-                "AXIS[\"northing (Y)\",north,ORDER[2],LENGTHUNIT[\"worldbox_tile\",1]]]";
+                "AXIS[\"easting (X)\",east,ORDER[1],LENGTHUNIT[\"metre\",1]]," +
+                "AXIS[\"northing (Y)\",north,ORDER[2],LENGTHUNIT[\"metre\",1]]]";
         }
 
         private static uint ReadSingleUInt(
@@ -456,6 +516,31 @@ namespace TerrainLab
             for (int index = 0; index < result.Length; index++)
             {
                 result[index] = BitConverter.ToUInt32(bytes, index * sizeof(uint));
+            }
+
+            return result;
+        }
+
+        private static double[] ReadDoubleArray(
+            IDictionary<ushort, TiffReadEntry> entries,
+            Stream stream,
+            ushort tag,
+            int expectedCount)
+        {
+            if (!entries.TryGetValue(tag, out TiffReadEntry entry) ||
+                entry.Type != TypeDouble || entry.Count != expectedCount)
+            {
+                throw new InvalidDataException(
+                    "TIFF double array is missing or inconsistent: " + tag);
+            }
+
+            byte[] bytes = ReadEntryBytes(entry, stream);
+            double[] result = new double[expectedCount];
+            for (int index = 0; index < result.Length; index++)
+            {
+                result[index] = BitConverter.ToDouble(
+                    bytes,
+                    index * sizeof(double));
             }
 
             return result;
@@ -737,6 +822,9 @@ namespace TerrainLab
         [JsonProperty("height")]
         public int Height { get; set; }
 
+        [JsonProperty("horizontal_metres_per_cell")]
+        public double HorizontalMetresPerCell { get; set; }
+
         [JsonProperty("crs_wkt")]
         public string CrsWkt { get; set; }
 
@@ -912,13 +1000,14 @@ namespace TerrainLab
                 TerrainGisManifest manifest = new TerrainGisManifest
                 {
                     Format = "terrainlab-gis",
-                    SchemaVersion = "1.0.0",
+                    SchemaVersion = "1.1.0",
                     ProjectId = state.ProjectId,
                     SourceRevision = state.Revision,
                     SourceElevationSha256 = elevationHash,
                     CreatedUtc = DateTime.UtcNow,
                     Width = state.Width,
                     Height = state.Height,
+                    HorizontalMetresPerCell = state.HorizontalMetresPerCell,
                     CrsWkt = TerrainGeoTiff.GetCrsWkt(state.ProjectId),
                     VerticalUnit = "metre",
                     SeaLevel = state.SeaLevel,
@@ -968,7 +1057,8 @@ namespace TerrainLab
                 kind,
                 noData,
                 state.ProjectId,
-                id);
+                id,
+                state.HorizontalMetresPerCell);
             layers.Add(new TerrainGisLayerManifest
             {
                 Id = id,

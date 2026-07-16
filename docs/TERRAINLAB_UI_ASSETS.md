@@ -20,7 +20,7 @@ against screen edges and can be collapsed independently.
 
 ## Implementation status
 
-Version 1.2.1 implements the standalone side button, an adaptive top GIS
+Version 1.2.2 implements the standalone side button, an adaptive top GIS
 toolbar, and a stock WorldBox internal window. The toolbar copies the bottom
 WorldBox panel and button sprites, stretches to the logical canvas width, and
 balances commands across as few rows as the current UI scale permits. Its frame
@@ -36,7 +36,8 @@ running jobs and the settings level use amber. Re-clicking an active chapter,
 map tool, or derived layer switches it off, matching the base-game power bar.
 Row breaks prefer semantic group boundaries.
 Active tools and overlays are highlighted, unavailable operations are disabled,
-and running jobs switch from play to pause.
+and running jobs switch from play to pause. The bottom coordinate, DEM, slope,
+and aspect strip is shown only while the Inspector tool is selected.
 
 Surface digitizing includes a gameplay-safe eyedropper, four-connected bucket
 fill, multi-vertex line, filled polygon, rectangle, connected-region

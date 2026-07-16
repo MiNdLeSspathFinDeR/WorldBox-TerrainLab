@@ -45,6 +45,11 @@ cell across the complete Int16 domain.
 
 The mountain and deep-ocean extreme budgets use integer cell counts, so no
 more than five percent of either group can reach `7000 m` elevation or depth.
+The inferred grid then receives a metric `1000 m` horizontal cell size and a
+spatial grade constraint: same-domain cardinal neighbors may differ by at most
+`500 m`, diagonal neighbors by `707 m`, and coast cells approach the zero datum
+through a bounded transition. This removes isolated one-cell spikes without
+changing imported or manually edited DEMs.
 The natural deep-ocean floor approximates terrestrial bathymetry; the full
 `-20000..9000 m` storage domain remains available to imported GeoTIFFs, manual
 editing, and non-Earth projects. Existing WBXGEO and imported metric DEM values
@@ -56,7 +61,9 @@ TerrainLab 1.1 derives four rasters from the authoritative Int16 DEM with a Horn
 `3 x 3` neighborhood: slope in tenths of a degree, downslope aspect in tenths
 of a degree, hillshade, and local ruggedness. Edge samples are clamped and
 `NODATA` neighbors fall back to the center cell. The calculation is cancellable,
-revision-bound, and does not alter the DEM.
+revision-bound, and does not alter the DEM. Horizontal derivatives divide by
+the project's metric cell size, so slope is a physical angle rather than a
+ratio of metres to an unspecified game tile.
 
 ## Implemented DEM visualization
 

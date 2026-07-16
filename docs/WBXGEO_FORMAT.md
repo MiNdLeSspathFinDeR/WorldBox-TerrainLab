@@ -114,13 +114,13 @@ compatibility restrictions, not WBXGEO geometry restrictions.
 
 ## Manifest contract
 
-The initial schema version is `1.0.0`. Major versions are compatibility
-boundaries; readers may accept newer minor versions and preserve unknown data.
+The current core schema version is `1.1.0`. Major versions are compatibility
+boundaries; readers accept compatible `1.x` packages and preserve unknown data.
 
 ```json
 {
   "format": "wbxgeo",
-  "schema_version": "1.0.0",
+  "schema_version": "1.1.0",
   "package_role": "worldbox-overlay",
   "project_id": "2f43d7d9-0d3f-41f8-9eb0-16576633200d",
   "base_map": {
@@ -137,17 +137,17 @@ boundaries; readers may accept newer minor versions and preserve unknown data.
     "maximum_cell_count": 1884160,
     "origin": "south-west",
     "row_order": "south-to-north",
-    "cell_size": 1.0
+    "cell_size": 1000.0
   },
   "crs": {
     "type": "ENGCRS",
     "name": "WorldBox / 2f43d7d9-0d3f-41f8-9eb0-16576633200d",
-    "horizontal_unit": "worldbox_tile"
+    "horizontal_unit": "metre"
   },
   "vertical_reference": {
     "datum": "worldbox-local",
     "unit": "metre",
-    "sea_level": 98,
+    "sea_level": 0,
     "storage_type": "int16",
     "nodata": 9999
   },
@@ -163,6 +163,9 @@ boundaries; readers may accept newer minor versions and preserve unknown data.
 
 Every core and module layer has a SHA-256 checksum. The embedded base map hash
 must match the adjacent `map.wbox` before TerrainLab applies the overlay.
+`canvas.cell_size` is the horizontal ground distance represented by one raster
+cell. New projects default to `1000 m`; schema `1.0.x` manifests using
+`worldbox_tile` are migrated with one legacy tile equal to `1000 m`.
 
 ## Module extension contract
 
@@ -238,7 +241,7 @@ one module; it does not invalidate the core project.
 
 ### Live water module
 
-TerrainLab implements optional module `hydrology.water_dynamics` schema `1.3.0`.
+TerrainLab implements optional module `hydrology.water_dynamics` schema `1.4.0`.
 `state.json` stores whether routing is enabled, normalized integer parameters,
 managed-cell count, injected/consumed volume counters, and observed native
 geyser pulse count. Parameter `routing_algorithm` is one of `d8`, `dinf`, or
@@ -252,7 +255,7 @@ geyser pulse count. Parameter `routing_algorithm` is one of `d8`, `dinf`, or
 | `hydrology.water_dynamics.hydro_feature` | UInt8 | `255` | Persistent `0` none, `1` river, `2` waterbody class, including dry channels |
 | `hydrology.water_dynamics.moisture` | UInt8 | none | Dynamic substrate moisture from dry `0` to saturated `255` |
 | `hydrology.water_dynamics.erodibility` | UInt8 | `255` | Dynamic detachment coefficient; `0` is not initialized and valid values end at `254` |
-| `hydrology.water_dynamics.local_slope` | UInt8 | `255` | Horn slope: `0..254` maps to `0..pi/2` radians |
+| `hydrology.water_dynamics.local_slope` | UInt8 | `255` | Metric Horn slope: `0..254` maps to `0..pi/2` radians |
 | `hydrology.water_dynamics.local_aspect` | UInt8 | `255` | Downslope aspect: `0..254` maps to `0..2*pi` radians |
 
 The loader requires exact project ID, dimensions, layer length, SHA-256, binary
@@ -263,6 +266,8 @@ restores managed water, dry hydro features, dynamic substrate fields, and the
 pre-water surface but does not inject another ordinary source budget. Valid
 `1.0.x` and `1.1.x` payloads migrate with shallow default storage and safe
 river/waterbody values; `1.2.x` adds those values to its existing water balance.
+Schema `1.3.x` local slope and aspect values are recalculated with the core
+metric cell size during load.
 Later native geyser pulses can continue replenishing a source. The configured
 flood percentage is normalized to `1..50`, and runtime
 code always enforces the same hard 50-percent ceiling over valid DEM cells.

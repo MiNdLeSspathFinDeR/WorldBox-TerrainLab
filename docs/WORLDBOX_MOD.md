@@ -32,8 +32,9 @@ identify functional groups, while native WorldBox on/off sprites report active
 states and amber lamps report running work. A second click deselects a chapter,
 map tool, or visible derived layer. The frame height shrinks or grows to its row
 count. The internal window is limited to project/import details, numeric
-parameters, layer
-diagnostics, and settings.
+parameters, layer diagnostics, and settings. The bottom coordinate/elevation
+strip is hidden unless Inspector is the active map tool; selecting another tool
+or clicking Inspector again removes it.
 The standalone side icon closes or reopens the complete workspace. The stock
 window cross advances the side-button cycle from settings to off.
 
@@ -72,8 +73,10 @@ both DEM and surface edits through one history capped at 32 entries and 64 MiB.
 
 The existing WorldBox terrain morphotype stays independent, so a mountain tile
 can carry any analytical height. Horn `3 x 3` analysis derives slope, aspect,
-hillshade, and ruggedness in a cancellable background job. Hypsometry and all
-four display derivatives can be drawn over the game map. Core landforms,
+hillshade, and ruggedness in a cancellable background job. Derivatives use the
+project's horizontal metric cell size (`1000 m/cell` by default), so vertical
+metre differences produce physical slope angles. Hypsometry and all four
+display derivatives can be drawn over the game map. Core landforms,
 materials, and DEM contours at 250-metre intervals are direct overlays that do
 not require relief analysis. Selecting a missing or stale derivative starts its
 calculation and opens it when ready.
@@ -161,7 +164,8 @@ reports the complete runtime catalog with ready, stale, or missing state.
 TerrainLab runs at most one scientific background job at a time to bound peak
 memory on the maximum 1,884,160-cell map. Raster overlays use independent
 `256 x 256` textures, so extreme aspect ratios do not require one world-sized
-texture. The bottom strip reports coordinates and module-specific cell values.
+texture. While Inspector is active, the bottom strip reports coordinates and
+module-specific cell values.
 
 The map budget equals a `20 x 20` WorldBox-block baseline plus 15 percent.
 Aspect ratio is unrestricted. Over-budget worlds continue to use vanilla saves,
@@ -174,7 +178,7 @@ WorldBox writes `map.wbox` first; TerrainLab then writes
 same vanilla map plus core GIS arrays and optional hydrology, live-water, and
 erosion modules.
 Live-water configuration and all eight state rasters use optional
-`hydrology.water_dynamics` schema `1.3.0`. The managed mask, store,
+`hydrology.water_dynamics` schema `1.4.0`. The managed mask, store,
 river/waterbody class, moisture, erodibility, local slope, and local aspect also
 export to GeoTIFF; restore-surface codes remain package-internal.
 Unknown optional module data survives load/save. Invalid optional data is

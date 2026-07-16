@@ -153,6 +153,8 @@ namespace TerrainLab
 
         public short SeaLevel { get; private set; }
 
+        public double HorizontalMetresPerCell { get; private set; }
+
         public short[] Elevation { get; private set; }
 
         public byte[] Landform { get; private set; }
@@ -223,7 +225,9 @@ namespace TerrainLab
             TerrainEarthElevationModel.InferWorldElevations(
                 tiles,
                 state.Landform,
-                state.Elevation);
+                state.Elevation,
+                width,
+                height);
 
             return state;
         }
@@ -236,7 +240,9 @@ namespace TerrainLab
             short seaLevel,
             short[] elevation,
             byte[] landform,
-            byte[] material)
+            byte[] material,
+            double horizontalMetresPerCell =
+                TerrainSpatialScale.DefaultHorizontalMetresPerCell)
         {
             if (!TerrainMapLimits.TryValidate(width, height, out string error))
             {
@@ -247,6 +253,12 @@ namespace TerrainLab
             {
                 throw new InvalidOperationException(
                     "Sea level must be between -20000 and 9000 metres.");
+            }
+
+            if (!TerrainSpatialScale.IsValid(horizontalMetresPerCell))
+            {
+                throw new InvalidOperationException(
+                    "Horizontal cell size must be between 1 and 1000000 metres.");
             }
 
             int expected = checked(width * height);
@@ -325,6 +337,7 @@ namespace TerrainLab
                 Width = width,
                 Height = height,
                 SeaLevel = 0,
+                HorizontalMetresPerCell = horizontalMetresPerCell,
                 Elevation = normalizedElevation,
                 Landform = landform,
                 Material = material
@@ -1140,6 +1153,8 @@ namespace TerrainLab
                 Width = width,
                 Height = height,
                 SeaLevel = seaLevel,
+                HorizontalMetresPerCell =
+                    TerrainSpatialScale.DefaultHorizontalMetresPerCell,
                 Elevation = new short[count],
                 Landform = new byte[count],
                 Material = new byte[count]

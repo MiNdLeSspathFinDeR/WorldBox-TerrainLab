@@ -16,7 +16,7 @@ namespace TerrainLab
         public const string Extension = ".wbxgeo";
         public const string SidecarFileName = "terrainlab" + Extension;
         public const string FormatId = "wbxgeo";
-        public const string SchemaVersion = "1.0.0";
+        public const string SchemaVersion = "1.1.0";
         public const string MimeType = "application/vnd.terrainlab.wbxgeo+zip";
 
         internal const string ManifestEntry = "manifest.json";
@@ -408,7 +408,8 @@ namespace TerrainLab
                         manifest.VerticalReference?.SeaLevel ?? 0,
                         elevation,
                         landform,
-                        material);
+                        material,
+                        GetHorizontalMetresPerCell(manifest));
 
                     ReadRegisteredModules(archive, manifest, moduleRegistry, state);
                     return true;
@@ -499,13 +500,13 @@ namespace TerrainLab
                     MaximumCellCount = TerrainMapLimits.MaximumCellCount,
                     Origin = "south-west",
                     RowOrder = "south-to-north",
-                    CellSize = 1d
+                    CellSize = state.HorizontalMetresPerCell
                 },
                 Crs = new WbxGeoCrs
                 {
                     Type = "ENGCRS",
                     Name = "WorldBox / " + state.ProjectId,
-                    HorizontalUnit = "worldbox_tile"
+                    HorizontalUnit = "metre"
                 },
                 VerticalReference = new WbxGeoVerticalReference
                 {
@@ -583,7 +584,7 @@ namespace TerrainLab
             }
 
             if (manifest.BaseMap == null || manifest.Canvas == null ||
-                manifest.VerticalReference == null)
+                manifest.Crs == null || manifest.VerticalReference == null)
             {
                 throw new InvalidDataException("WBXGEO manifest is missing required sections.");
             }
@@ -620,6 +621,8 @@ namespace TerrainLab
                 throw new InvalidDataException("WBXGEO canvas cell count is inconsistent.");
             }
 
+            GetHorizontalMetresPerCell(manifest);
+
             List<TerrainModuleDescriptor> modules = manifest.Modules ??
                 new List<TerrainModuleDescriptor>();
             if (modules.GroupBy(module => module.Id, StringComparer.Ordinal).Any(group => group.Count() > 1))
@@ -643,6 +646,40 @@ namespace TerrainLab
             {
                 throw new InvalidDataException("WBXGEO contains duplicate layer ids or entries.");
             }
+        }
+
+        private static double GetHorizontalMetresPerCell(
+            WbxGeoManifest manifest)
+        {
+            string unit = manifest?.Crs?.HorizontalUnit;
+            double cellSize = manifest?.Canvas?.CellSize ?? 0d;
+            double metresPerCell;
+            if (string.Equals(unit, "metre", StringComparison.OrdinalIgnoreCase))
+            {
+                metresPerCell = cellSize;
+            }
+            else if (string.Equals(
+                unit,
+                "worldbox_tile",
+                StringComparison.OrdinalIgnoreCase))
+            {
+                double legacyTilesPerCell = cellSize > 0d ? cellSize : 1d;
+                metresPerCell = legacyTilesPerCell *
+                    TerrainSpatialScale.DefaultHorizontalMetresPerCell;
+            }
+            else
+            {
+                throw new InvalidDataException(
+                    "WBXGEO horizontal unit must be metre or legacy worldbox_tile.");
+            }
+
+            if (!TerrainSpatialScale.IsValid(metresPerCell))
+            {
+                throw new InvalidDataException(
+                    "WBXGEO horizontal cell size is outside 1..1000000 metres.");
+            }
+
+            return metresPerCell;
         }
 
         private static WbxGeoManifest ReadManifest(ZipArchive archive)

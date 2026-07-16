@@ -2,6 +2,24 @@
 
 ## Unreleased
 
+## 1.2.2 - 2026-07-17
+
+- Added an explicit horizontal cell scale to TerrainLab projects. New worlds use
+  `1000 m` per WorldBox cell by default, WBXGEO `1.1` persists the metric value,
+  and legacy `worldbox_tile` packages migrate without losing compatibility.
+- Corrected Horn slope, aspect, hillshade, and river-valley derivatives to
+  divide vertical metre differences by horizontal ground distance. A `567 m`
+  rise across the default cell is now about `29.5 degrees`, not `89.9 degrees`.
+- Added spatial regularization to vanilla-derived initial DEMs: generated land
+  and bathymetry are limited to Earth-like neighboring rises and gradual coastal
+  transitions while imported and manually edited DEM values remain untouched.
+- GeoTIFF, world files, WKT2 engineering CRS, GIS manifests, and protected file
+  sync now carry the same metric cell size.
+- The bottom coordinate/elevation strip is now visible only while the Inspector
+  tool is active and hides immediately when that tool is deselected.
+- Advanced `hydrology.water_dynamics` to schema `1.4.0`; older compact local
+  slope/aspect fields are recalculated using the metric cell scale on load.
+
 ## 1.2.1 - 2026-07-16
 
 - Kept every GIS raster overlay visible after WorldBox switches from the

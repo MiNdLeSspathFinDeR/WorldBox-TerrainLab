@@ -52,6 +52,9 @@ namespace TerrainLab
         [JsonProperty("height")]
         public int Height { get; set; }
 
+        [JsonProperty("horizontal_metres_per_cell")]
+        public double HorizontalMetresPerCell { get; set; }
+
         [JsonProperty("data_type")]
         public string DataType { get; set; }
 
@@ -72,6 +75,7 @@ namespace TerrainLab
                 ExportedUtc = DateTime.UtcNow,
                 Width = state.Width,
                 Height = state.Height,
+                HorizontalMetresPerCell = state.HorizontalMetresPerCell,
                 DataType = "int16",
                 NoData = TerrainElevationEncoding.NoData
             };
@@ -172,7 +176,7 @@ namespace TerrainLab
     public static class TerrainFileSync
     {
         public const string FormatId = "terrainlab-file-sync";
-        public const string SchemaVersion = "1.0.0";
+        public const string SchemaVersion = "1.1.0";
 
         private const string BaselineFileName = "baseline.json";
         private const string ChangeLogFileName = "changes.jsonl";
@@ -284,7 +288,8 @@ namespace TerrainLab
                 short[] incoming = TerrainGeoTiff.ReadInt16(
                     stagingPath,
                     state.Width,
-                    state.Height);
+                    state.Height,
+                    state.HorizontalMetresPerCell);
                 string incomingHash = ComputeElevationSha256(incoming);
                 if (conflict && (policy == TerrainSyncConflictPolicy.Reject ||
                                  policy == TerrainSyncConflictPolicy.PreferWorld))
@@ -470,7 +475,8 @@ namespace TerrainLab
                 TerrainTiffSampleKind.Int16,
                 TerrainElevationEncoding.NoData.ToString(CultureInfo.InvariantCulture),
                 state.ProjectId,
-                "core.elevation");
+                "core.elevation",
+                state.HorizontalMetresPerCell);
             WriteJsonAtomic(
                 Path.Combine(workspace, BaselineFileName),
                 TerrainSyncBaseline.FromState(state, hash));
@@ -508,6 +514,8 @@ namespace TerrainLab
                 baseline.SchemaVersion != SchemaVersion ||
                 baseline.ProjectId != state.ProjectId ||
                 baseline.Width != state.Width || baseline.Height != state.Height ||
+                Math.Abs(baseline.HorizontalMetresPerCell -
+                    state.HorizontalMetresPerCell) > 1e-9 ||
                 baseline.DataType != "int16" ||
                 baseline.NoData != TerrainElevationEncoding.NoData ||
                 !IsSha256(baseline.ElevationSha256))
@@ -537,7 +545,8 @@ namespace TerrainLab
                 TerrainTiffSampleKind.Int16,
                 TerrainElevationEncoding.NoData.ToString(CultureInfo.InvariantCulture),
                 state.ProjectId,
-                "core.elevation.branch");
+                "core.elevation.branch",
+                state.HorizontalMetresPerCell);
             WriteJsonAtomic(
                 Path.ChangeExtension(path, ".json"),
                 TerrainSyncBaseline.FromState(state, elevationSha256));
@@ -687,11 +696,11 @@ namespace TerrainLab
 
             File.WriteAllText(
                 path,
-                "TerrainLab file sync 1.0\r\n" +
+                "TerrainLab file sync 1.1\r\n" +
                 "1. Open outgoing/elevation.tif in a GIS editor.\r\n" +
                 "2. Export the edited DEM atomically as incoming/elevation.tif.\r\n" +
                 "3. In TerrainLab, pull with conflict checking.\r\n" +
-                "The raster must remain signed Int16, use NODATA 9999, and keep its dimensions.\r\n",
+                "The raster must remain signed Int16, use NODATA 9999, keep its dimensions, and preserve the metric cell size.\r\n",
                 new UTF8Encoding(false));
         }
 

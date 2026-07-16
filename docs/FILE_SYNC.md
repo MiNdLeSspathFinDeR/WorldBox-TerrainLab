@@ -1,6 +1,6 @@
-# TerrainLab file sync 1.0
+# TerrainLab file sync 1.1
 
-TerrainLab 1.0 exposes a local, tool-neutral exchange contract for QGIS and
+TerrainLab 1.1 exposes a local, tool-neutral exchange contract for QGIS and
 other GIS software. It does not open a network port or launch an external
 process. A future QGIS plugin can automate these same files without changing
 the game-side data model.
@@ -40,7 +40,8 @@ The elevation exchange raster is:
 - every data sample in `-20000..9000` metres;
 - exact project width and height;
 - GDAL NODATA tag `9999`;
-- pixel-is-area, one WorldBox tile per pixel;
+- pixel-is-area, one WorldBox tile per pixel, with the project's metric cell
+  size (`1000 m` by default);
 - file row zero at the north/top edge;
 - user-defined local model in GeoTIFF and a WorldBox WKT2 `ENGCRS` in `.prj`;
 - world-file origin at the center of the north-west pixel.
@@ -57,8 +58,8 @@ copied to a private staging file and must remain unchanged during that copy.
 ## Baseline and conflicts
 
 `baseline.json` records format/schema, project ID, source revision, dimensions,
-data type, NODATA, UTC export time, and SHA-256 of the south-first little-endian
-Int16 elevation array.
+metric horizontal cell size, data type, NODATA, UTC export time, and SHA-256 of
+the south-first little-endian Int16 elevation array.
 
 On pull, TerrainLab compares three DEMs:
 
@@ -74,7 +75,7 @@ policies:
   incoming DEM.
 
 The backend also defines `prefer_world` and `prefer_incoming` policies for a
-future integration layer, but the 1.0 UI does not offer silent overwrite.
+future integration layer, but the 1.1 UI does not offer silent overwrite.
 
 After a successful or no-op pull, the input moves to `history`, `outgoing` and
 the baseline are refreshed, and one compact JSON object is appended to
@@ -100,7 +101,7 @@ For a one-way analytical export, use `GeoTIFF` in the project view. It writes a
 timestamped directory containing every currently ready core, relief, hydrology,
 and erosion raster plus `terrainlab-gis.json` with checksums.
 
-## 1.0 boundary
+## 1.1 boundary
 
 This release synchronizes the authoritative DEM only. It does not yet import
 vector Simple Features, assign a real-world CRS, reproject rasters, merge cells,

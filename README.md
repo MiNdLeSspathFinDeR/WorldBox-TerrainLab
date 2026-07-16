@@ -24,7 +24,8 @@ project layer for WorldBox.
 4. Auto sizing: if only one size parameter is set, the other is calculated from the image ratio.
 5. Configurable: the legacy direct-palette algorithm and custom tile sets remain available.
 6. In-game GIS: editable `-20000..9000 m` Int16 DEM, fixed-scale translucent
-   Turbo height display, Earth-like morphotype-aware initial elevations,
+   Turbo height display, Earth-like morphotype-aware initial elevations with a
+   metric `1000 m/cell` default and spatial grade limiting,
    relief derivatives, Priority-Flood/D8, watersheds, Strahler order,
    selectable D8/D-infinity/MFD live-water channels, absolute 0/-5/-150 m water
    classes, persistent river/waterbody zones, geyser-fed recharge, moisture,
@@ -74,7 +75,8 @@ worldbox_mod\install.cmd
 
 The in-game three-row toolbar saves and validates WBXGEO, edits the Int16 DEM,
 runs relief/hydrology/erosion jobs, switches derived map layers, exports GeoTIFF,
-and operates protected file sync. The internal window holds imports, numeric
+and operates protected file sync. The coordinate/elevation status strip appears
+only with the Inspector tool. The internal window holds imports, numeric
 parameters, layer diagnostics, and settings. Erosion provides a deterministic,
 exact-mass-balance preview that can be applied as one undoable DEM edit. See
 [TerrainLab in WorldBox](docs/WORLDBOX_MOD.md) for paths and lifecycle details.

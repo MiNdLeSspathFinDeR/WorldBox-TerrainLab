@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 
 namespace TerrainLab
 {
@@ -197,11 +198,15 @@ namespace TerrainLab
         internal static void InferWorldElevations(
             WorldTile[] tiles,
             byte[] landform,
-            short[] rawHeightAndElevation)
+            short[] rawHeightAndElevation,
+            int width,
+            int height)
         {
             if (tiles == null || landform == null || rawHeightAndElevation == null ||
                 tiles.Length != landform.Length ||
-                tiles.Length != rawHeightAndElevation.Length)
+                tiles.Length != rawHeightAndElevation.Length ||
+                width <= 0 || height <= 0 ||
+                checked(width * height) != tiles.Length)
             {
                 throw new ArgumentException(
                     "World tiles, landforms, and elevation must have equal dimensions.");
@@ -210,11 +215,14 @@ namespace TerrainLab
             // Equal vanilla heights share one quantile so flat morphotypes stay flat.
             int[] counts = new int[ProfileCount * RawHeightCount];
             int[] totals = new int[ProfileCount];
+            TerrainEarthElevationProfile[] profiles =
+                new TerrainEarthElevationProfile[tiles.Length];
             for (int index = 0; index < tiles.Length; index++)
             {
                 TerrainEarthElevationProfile profile = GetProfile(
                     tiles[index],
                     (TerrainLandform)landform[index]);
+                profiles[index] = profile;
                 int rawHeight = GetRankedRawHeight(
                     rawHeightAndElevation[index],
                     (TerrainLandform)landform[index]);
@@ -236,9 +244,7 @@ namespace TerrainLab
 
             for (int index = 0; index < tiles.Length; index++)
             {
-                TerrainEarthElevationProfile profile = GetProfile(
-                    tiles[index],
-                    (TerrainLandform)landform[index]);
+                TerrainEarthElevationProfile profile = profiles[index];
                 int profileIndex = (int)profile;
                 int rawHeight = GetRankedRawHeight(
                     rawHeightAndElevation[index],
@@ -249,6 +255,204 @@ namespace TerrainLab
                     prefixes[bin],
                     counts[bin],
                     totals[profileIndex]);
+            }
+
+            RegularizeGeneratedSurface(
+                width,
+                height,
+                rawHeightAndElevation,
+                profiles);
+        }
+
+        public static void RegularizeGeneratedSurface(
+            int width,
+            int height,
+            short[] elevation,
+            TerrainEarthElevationProfile[] profiles)
+        {
+            int count = checked(width * height);
+            if (width <= 0 || height <= 0 || elevation == null ||
+                profiles == null || elevation.Length != count ||
+                profiles.Length != count)
+            {
+                throw new ArgumentException(
+                    "Generated elevation and profile grids must match the canvas.");
+            }
+
+            Queue<int> queue = new Queue<int>(count);
+            bool[] queued = new bool[count];
+            for (int index = 0; index < count; index++)
+            {
+                if (elevation[index] == TerrainElevationEncoding.NoData)
+                {
+                    continue;
+                }
+
+                ValidateProfile(profiles[index]);
+                queue.Enqueue(index);
+                queued[index] = true;
+            }
+
+            while (queue.Count > 0)
+            {
+                int index = queue.Dequeue();
+                queued[index] = false;
+                int x = index % width;
+                int y = index / width;
+                bool currentChanged = false;
+
+                for (int offsetY = -1; offsetY <= 1; offsetY++)
+                {
+                    int neighborY = y + offsetY;
+                    if (neighborY < 0 || neighborY >= height)
+                    {
+                        continue;
+                    }
+
+                    for (int offsetX = -1; offsetX <= 1; offsetX++)
+                    {
+                        if (offsetX == 0 && offsetY == 0)
+                        {
+                            continue;
+                        }
+
+                        int neighborX = x + offsetX;
+                        if (neighborX < 0 || neighborX >= width)
+                        {
+                            continue;
+                        }
+
+                        int neighbor = neighborY * width + neighborX;
+                        if (elevation[neighbor] == TerrainElevationEncoding.NoData)
+                        {
+                            continue;
+                        }
+
+                        bool currentWater = IsWaterProfile(profiles[index]);
+                        bool neighborWater = IsWaterProfile(profiles[neighbor]);
+                        if (currentWater != neighborWater)
+                        {
+                            currentChanged |= TryLowerMagnitude(
+                                elevation,
+                                profiles,
+                                index,
+                                TerrainSpatialScale.GeneratedMaximumCoastalMagnitudeMetres);
+                            if (TryLowerMagnitude(
+                                elevation,
+                                profiles,
+                                neighbor,
+                                TerrainSpatialScale.GeneratedMaximumCoastalMagnitudeMetres))
+                            {
+                                Enqueue(queue, queued, neighbor);
+                            }
+
+                            continue;
+                        }
+
+                        int riseLimit = offsetX != 0 && offsetY != 0
+                            ? TerrainSpatialScale.GeneratedMaximumDiagonalRiseMetres
+                            : TerrainSpatialScale.GeneratedMaximumCardinalRiseMetres;
+                        int currentMagnitude = GetMagnitude(
+                            elevation[index],
+                            currentWater);
+                        int neighborMagnitude = GetMagnitude(
+                            elevation[neighbor],
+                            neighborWater);
+                        if (currentMagnitude > neighborMagnitude + riseLimit)
+                        {
+                            currentChanged |= TryLowerMagnitude(
+                                elevation,
+                                profiles,
+                                index,
+                                neighborMagnitude + riseLimit);
+                            currentMagnitude = GetMagnitude(
+                                elevation[index],
+                                currentWater);
+                        }
+
+                        if (neighborMagnitude > currentMagnitude + riseLimit &&
+                            TryLowerMagnitude(
+                                elevation,
+                                profiles,
+                                neighbor,
+                                currentMagnitude + riseLimit))
+                        {
+                            Enqueue(queue, queued, neighbor);
+                        }
+                    }
+                }
+
+                if (currentChanged)
+                {
+                    Enqueue(queue, queued, index);
+                }
+            }
+        }
+
+        private static void Enqueue(
+            Queue<int> queue,
+            bool[] queued,
+            int index)
+        {
+            if (!queued[index])
+            {
+                queue.Enqueue(index);
+                queued[index] = true;
+            }
+        }
+
+        private static bool TryLowerMagnitude(
+            short[] elevation,
+            TerrainEarthElevationProfile[] profiles,
+            int index,
+            int maximumMagnitude)
+        {
+            TerrainEarthElevationProfile profile = profiles[index];
+            bool water = IsWaterProfile(profile);
+            int current = GetMagnitude(elevation[index], water);
+            int next = Math.Max(GetMinimumMagnitude(profile), maximumMagnitude);
+            if (next >= current)
+            {
+                return false;
+            }
+
+            elevation[index] = (short)(water ? -next : next);
+            return true;
+        }
+
+        private static int GetMagnitude(short elevation, bool water)
+        {
+            return water ? -(int)elevation : elevation;
+        }
+
+        private static bool IsWaterProfile(TerrainEarthElevationProfile profile)
+        {
+            return profile == TerrainEarthElevationProfile.ShallowWater ||
+                   profile == TerrainEarthElevationProfile.Shelf ||
+                   profile == TerrainEarthElevationProfile.DeepOcean;
+        }
+
+        private static int GetMinimumMagnitude(
+            TerrainEarthElevationProfile profile)
+        {
+            switch (profile)
+            {
+                case TerrainEarthElevationProfile.Shelf:
+                    return 6;
+                case TerrainEarthElevationProfile.DeepOcean:
+                    return 150;
+                default:
+                    return 0;
+            }
+        }
+
+        private static void ValidateProfile(TerrainEarthElevationProfile profile)
+        {
+            if ((int)profile < 0 || (int)profile >= ProfileCount)
+            {
+                throw new ArgumentOutOfRangeException(
+                    nameof(profile),
+                    "Unknown generated elevation profile.");
             }
         }
 
