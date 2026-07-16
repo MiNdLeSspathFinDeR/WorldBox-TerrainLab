@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+## 1.2.1 - 2026-07-16
+
+- Kept every GIS raster overlay visible after WorldBox switches from the
+  gameplay tilemap to its low-resolution overview renderer at distant camera
+  zoom. Overlay chunks now use the topmost gameplay/overview sorting context
+  and are excluded from dynamic occlusion culling.
+
 ## 1.2.0 - 2026-07-16
 
 - Added persistent `River` and `Waterbody` cell semantics independent of sea
