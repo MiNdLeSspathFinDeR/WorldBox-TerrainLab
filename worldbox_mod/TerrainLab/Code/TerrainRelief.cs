@@ -158,6 +158,15 @@ namespace TerrainLab
                 byte.MaxValue,
                 hydrology,
                 false));
+            layers.Add(new TerrainLayerInfo(
+                "hydrology.water_dynamics.managed_mask",
+                "hydrology",
+                "uint8",
+                0,
+                state.WaterDynamics?.ManagedMask?.Length == state.CellCount
+                    ? TerrainLayerAvailability.Ready
+                    : TerrainLayerAvailability.Missing,
+                false));
 
             TerrainLayerAvailability erosion = GetAvailability(
                 state.Erosion != null,

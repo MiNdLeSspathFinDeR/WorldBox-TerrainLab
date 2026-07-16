@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+- Added bounded live DEM water routing with finite painted sources,
+  Priority-Flood/D8 channels, depth-weighted local depression filling, and a
+  hard 50-percent valid-cell ceiling.
+- Connected native geyser pulses as continuing water-volume sources while
+  preserving WorldBox pause, disable, destruction, and spawn timing.
+- Added live-water toolbar/settings controls, WBXGEO managed-mask persistence,
+  GeoTIFF export, optional-module validation, and maximum-grid probes.
 - Added a direct per-cell Int16 DEM overlay with translucent, sea-level-centered
   Turbo colors and incremental chunk refresh during edit, undo, and redo.
 - Added command-specific Russian and English hover descriptions to every

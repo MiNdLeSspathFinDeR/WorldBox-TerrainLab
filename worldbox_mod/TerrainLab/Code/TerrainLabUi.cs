@@ -136,6 +136,7 @@ namespace TerrainLab
         private Image _toolbarRightRail;
         private SimpleButton _reliefJobButton;
         private SimpleButton _hydrologyJobButton;
+        private SimpleButton _waterDynamicsButton;
         private SimpleButton _erosionJobButton;
         private SimpleButton _applyErosionButton;
         private GameObject _mapStatusBar;
@@ -745,6 +746,14 @@ namespace TerrainLab
                 ToggleHydrologyAnalysis,
                 "terrain_lab_toolbar_hydrology_job",
                 "terrain_lab_toolbar_hydrology_job_description");
+            _waterDynamicsButton = CreateToolbarButton(
+                row,
+                "water_dynamics",
+                "ui/Icons/iconRain",
+                "W",
+                ToggleWaterDynamics,
+                "terrain_lab_toolbar_water_dynamics",
+                "terrain_lab_toolbar_water_dynamics_description");
             _erosionJobButton = CreateToolbarButton(
                 row,
                 "erosion_job",
@@ -1328,6 +1337,21 @@ namespace TerrainLab
                 hydrologyRunning,
                 hasState && (!analysisRunning || hydrologyRunning),
                 hydrologyCurrent);
+            if (_waterDynamicsButton != null)
+            {
+                TerrainWaterDynamicsService waterService = runtime?.WaterDynamics;
+                bool waterEnabled = hasState && waterService?.Enabled == true;
+                _waterDynamicsButton.Button.interactable = hasState && !analysisRunning;
+                _waterDynamicsButton.Background.color = hasState && !analysisRunning
+                    ? Color.white
+                    : InactiveButton;
+                SetToolbarActivity(
+                    _waterDynamicsButton,
+                    waterEnabled,
+                    waterService?.LimitReached == true
+                        ? ActivityAmber
+                        : ActivityGreen);
+            }
             UpdateJobButton(
                 _erosionJobButton,
                 erosionRunning,
@@ -1754,6 +1778,8 @@ namespace TerrainLab
                 HandleHydrologyThresholdChanged,
                 8);
 
+            BuildWaterDynamicsParameters(state);
+
             CreateSectionHeading(_moduleContent, "terrain_lab_erosion_parameters_heading");
             EnsureErosionParameters(state);
             CreateNumericInputRow(
@@ -1843,6 +1869,92 @@ namespace TerrainLab
                     erosion.Statistics.MassBalance == 0 ? SuccessText : ErrorText,
                     28f);
             }
+        }
+
+        private void BuildWaterDynamicsParameters(TerrainWorldState state)
+        {
+            CreateSectionHeading(_moduleContent, "terrain_lab_water_dynamics_heading");
+            TerrainLabRuntime runtime = TerrainLabRuntime.Instance;
+            TerrainWaterDynamicsService service = runtime?.WaterDynamics;
+            TerrainWaterState water = state.WaterDynamics;
+            TerrainWaterParameters parameters = water?.Parameters ??
+                new TerrainWaterParameters();
+
+            int validCells = 0;
+            for (int index = 0; index < state.Elevation.Length; index++)
+            {
+                if (state.Elevation[index] != TerrainElevationEncoding.NoData)
+                {
+                    validCells++;
+                }
+            }
+
+            int floodLimit = service?.FloodCellLimit ?? 0;
+            if (floodLimit <= 0)
+            {
+                floodLimit = Math.Max(
+                    1,
+                    validCells * parameters.MaximumFloodPercent / 100);
+            }
+
+            bool enabled = service?.Enabled == true;
+            CreateInfoText(
+                string.Format(
+                    LM.Get("terrain_lab_water_dynamics_status_format"),
+                    enabled
+                        ? LM.Get("terrain_lab_water_dynamics_enabled")
+                        : LM.Get("terrain_lab_water_dynamics_disabled"),
+                    service?.ManagedCellCount ?? water?.ManagedCellCount ?? 0,
+                    floodLimit,
+                    service?.ActiveSourceCount ?? 0,
+                    service?.PendingVolume ?? 0L),
+                service?.LimitReached == true
+                    ? WarningText
+                    : enabled ? SuccessText : NeutralText,
+                42f);
+
+            if (!string.IsNullOrWhiteSpace(service?.LastError))
+            {
+                CreateInfoText(service.LastError, ErrorText, 42f);
+            }
+
+            CreateActionButton(
+                _moduleContent,
+                LM.Get(enabled
+                    ? "terrain_lab_water_dynamics_disable"
+                    : "terrain_lab_water_dynamics_enable"),
+                ToggleWaterDynamics,
+                194f,
+                28f,
+                "ui/Icons/iconRain",
+                enabled
+                    ? "terrain_lab_water_dynamics_disable"
+                    : "terrain_lab_water_dynamics_enable",
+                "terrain_lab_toolbar_water_dynamics_description");
+            CreateNumericInputRow(
+                "TerrainLabWaterMaximumFlood",
+                "terrain_lab_water_maximum_flood_percent",
+                parameters.MaximumFloodPercent.ToString(),
+                HandleWaterMaximumFloodChanged,
+                2);
+            CreateNumericInputRow(
+                "TerrainLabWaterInitialVolume",
+                "terrain_lab_water_initial_source_volume",
+                parameters.InitialSourceVolume.ToString(),
+                HandleWaterInitialVolumeChanged,
+                4);
+            CreateNumericInputRow(
+                "TerrainLabWaterGeyserVolume",
+                "terrain_lab_water_geyser_pulse_volume",
+                parameters.GeyserPulseVolume.ToString(),
+                HandleWaterGeyserVolumeChanged,
+                4);
+            CreateNumericInputRow(
+                "TerrainLabWaterCellsPerTick",
+                "terrain_lab_water_cells_per_tick",
+                parameters.CellsPerTick.ToString(),
+                HandleWaterCellsPerTickChanged,
+                3);
         }
 
         private void BuildReliefView()
@@ -2487,6 +2599,115 @@ namespace TerrainLab
             }
 
             RunHydrology();
+        }
+
+        private void ToggleWaterDynamics()
+        {
+            TerrainLabRuntime runtime = TerrainLabRuntime.Instance;
+            TerrainWorldState state = runtime?.State;
+            TerrainWaterDynamicsService service = runtime?.WaterDynamics;
+            if (state == null || service == null)
+            {
+                SetError(LM.Get("terrain_lab_no_project_state"));
+                return;
+            }
+
+            bool enable = !service.Enabled;
+            if (!service.TrySetEnabled(state, enable, out string error))
+            {
+                SetError(error);
+                return;
+            }
+
+            UpdateToolbarState();
+            RebuildModuleContent();
+            SetStatus(
+                LM.Get(enable
+                    ? "terrain_lab_water_dynamics_started"
+                    : "terrain_lab_water_dynamics_stopped"),
+                false,
+                enable);
+        }
+
+        private void HandleWaterMaximumFloodChanged(string value)
+        {
+            TryUpdateWaterParameter(
+                value,
+                1,
+                TerrainWaterParameters.HardMaximumFloodPercent,
+                (parameters, parsed) => parameters.MaximumFloodPercent = parsed);
+        }
+
+        private void HandleWaterInitialVolumeChanged(string value)
+        {
+            TryUpdateWaterParameter(
+                value,
+                1,
+                4096,
+                (parameters, parsed) => parameters.InitialSourceVolume = parsed);
+        }
+
+        private void HandleWaterGeyserVolumeChanged(string value)
+        {
+            TryUpdateWaterParameter(
+                value,
+                1,
+                1024,
+                (parameters, parsed) => parameters.GeyserPulseVolume = parsed);
+        }
+
+        private void HandleWaterCellsPerTickChanged(string value)
+        {
+            TryUpdateWaterParameter(
+                value,
+                1,
+                512,
+                (parameters, parsed) => parameters.CellsPerTick = parsed);
+        }
+
+        private void TryUpdateWaterParameter(
+            string value,
+            int minimum,
+            int maximum,
+            Action<TerrainWaterParameters, int> setter)
+        {
+            if (!int.TryParse(value, out int parsed) ||
+                parsed < minimum || parsed > maximum)
+            {
+                SetError(string.Format(
+                    LM.Get("terrain_lab_water_parameter_error"),
+                    minimum,
+                    maximum));
+                return;
+            }
+
+            TerrainLabRuntime runtime = TerrainLabRuntime.Instance;
+            TerrainWorldState state = runtime?.State;
+            TerrainWaterDynamicsService service = runtime?.WaterDynamics;
+            if (state == null || service == null)
+            {
+                SetError(LM.Get("terrain_lab_no_project_state"));
+                return;
+            }
+
+            TerrainWaterParameters source = state.WaterDynamics?.Parameters ??
+                new TerrainWaterParameters();
+            TerrainWaterParameters updated = new TerrainWaterParameters
+            {
+                MaximumFloodPercent = source.MaximumFloodPercent,
+                InitialSourceVolume = source.InitialSourceVolume,
+                GeyserPulseVolume = source.GeyserPulseVolume,
+                CellsPerTick = source.CellsPerTick
+            };
+            setter(updated, parsed);
+            if (!service.TryUpdateParameters(state, updated, out string error))
+            {
+                SetError(error);
+                return;
+            }
+
+            UpdateToolbarState();
+            SetStatus(LM.Get("terrain_lab_water_parameters_updated"), false, true);
         }
 
         private void EnsureHydrologyThreshold(TerrainWorldState state)

@@ -114,11 +114,24 @@ namespace TerrainLab
 
         public TerrainHydrologyResult Hydrology { get; internal set; }
 
+        public TerrainWaterState WaterDynamics { get; internal set; }
+
         public TerrainReliefResult Relief { get; internal set; }
 
         public TerrainErosionResult Erosion { get; internal set; }
 
         public bool IsDirty { get; private set; }
+
+        public TerrainWaterState EnsureWaterDynamics()
+        {
+            if (WaterDynamics == null)
+            {
+                WaterDynamics = TerrainWaterState.Create(CellCount);
+            }
+
+            WaterDynamics.ValidateAndRecount(CellCount);
+            return WaterDynamics;
+        }
 
         private TerrainWorldState()
         {
@@ -919,6 +932,12 @@ namespace TerrainLab
             }
 
             return (WorldTile[])TilesListField.GetValue(World.world);
+        }
+
+        internal WorldTile[] GetCurrentWorldTilesForRuntime()
+        {
+            WorldTile[] tiles = GetCurrentTiles();
+            return tiles != null && tiles.Length == CellCount ? tiles : null;
         }
     }
 }

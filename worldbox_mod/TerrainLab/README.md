@@ -24,10 +24,13 @@ under `Code` when the game starts.
 - Horn 3 x 3 slope, aspect, hillshade, ruggedness, and hypsometric overlays;
 - Priority-Flood, deterministic D8, UInt32 accumulation, stream extraction,
   stable watershed IDs, and Strahler stream order;
+- bounded live-water routing with finite painted sources, native geyser pulse
+  replenishment, local depression filling, gameplay-safe conversion, and a
+  non-bypassable 50-percent valid-cell ceiling;
 - deterministic integer hydraulic/thermal transport with exact mass balance,
   preview overlays, apply, and undo;
-- optional hydrology and erosion payloads in WBXGEO, each bound to source and
-  layer checksums;
+- optional hydrology, live-water, and erosion payloads in WBXGEO, each protected
+  by layer checksums;
 - strict north-first GeoTIFF export and protected Int16 DEM import;
 - local file sync with baseline SHA-256, conflict rejection, branch-and-apply,
   incoming history, and `changes.jsonl`;

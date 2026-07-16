@@ -37,6 +37,9 @@ terrainlab.wbxgeo
     |   |-- streams.u8
     |   |-- watersheds.u32
     |   `-- stream_order.u8
+    |-- hydrology.water_dynamics/
+    |   |-- state.json
+    |   `-- managed_water.u8
     |-- erosion.hydraulic/
     |   |-- analysis.json
     |   |-- result_elevation.i16
@@ -198,6 +201,7 @@ First-party and reserved module IDs:
 
 ```text
 hydrology
+hydrology.water_dynamics
 erosion.hydraulic
 erosion.thermal
 export.gis
@@ -229,6 +233,25 @@ keeps only `analysis.json`; it never modifies the authoritative DEM during save.
 Readers migrate valid hydrology schema `1.0.x` payloads by deriving watersheds
 and stream order from the stored D8 graph. Invalid optional data is discarded as
 one module; it does not invalidate the core project.
+
+### Live water module
+
+TerrainLab implements optional module `hydrology.water_dynamics` schema `1.0.0`.
+`state.json` stores whether routing is enabled, normalized integer parameters,
+managed-cell count, injected/consumed volume counters, and observed native
+geyser pulse count.
+
+| Layer | Storage | NODATA | Meaning |
+|---|---|---:|---|
+| `hydrology.water_dynamics.managed_mask` | UInt8 | `255` | `1` for water cells created and budgeted by TerrainLab, `0` otherwise |
+
+The loader requires exact project ID, dimensions, layer length, SHA-256, binary
+mask values, and a managed-cell count matching the raster. Invalid data drops
+only this optional module. Source queues and remaining finite volume are not
+serialized: loading restores the managed mask but does not inject another
+ordinary-source budget. Later native geyser pulses can continue replenishing a
+source. The configured flood percentage is normalized to `1..50`, and runtime
+code always enforces the same hard 50-percent ceiling over valid DEM cells.
 
 ### Erosion module
 

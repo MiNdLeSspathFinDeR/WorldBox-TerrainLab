@@ -52,6 +52,12 @@ and all raster overlays use `256 x 256` chunks. The internal window now contains
 only project/import details, algorithm parameters, the runtime layer catalog,
 and format/exchange settings; it does not duplicate routine map commands.
 
+The Analysis chapter also exposes `Live DEM water` with WorldBox's native rain
+icon. It is a repeat-click toggle with a green native activity lamp; the lamp
+turns amber when the configured area ceiling is reached. The Parameters page
+contains maximum flooded area, finite contact volume, geyser pulse volume, and
+cells-per-tick controls plus live managed-cell/source diagnostics.
+
 The Layers chapter also exposes the authoritative Int16 DEM directly, without
 requiring relief analysis. It renders one point-filtered texture pixel per world
 cell at 61-percent opacity. A Turbo-derived split scale maps elevations below sea
@@ -79,7 +85,7 @@ are delivered; every toolbar control has a localized tooltip.
 
 ## Runtime button and tooltip audit
 
-The current top toolbar contains 47 controls. Every one is connected to a real
+The current top toolbar contains 48 controls. Every one is connected to a real
 handler; there are no visible placeholder or no-op buttons.
 
 | Surface | Count | Implemented behavior |
@@ -89,7 +95,7 @@ handler; there are no visible placeholder or no-op buttons.
 | Project chapter | 6 | WBXGEO export/validation, GeoTIFF export, and three sync commands |
 | Terrain chapter | 7 | Five DEM tools plus undo and redo |
 | Digitizing chapter | 8 | Six surface tools, apply selection, and cancel |
-| Analysis chapter | 4 | Relief, hydrology, erosion preview, and explicit erosion apply |
+| Analysis chapter | 5 | Relief, hydrology, live DEM water, erosion preview, and explicit erosion apply |
 | Derived-layer chapter | 15 | Direct DEM, four relief, five hydrology, four erosion layers, and hide all |
 
 The live internal window's module selectors, package imports, radius controls,
@@ -122,7 +128,7 @@ the nearest icon or an ASCII badge:
 | DEM editing and display | `dem_elevation`, `elevation_set`, `elevation_lower`, `elevation_smooth` |
 | Surface digitizing | `surface_sample`, `surface_line`, `surface_polygon`, `surface_rectangle`, `surface_polygonize`, `selection_apply`, `digitizing_cancel` |
 | Relief layers | `hypsometry`, `slope`, `aspect`, `hillshade` |
-| Hydrology layers | `stream_extract`, `flow_accumulation`, `sink_fill`, `watershed`, `stream_order` |
+| Hydrology layers/process | `stream_extract`, `flow_accumulation`, `sink_fill`, `watershed`, `stream_order`, `flood` |
 | Erosion result | `erosion_net`, `erosion_cut`, `deposition`, `erosion_result`, `erosion_apply` |
 
 The safe-fill control already uses WorldBox's exact bucket metaphor. Analysis
@@ -148,8 +154,8 @@ These are actual runtime boundaries, not merely missing icons:
    GeoPackage export, and projection-aware scale/measurement tools.
 6. Advanced DEM tools such as flatten, ramp, sampled elevation, contour
    generation, raster calculator, and explicit sea-level editing.
-7. Advanced hydrology: MFD flow, sink breaching, editable outlets, lakes,
-   constrained river vectors, water depth/surface, and flood simulation.
+7. Advanced hydrology: MFD flow, sink breaching, editable outlets, persistent
+   lakes, constrained river vectors, and calibrated water depth/velocity.
 8. Calibrated process modules with rainfall fields, persistent water/sediment,
    variable erodibility, physical units, process stepping, and reset.
 9. A QGIS plugin or live transport. Version 1.0 implements the documented file

@@ -820,6 +820,20 @@ namespace TerrainLab
                         state.Hydrology.StreamOrder, TerrainTiffSampleKind.UInt8, "255", "uint8");
                 }
 
+                if (state.WaterDynamics?.ManagedMask?.Length == state.CellCount)
+                {
+                    WriteLayer(
+                        stagingDirectory,
+                        state,
+                        layers,
+                        "hydrology.water_dynamics.managed_mask",
+                        "managed_water.tif",
+                        state.WaterDynamics.ManagedMask,
+                        TerrainTiffSampleKind.UInt8,
+                        "255",
+                        "uint8");
+                }
+
                 if (state.Erosion != null && state.Erosion.IsCurrent(state))
                 {
                     RequireSourceHash(

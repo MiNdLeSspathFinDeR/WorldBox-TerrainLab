@@ -13,6 +13,8 @@ namespace TerrainLab
         private static readonly TerrainModuleRegistry ModuleRegistry;
         private static readonly TerrainReliefService ReliefService;
         private static readonly TerrainHydrologyModule HydrologyModule;
+        private static readonly TerrainWaterDynamicsModule WaterDynamicsModule;
+        private static readonly TerrainWaterDynamicsService WaterDynamicsService;
         private static readonly TerrainErosionModule ErosionModule;
 
         private static string _pendingLoadDirectory;
@@ -28,8 +30,11 @@ namespace TerrainLab
             ModuleRegistry = new TerrainModuleRegistry();
             ReliefService = new TerrainReliefService();
             HydrologyModule = new TerrainHydrologyModule();
+            WaterDynamicsModule = new TerrainWaterDynamicsModule();
+            WaterDynamicsService = new TerrainWaterDynamicsService();
             ErosionModule = new TerrainErosionModule();
             ModuleRegistry.Register(HydrologyModule);
+            ModuleRegistry.Register(WaterDynamicsModule);
             ModuleRegistry.Register(ErosionModule);
         }
 
@@ -38,6 +43,8 @@ namespace TerrainLab
         public TerrainHydrologyModule Hydrology => HydrologyModule;
 
         public TerrainReliefService Relief => ReliefService;
+
+        public TerrainWaterDynamicsService WaterDynamics => WaterDynamicsService;
 
         public TerrainErosionModule Erosion => ErosionModule;
 
@@ -50,6 +57,8 @@ namespace TerrainLab
              State.Hydrology != null &&
              State.Hydrology.IsCurrent(State) &&
              State.Hydrology.IsDirty ||
+             State.WaterDynamics != null &&
+             State.WaterDynamics.IsDirty ||
              State.Erosion != null &&
              State.Erosion.IsCurrent(State) &&
              State.Erosion.IsDirty);
@@ -144,6 +153,7 @@ namespace TerrainLab
                 changed |= ReliefService.Poll(State);
                 changed |= HydrologyModule.Poll(State);
                 changed |= ErosionModule.Poll(State);
+                changed |= WaterDynamicsService.Poll(State, HasRunningAnalysis);
             }
 
             if (changed)
@@ -193,6 +203,7 @@ namespace TerrainLab
                 if (State == null || !State.MatchesCurrentWorld())
                 {
                     State = TerrainWorldState.CaptureCurrentWorld();
+                    WaterDynamicsService.AttachState(State);
                 }
                 else
                 {
@@ -202,6 +213,7 @@ namespace TerrainLab
                 WbxGeoPackage.Save(directory, State, savedMap, ModuleRegistry);
                 State.MarkSaved();
                 HydrologyModule.MarkSaved(State);
+                WaterDynamicsModule.MarkSaved(State);
                 ErosionModule.MarkSaved(State);
                 Debug.Log("[TerrainLab] Saved " + WbxGeoPackage.GetSidecarPath(directory));
             }
@@ -528,6 +540,7 @@ namespace TerrainLab
             ReliefService.Cancel();
             HydrologyModule.Cancel();
             ErosionModule.Cancel();
+            WaterDynamicsService.Reset();
             try
             {
                 if (!TerrainMapLimits.TryValidate(MapBox.width, MapBox.height, out string limitError))
@@ -577,6 +590,7 @@ namespace TerrainLab
             finally
             {
                 _pendingLoadDirectory = null;
+                WaterDynamicsService.AttachState(State);
                 NotifyStateChanged();
             }
         }
@@ -681,6 +695,7 @@ namespace TerrainLab
             ReliefService.Cancel();
             HydrologyModule.Cancel();
             ErosionModule.Cancel();
+            WaterDynamicsService.Reset();
             if (_worldLoadedField != null && _worldLoadedCallback != null)
             {
                 Action current = (Action)_worldLoadedField.GetValue(null);

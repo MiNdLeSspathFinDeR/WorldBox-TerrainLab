@@ -85,6 +85,22 @@ The view reports outlets, fill depth, accumulation, stream cells, watershed
 count, and maximum order. Streams, accumulation, fill, watersheds, and Strahler
 order have chunked overlays. Any DEM edit marks the analysis stale.
 
+The Analysis toolbar also has a persistent `Live DEM water` toggle. A normal
+water-layer contact receives a finite integer budget and follows the dedicated
+Priority-Flood/D8 graph. The route is drawn as a shallow one-cell channel;
+positive-depth depressions may fill locally with coastal/deep water according
+to fill depth. The simulation cannot convert more than the configured 1-50
+percent of valid DEM cells, never overwrites hazardous surfaces or ordinary
+buildings, pauses with WorldBox and modal windows, and does not count the
+pre-existing ocean against its limit.
+
+The native `geyser` building is observed at its real drop-spawn call. Each pulse
+adds volume, making it a continuing river source without bypassing the same area
+cap. Disabling the toggle stops further routing but deliberately leaves already
+created WorldBox water in place. Parameters for area cap, one-shot contact
+volume, geyser pulse volume, and cells per tick live in the internal Parameters
+page.
+
 ### Erosion
 
 The 1.0 erosion baseline performs deterministic D8 downhill transfer plus
@@ -117,7 +133,10 @@ but TerrainLab does not allocate GIS state for them.
 
 WorldBox writes `map.wbox` first; TerrainLab then writes
 `terrainlab.wbxgeo` beside it by temporary-file replacement. WBXGEO embeds the
-same vanilla map plus core GIS arrays and optional hydrology/erosion modules.
+same vanilla map plus core GIS arrays and optional hydrology, live-water, and
+erosion modules.
+Live-water configuration and its managed UInt8 mask use the separate optional
+`hydrology.water_dynamics` module; the mask also exports to GeoTIFF.
 Unknown optional module data survives load/save. Invalid optional data is
 dropped without blocking the core project or vanilla map.
 

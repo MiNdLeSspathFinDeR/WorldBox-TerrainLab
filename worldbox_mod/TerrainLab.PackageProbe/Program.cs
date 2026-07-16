@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using System.Diagnostics;
 using System.IO;
 using System.IO.Compression;
@@ -53,6 +54,7 @@ internal static class Program
             ValidateElevationPalette();
             ValidateReliefAlgorithm();
             ValidateHydrologyAlgorithm();
+            ValidateWaterDynamicsAlgorithm();
             ValidateGeoTiff(testRoot);
             ValidateFileSync(testRoot);
             ValidateFileSyncRollback(testRoot);
@@ -270,6 +272,25 @@ internal static class Program
             TerrainHydrologyAnalyzer.GetDefaultStreamThreshold(count));
         TerrainErosionModule erosion = new TerrainErosionModule();
         RunErosion(state, erosion);
+        TerrainWaterRouting waterRouting = TerrainWaterRouting.Build(
+            width,
+            height,
+            state.Elevation);
+        TerrainWaterSimulation water = new TerrainWaterSimulation(
+            waterRouting,
+            new byte[count],
+            new byte[count],
+            new TerrainWaterParameters
+            {
+                MaximumFloodPercent = 50,
+                InitialSourceVolume = 128,
+                GeyserPulseVolume = 2,
+                CellsPerTick = 128
+            });
+        int waterSource = height / 2 * width + width / 2;
+        water.AddSource(waterSource, elevation[waterSource], 128);
+        IReadOnlyList<TerrainWaterCellChange> waterChanges =
+            water.Step(128, _ => true);
         stopwatch.Stop();
         GC.Collect();
         long retainedBytes = GC.GetTotalMemory(true) - beforeBytes;
@@ -281,6 +302,9 @@ internal static class Program
         Assert(state.Erosion != null && state.Erosion.IsCurrent(state) &&
                state.Erosion.Statistics.MassBalance == 0,
             "Maximum-grid erosion result is invalid.");
+        Assert(waterChanges.Count > 0 &&
+               water.ManagedCellCount <= water.FloodCellLimit,
+            "Maximum-grid live-water routing is invalid.");
         Process process = Process.GetCurrentProcess();
         process.Refresh();
         Console.WriteLine(
@@ -361,14 +385,24 @@ internal static class Program
         savedMap.saveVersion = 17;
         TerrainModuleRegistry registry = new TerrainModuleRegistry();
         TerrainHydrologyModule hydrologyModule = new TerrainHydrologyModule();
+        TerrainWaterDynamicsModule waterModule = new TerrainWaterDynamicsModule();
         TerrainErosionModule erosionModule = new TerrainErosionModule();
         registry.Register(hydrologyModule);
+        registry.Register(waterModule);
         registry.Register(erosionModule);
         RunRelief(state);
         RunHydrology(state, hydrologyModule, 2);
         Assert(state.Hydrology != null, "Hydrology analysis did not attach a result.");
         RunErosion(state, erosionModule);
         Assert(state.Erosion != null, "Erosion analysis did not attach a result.");
+        TerrainWaterState water = state.EnsureWaterDynamics();
+        water.Parameters.MaximumFloodPercent = 37;
+        water.Parameters.InitialSourceVolume = 19;
+        water.Parameters.GeyserPulseVolume = 3;
+        water.Parameters.CellsPerTick = 11;
+        water.ManagedMask[2] = 1;
+        water.ManagedMask[7] = 1;
+        state.EnsureWaterDynamics();
 
         string gisDirectory = TerrainGisExporter.Export(
             Path.Combine(testRoot, "gis"),
@@ -377,8 +411,10 @@ internal static class Program
             "GIS manifest was not created.");
         JObject gisManifest = JObject.Parse(
             File.ReadAllText(Path.Combine(gisDirectory, "terrainlab-gis.json")));
-        Assert(gisManifest["layers"].Count() == 15,
+        Assert(gisManifest["layers"].Count() == 16,
             "GIS export did not include every ready layer.");
+        Assert(File.Exists(Path.Combine(gisDirectory, "managed_water.tif")),
+            "GIS export omitted the managed-water mask.");
         Assert(((string)gisManifest["crs_wkt"]).StartsWith("ENGCRS["),
             "GIS manifest does not contain WKT2 ENGCRS.");
         Assert(
@@ -407,6 +443,13 @@ internal static class Program
         Assert(loaded.Elevation[5] == TerrainElevationEncoding.NoData, "NODATA changed.");
         Assert(loaded.Width == width && loaded.Height == height, "Dimensions changed.");
         Assert(loaded.Hydrology != null, "Hydrology module did not survive package reload.");
+        Assert(
+            loaded.WaterDynamics != null &&
+            loaded.WaterDynamics.ManagedCellCount == 2 &&
+            loaded.WaterDynamics.ManagedMask.SequenceEqual(water.ManagedMask) &&
+            loaded.WaterDynamics.Parameters.MaximumFloodPercent == 37 &&
+            loaded.WaterDynamics.Parameters.GeyserPulseVolume == 3,
+            "Water dynamics state changed during package round-trip.");
         Assert(
             loaded.Hydrology.FlowDirection[5] == byte.MaxValue &&
             loaded.Hydrology.FlowAccumulation[5] == 0 &&
@@ -519,6 +562,40 @@ internal static class Program
         Assert(semanticErosionFallback.Hydrology != null &&
                semanticErosionFallback.Erosion == null,
             "Semantically invalid erosion data was attached to the project.");
+
+        string semanticWaterPackage = Path.Combine(
+            testRoot,
+            "semantic-water-dynamics.wbxgeo");
+        File.Copy(packagePath, semanticWaterPackage);
+        using (ZipArchive archive = ZipFile.Open(
+            semanticWaterPackage,
+            ZipArchiveMode.Update))
+        {
+            const string entryPath =
+                "modules/hydrology.water_dynamics/managed_water.u8";
+            byte[] managedWater = ReadArchiveEntry(archive, entryPath);
+            managedWater[0] = 2;
+            ReplaceArchiveEntry(archive, entryPath, managedWater);
+            UpdateLayerChecksum(
+                archive,
+                "hydrology.water_dynamics.managed_mask",
+                managedWater);
+        }
+
+        Assert(
+            WbxGeoPackage.TryLoad(
+                semanticWaterPackage,
+                baseMap,
+                registry,
+                out TerrainWorldState semanticWaterFallback,
+                out string semanticWaterError),
+            "Semantic water corruption rejected the core project: " +
+            semanticWaterError);
+        Assert(
+            semanticWaterFallback.WaterDynamics == null &&
+            semanticWaterFallback.Hydrology != null &&
+            semanticWaterFallback.Erosion != null,
+            "Semantically invalid live-water data was attached to the project.");
 
         string corruptPackage = Path.Combine(testRoot, "corrupt.wbxgeo");
         File.Copy(packagePath, corruptPackage);
@@ -639,6 +716,181 @@ internal static class Program
             1);
         Assert(state.Revision == revision + 1, "DEM revision did not advance.");
         Assert(!result.IsCurrent(state), "DEM edit did not invalidate hydrology.");
+    }
+
+    private static void ValidateWaterDynamicsAlgorithm()
+    {
+        const int width = 10;
+        const int height = 10;
+        const int count = width * height;
+        short[] elevation = new short[count];
+        for (int y = 0; y < height; y++)
+        {
+            for (int x = 0; x < width; x++)
+            {
+                elevation[y * width + x] =
+                    (short)(200 - x * 10 + Math.Abs(y - 5) * 3);
+            }
+        }
+
+        elevation[0] = TerrainElevationEncoding.NoData;
+        TerrainWaterRouting routing = TerrainWaterRouting.Build(
+            width,
+            height,
+            elevation);
+        TerrainWaterParameters cappedParameters = new TerrainWaterParameters
+        {
+            MaximumFloodPercent = 99,
+            InitialSourceVolume = 100,
+            GeyserPulseVolume = 2,
+            CellsPerTick = 100
+        };
+        TerrainWaterSimulation capped = new TerrainWaterSimulation(
+            routing,
+            new byte[count],
+            new byte[count],
+            cappedParameters);
+        Assert(capped.FloodCellLimit == routing.ValidCellCount / 2,
+            "Water dynamics exceeded its hard 50-percent cell cap.");
+
+        TerrainWaterParameters finiteParameters = new TerrainWaterParameters
+        {
+            MaximumFloodPercent = 50,
+            InitialSourceVolume = 3,
+            GeyserPulseVolume = 1,
+            CellsPerTick = 100
+        };
+        int source = 5 * width + 1;
+        TerrainWaterSimulation first = new TerrainWaterSimulation(
+            routing,
+            new byte[count],
+            new byte[count],
+            finiteParameters);
+        Assert(first.AddSource(source, elevation[source], 3),
+            "Finite water source was rejected.");
+        int[] firstPath = first.Step(100, _ => true)
+            .Select(change => change.Index)
+            .ToArray();
+        Assert(firstPath.Length == 3 && first.ManagedCellCount == 3,
+            "Finite water source did not consume exactly its volume.");
+        Assert(first.Step(100, _ => true).Count == 0,
+            "Exhausted finite water source continued spreading.");
+        Assert(firstPath.All(index => elevation[index] != TerrainElevationEncoding.NoData),
+            "Water entered a NODATA cell.");
+        Assert(first.AddSource(source, elevation[source], 2) &&
+               first.Step(100, _ => true).Count == 2,
+            "A repeated finite contact did not replenish its unfinished route.");
+        Assert(first.MarkExternalDry(firstPath[0]) &&
+               first.ManagedCellCount == 4 &&
+               !first.IsWater(firstPath[0]),
+            "Externally repainted water remained in the managed budget.");
+
+        TerrainWaterSimulation repeated = new TerrainWaterSimulation(
+            routing,
+            new byte[count],
+            new byte[count],
+            finiteParameters);
+        repeated.AddSource(source, elevation[source], 3);
+        int[] repeatedPath = repeated.Step(100, _ => true)
+            .Select(change => change.Index)
+            .ToArray();
+        Assert(firstPath.SequenceEqual(repeatedPath),
+            "D8 water routing is not deterministic.");
+
+        const int basinWidth = 7;
+        const int basinHeight = 7;
+        short[] basinElevation = new short[basinWidth * basinHeight];
+        for (int y = 0; y < basinHeight; y++)
+        {
+            for (int x = 0; x < basinWidth; x++)
+            {
+                basinElevation[y * basinWidth + x] =
+                    x == 0 || y == 0 || x == basinWidth - 1 || y == basinHeight - 1
+                        ? (short)50
+                        : (short)0;
+            }
+        }
+
+        TerrainWaterRouting basinRouting = TerrainWaterRouting.Build(
+            basinWidth,
+            basinHeight,
+            basinElevation);
+        TerrainWaterSimulation basin = new TerrainWaterSimulation(
+            basinRouting,
+            new byte[basinElevation.Length],
+            new byte[basinElevation.Length],
+            finiteParameters);
+        int basinSource = 3 * basinWidth + 3;
+        basin.AddSource(basinSource, basinElevation[basinSource], 204);
+        TerrainWaterCellChange[] basinChanges = basin.Step(10, _ => true).ToArray();
+        Assert(
+            basinChanges.Length == 4 &&
+            basinChanges.All(change =>
+                change.Cost == 51 &&
+                basinElevation[change.Index] == 0) &&
+            basinChanges.Any(change =>
+                change.DepthClass == TerrainWaterDepthClass.Shallow) &&
+            basinChanges.Any(change =>
+                change.DepthClass == TerrainWaterDepthClass.Deep),
+            "Depression fill did not consume depth-weighted volume locally: " +
+            string.Join(", ", basinChanges.Select(change => string.Format(
+                "{0}/{1}/{2}",
+                change.Index,
+                change.Cost,
+                change.DepthClass))));
+
+        TerrainWaterSimulation limited = new TerrainWaterSimulation(
+            routing,
+            new byte[count],
+            new byte[count],
+            new TerrainWaterParameters
+            {
+                MaximumFloodPercent = 10,
+                InitialSourceVolume = 1000,
+                GeyserPulseVolume = 1,
+                CellsPerTick = 100
+            });
+        limited.AddSource(source, elevation[source], 1000);
+        for (int iteration = 0; iteration < 10; iteration++)
+        {
+            limited.Step(100, _ => true);
+        }
+
+        Assert(limited.ManagedCellCount <= limited.FloodCellLimit,
+            "Water spread crossed its configured area limit.");
+
+        const int registryWidth = 20;
+        const int registryHeight = 20;
+        short[] registryElevation = Enumerable.Range(
+                0,
+                registryWidth * registryHeight)
+            .Select(index => (short)(index / registryWidth + index % registryWidth))
+            .ToArray();
+        byte[] allExternalWater = Enumerable.Repeat(
+                (byte)1,
+                registryElevation.Length)
+            .ToArray();
+        TerrainWaterSimulation registrySimulation = new TerrainWaterSimulation(
+            TerrainWaterRouting.Build(
+                registryWidth,
+                registryHeight,
+                registryElevation),
+            allExternalWater,
+            new byte[registryElevation.Length],
+            finiteParameters);
+        for (int index = 0; index < 300; index++)
+        {
+            Assert(
+                registrySimulation.AddSource(
+                    index,
+                    registryElevation[index],
+                    1),
+                "Inactive water sources permanently exhausted the registry.");
+            registrySimulation.Step(1, _ => true);
+        }
+
+        Assert(registrySimulation.ActiveSourceCount == 0,
+            "Completed external-water sources remained active.");
     }
 
     private static void ValidateGeoTiff(string testRoot)
@@ -1041,6 +1293,8 @@ internal static class Program
                 "modules/hydrology/streams.u8",
                 "modules/hydrology/watersheds.u32",
                 "modules/hydrology/stream_order.u8",
+                "modules/hydrology.water_dynamics/state.json",
+                "modules/hydrology.water_dynamics/managed_water.u8",
                 "modules/erosion.hydraulic/analysis.json",
                 "modules/erosion.hydraulic/result_elevation.i16",
                 "modules/erosion.hydraulic/net_change.i32"
@@ -1061,12 +1315,20 @@ internal static class Program
                     "Hydrology module descriptor is missing.");
                 Assert(
                     manifest["modules"].Any(module =>
+                        (string)module["id"] == "hydrology.water_dynamics"),
+                    "Water dynamics module descriptor is missing.");
+                Assert(
+                    manifest["modules"].Any(module =>
                         (string)module["id"] == "erosion.hydraulic"),
                     "Erosion module descriptor is missing.");
                 Assert(
                     manifest["layers"].Count(layer =>
                         (string)layer["module"] == "hydrology") == 6,
                     "Hydrology layer catalog is incomplete.");
+                Assert(
+                    manifest["layers"].Count(layer =>
+                        (string)layer["module"] == "hydrology.water_dynamics") == 1,
+                    "Water dynamics layer catalog is incomplete.");
                 Assert(
                     manifest["layers"].Count(layer =>
                         (string)layer["module"] == "erosion.hydraulic") == 2,

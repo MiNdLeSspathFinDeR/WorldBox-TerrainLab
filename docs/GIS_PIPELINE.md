@@ -70,6 +70,50 @@ The deterministic hydrology module operates over the same DEM:
    are stored under `modules/hydrology/`, tied to a checksum of elevation and
    landform.
 
+## Implemented live water routing
+
+The optional `hydrology.water_dynamics` runtime turns water placement into a
+bounded DEM process without replacing WorldBox's own ocean behavior:
+
+1. Enabling the tool samples at most 96 spatially distributed contacts between
+   existing water and lower-or-equal DEM cells. Painting a deep, coastal, or
+   shallow water layer creates one debounced finite source at its best downhill
+   contact.
+2. A dedicated Priority-Flood surface provides depression spill levels and a
+   deterministic D8 receiver graph. The algorithm first cuts a one-cell channel
+   along D8, then interleaves local filling only among cells in the same
+   positive-depth depression and at the same spill elevation. It does not run an
+   unrestricted flood fill over a tilted plane.
+3. Source volume is integer. A channel cell costs one unit; filling a depression
+   costs more in proportion to its Priority-Flood depth. An ordinary contact has
+   a finite configurable volume.
+4. A Harmony postfix observes the native `geyser` building's actual
+   `spawnBurstSpecial` call. Every real pulse adds configurable volume, so a live
+   geyser behaves as a continuing river source while still respecting native
+   pause, disable, destruction, and spawn timing.
+5. TerrainLab-created water may occupy at most the configured 1-50 percent of
+   valid DEM cells. Fifty percent is a non-bypassable hard maximum. Existing
+   ocean cells do not consume that budget, and hazardous/non-copyable surfaces
+   or non-geyser buildings are never converted.
+6. Shallow channel cells and depth-classified coastal/deep depression cells are
+   written as normal WorldBox terrain. The managed UInt8 mask persists in
+   WBXGEO and exports as `managed_water.tif`; the vanilla map therefore retains
+   the visible river even without the mod.
+
+Finite source queues are intentionally runtime-only and are not replenished on
+reload. The managed mask is restored, while native geysers resume through later
+real pulses. This prevents save/reload from turning one finite placement into
+an infinite source. The current model is a gameplay drainage model, not a
+calibrated shallow-water solver: it does not yet model velocity, evaporation,
+infiltration, or continuous water depth.
+
+The design follows the same separation used by SAGA's
+[Wang & Liu depression filling](https://saga-gis.sourceforge.io/saga_tool_doc/7.8.1/ta_preprocessor_4.html)
+and [D8 channel-network](https://saga-gis.sourceforge.io/saga_tool_doc/9.11.1/ta_channels_5.html)
+tools: first condition the DEM and derive flow connectivity, then extract or
+evolve the channel process. TerrainLab uses its own bounded integer runtime
+implementation rather than embedding SAGA binaries.
+
 ## Implemented erosion baseline
 
 The `erosion.hydraulic` module is a reproducible integer process baseline, not a
@@ -101,8 +145,8 @@ calculate, then quantize it back to the authoritative integer grid:
 
 1. `dem.inference`: infer relative elevation from relief shading, contours, and
    semantic terrain masks.
-2. `hydrology.advanced`: MFD flow, sink breaching, editable outlets, lakes, and
-   vector river constraints.
+2. `hydrology.advanced`: MFD flow, sink breaching, editable outlets, persistent
+   lake levels, vector river constraints, and calibrated water depth/velocity.
 3. `erosion.process`: rainfall fields, water/sediment state, transport capacity,
    spatially variable erodibility, and calibrated timestep/units.
 4. `biomes`: classify climate/soil after the terrain process, so erosion changes
