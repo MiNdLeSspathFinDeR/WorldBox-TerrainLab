@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+## 1.2.3 - 2026-07-17
+
+- Decoupled toolbar chapter navigation from active map-tool state. Inspector,
+  its native activity lamp, and the bottom coordinate/elevation strip now stay
+  active while Project, Analysis, Layers, or another toolbar chapter is shown.
+  A map tool is disabled only by selecting another tool or clicking it again.
+
 ## 1.2.2 - 2026-07-17
 
 - Added an explicit horizontal cell scale to TerrainLab projects. New worlds use

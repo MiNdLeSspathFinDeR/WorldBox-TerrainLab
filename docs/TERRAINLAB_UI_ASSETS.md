@@ -20,7 +20,7 @@ against screen edges and can be collapsed independently.
 
 ## Implementation status
 
-Version 1.2.2 implements the standalone side button, an adaptive top GIS
+Version 1.2.3 implements the standalone side button, an adaptive top GIS
 toolbar, and a stock WorldBox internal window. The toolbar copies the bottom
 WorldBox panel and button sprites, stretches to the logical canvas width, and
 balances commands across as few rows as the current UI scale permits. Its frame
@@ -32,8 +32,11 @@ gray chapter buttons for Project, Terrain, Digitizing, Analysis, and Layers.
 Selecting a chapter replaces the functional row below it. Functional groups
 retain distinct outline colors and matching flag separators; selection and
 readiness use WorldBox's native `ToggleIcon.spriteON/spriteOFF` lamps, while
-running jobs and the settings level use amber. Re-clicking an active chapter,
-map tool, or derived layer switches it off, matching the base-game power bar.
+running jobs and the settings level use amber. Re-clicking an active chapter
+collapses its functional row; re-clicking a map tool or derived layer switches
+that state off, matching the base-game power bar. Toolbar chapters only control
+command visibility: switching to Layers or any other chapter preserves the
+active map tool and its inspector status strip.
 Row breaks prefer semantic group boundaries.
 Active tools and overlays are highlighted, unavailable operations are disabled,
 and running jobs switch from play to pause. The bottom coordinate, DEM, slope,

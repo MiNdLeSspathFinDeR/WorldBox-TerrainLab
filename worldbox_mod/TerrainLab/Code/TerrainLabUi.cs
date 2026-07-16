@@ -1360,7 +1360,6 @@ namespace TerrainLab
 
             if (_activeToolbarSection == section)
             {
-                _editor.SetTool(TerrainEditorTool.None);
                 _activeToolbarSection = ToolbarSection.Primary;
                 UpdateToolbarSectionVisibility();
                 UpdateAdaptiveToolbarLayout(true);
@@ -1369,12 +1368,8 @@ namespace TerrainLab
                 return;
             }
 
-            if (_editor.Tool != TerrainEditorTool.None &&
-                GetToolbarSection(_editor.Tool) != section)
-            {
-                _editor.SetTool(TerrainEditorTool.None);
-            }
-
+            // Toolbar sections only change which commands are visible. Map tools
+            // remain active until the user explicitly selects or deselects one.
             _activeToolbarSection = section;
             UpdateToolbarSectionVisibility();
             UpdateAdaptiveToolbarLayout(true);
