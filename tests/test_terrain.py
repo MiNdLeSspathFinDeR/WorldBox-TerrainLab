@@ -1,4 +1,5 @@
 import json
+import re
 import unittest
 import zlib
 from pathlib import Path
@@ -57,8 +58,32 @@ class TerrainConversionTests(unittest.TestCase):
         ui_source = (
             ROOT / "worldbox_mod" / "TerrainLab" / "Code" / "TerrainLabUi.cs"
         ).read_text(encoding="utf-8")
+        numeric_row_keys = set(
+            re.findall(
+                r'CreateNumericInputRow\(\s*"[^"]+",\s*"([^"]+)"',
+                ui_source,
+            )
+        )
+        self.assertTrue(numeric_row_keys)
+        for locale in locales.values():
+            for key in numeric_row_keys:
+                self.assertTrue(locale[key])
+                self.assertTrue(locale[f"{key}_description"])
+
+        tooltip_source = (
+            ROOT
+            / "worldbox_mod"
+            / "TerrainLab"
+            / "Code"
+            / "TerrainParameterTooltip.cs"
+        ).read_text(encoding="utf-8")
+        self.assertIn("IPointerEnterHandler", tooltip_source)
+        self.assertIn("IPointerClickHandler", tooltip_source)
+        self.assertIn("ISelectHandler", tooltip_source)
+        self.assertIn("Tooltip.show(", tooltip_source)
+        self.assertIn("Tooltip.hideTooltip();", tooltip_source)
         self.assertIn(
-            "ConfigureParameterTooltip(row.gameObject, labelKey);",
+            "target.AddComponent<TerrainParameterTooltip>();",
             ui_source,
         )
         self.assertIn(
@@ -68,6 +93,33 @@ class TerrainConversionTests(unittest.TestCase):
             "                3);",
             ui_source,
         )
+
+    def test_geyser_patch_forwards_the_building_lifecycle(self) -> None:
+        patch_source = (
+            ROOT
+            / "worldbox_mod"
+            / "TerrainLab"
+            / "Code"
+            / "TerrainLabPatches.cs"
+        ).read_text(encoding="utf-8")
+        service_source = (
+            ROOT
+            / "worldbox_mod"
+            / "TerrainLab"
+            / "Code"
+            / "TerrainWaterDynamicsService.cs"
+        ).read_text(encoding="utf-8")
+
+        self.assertIn(
+            "WaterDynamics.NotifyGeyserPulse(\n                    __instance,",
+            patch_source,
+        )
+        self.assertIn(
+            "public void NotifyGeyserPulse(Building geyser, int pulseCount)",
+            service_source,
+        )
+        self.assertIn("_geyserBuildings[geyserIndex] = geyser;", service_source)
+        self.assertIn("GeyserRemovalGraceSeconds", service_source)
 
     def test_elevation_nodata_is_reserved(self) -> None:
         self.assertEqual(ELEVATION_NODATA, 9999)

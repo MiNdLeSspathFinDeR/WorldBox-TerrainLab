@@ -3818,7 +3818,6 @@ namespace TerrainLab
             int characterLimit = 6)
         {
             Transform row = CreateActionRow(_moduleContent, objectName);
-            ConfigureParameterTooltip(row.gameObject, labelKey);
             Text label = CreateTextLabel(
                 row,
                 objectName + "Label",
@@ -3839,6 +3838,10 @@ namespace TerrainLab
             input.text.resizeTextMinSize = 8;
             input.text.resizeTextMaxSize = 11;
             ConfigureParameterTooltip(input.gameObject, labelKey);
+            if (!ReferenceEquals(input.input.gameObject, input.gameObject))
+            {
+                ConfigureParameterTooltip(input.input.gameObject, labelKey);
+            }
 
             LayoutElement element = input.GetComponent<LayoutElement>();
             if (element == null)
@@ -3854,18 +3857,15 @@ namespace TerrainLab
             GameObject target,
             string labelKey)
         {
-            TipButton tooltip = target.GetComponent<TipButton>();
+            TerrainParameterTooltip tooltip =
+                target.GetComponent<TerrainParameterTooltip>();
             if (tooltip == null)
             {
-                tooltip = target.AddComponent<TipButton>();
+                tooltip = target.AddComponent<TerrainParameterTooltip>();
             }
 
             tooltip.enabled = true;
-            tooltip.type = "tip";
-            tooltip.textOnClick = labelKey;
-            tooltip.textOnClickDescription = labelKey + "_description";
-            tooltip.text_description_2 = string.Empty;
-            tooltip.hoverAction = tooltip.showTooltipDefault;
+            tooltip.Configure(labelKey, labelKey + "_description");
         }
 
         private void SelectEditorTool(TerrainEditorTool tool)

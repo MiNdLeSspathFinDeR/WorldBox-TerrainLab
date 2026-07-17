@@ -107,6 +107,17 @@ internal static class Program
             target.GetParameters().Length == 1 &&
             target.GetParameters()[0].ParameterType == typeof(int),
             "The geyser Harmony patch no longer targets Building.spawnBurstSpecial(int).");
+
+        MethodInfo postfix = patchType.GetMethod(
+            "Postfix",
+            BindingFlags.NonPublic | BindingFlags.Static);
+        ParameterInfo[] postfixParameters = postfix?.GetParameters();
+        Assert(
+            postfixParameters != null &&
+            postfixParameters.Length == 2 &&
+            postfixParameters[0].ParameterType == typeof(Building) &&
+            postfixParameters[1].ParameterType == typeof(int),
+            "The geyser Harmony patch no longer forwards the live Building instance.");
     }
 
     private static void ValidateReliefAlgorithm()

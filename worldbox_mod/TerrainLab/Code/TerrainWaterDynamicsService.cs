@@ -10,6 +10,7 @@ namespace TerrainLab
         private const float TickIntervalSeconds = 0.2f;
         private const float ClimateIntervalSeconds = 30f;
         private const float RepaintDebounceSeconds = 0.75f;
+        private const float GeyserRemovalGraceSeconds = 2f;
         private const int MaximumInitialContacts = 96;
         private const int MaximumRecentPaintCells = 8192;
         private const int ContactBucketColumns = 16;
@@ -22,6 +23,10 @@ namespace TerrainLab
             new Dictionary<int, float>();
         private readonly Dictionary<int, int> _geyserOutlets =
             new Dictionary<int, int>();
+        private readonly Dictionary<int, Building> _geyserBuildings =
+            new Dictionary<int, Building>();
+        private readonly Dictionary<int, float> _missingGeyserSince =
+            new Dictionary<int, float>();
         private readonly Dictionary<int, TerrainSurfaceStamp> _autoDriedSurfaces =
             new Dictionary<int, TerrainSurfaceStamp>();
         private readonly List<int> _driedCells = new List<int>();
@@ -211,8 +216,9 @@ namespace TerrainLab
             return true;
         }
 
-        public void NotifyGeyserPulse(WorldTile tile, int pulseCount)
+        public void NotifyGeyserPulse(Building geyser, int pulseCount)
         {
+            WorldTile tile = geyser?.current_tile;
             if (tile == null || pulseCount <= 0)
             {
                 return;
@@ -244,6 +250,13 @@ namespace TerrainLab
                     return;
                 }
 
+                bool firstRegistration =
+                    !_geyserBuildings.TryGetValue(
+                        geyserIndex,
+                        out Building registered) ||
+                    !ReferenceEquals(registered, geyser);
+                _geyserBuildings[geyserIndex] = geyser;
+                _missingGeyserSince.Remove(geyserIndex);
                 long volume = SaturatingMultiply(
                     pulseCount,
                     water.Parameters.GeyserPulseVolume);
@@ -259,6 +272,13 @@ namespace TerrainLab
                         water.TotalInjectedVolume,
                         volume);
                     LastError = null;
+                    if (firstRegistration)
+                    {
+                        Debug.Log(
+                            "[TerrainLab] Registered live geyser at (" +
+                            tile.x + "," + tile.y + "), outlet index " +
+                            origin + ".");
+                    }
                 }
                 else
                 {
@@ -404,8 +424,22 @@ namespace TerrainLab
             foreach (KeyValuePair<int, int> pair in _geyserOutlets)
             {
                 int geyserIndex = pair.Key;
-                if (geyserIndex < 0 || geyserIndex >= _tiles.Length ||
-                    !IsGeyser(_tiles[geyserIndex]?.building))
+                if (IsRegisteredGeyserAlive(geyserIndex))
+                {
+                    _missingGeyserSince.Remove(geyserIndex);
+                    continue;
+                }
+
+                if (!_missingGeyserSince.TryGetValue(
+                        geyserIndex,
+                        out float missingSince))
+                {
+                    _missingGeyserSince[geyserIndex] = Time.unscaledTime;
+                    continue;
+                }
+
+                if (Time.unscaledTime - missingSince >=
+                    GeyserRemovalGraceSeconds)
                 {
                     destroyed.Add(geyserIndex);
                 }
@@ -425,6 +459,8 @@ namespace TerrainLab
                 }
 
                 _geyserOutlets.Remove(geyserIndex);
+                _geyserBuildings.Remove(geyserIndex);
+                _missingGeyserSince.Remove(geyserIndex);
             }
 
             bool changed = false;
@@ -453,6 +489,29 @@ namespace TerrainLab
             }
 
             return changed;
+        }
+
+        private bool IsRegisteredGeyserAlive(int geyserIndex)
+        {
+            if (geyserIndex < 0 || geyserIndex >= _tiles.Length ||
+                !_geyserBuildings.TryGetValue(
+                    geyserIndex,
+                    out Building geyser) ||
+                geyser == null)
+            {
+                return false;
+            }
+
+            try
+            {
+                return geyser.isAlive() &&
+                       IsGeyser(geyser) &&
+                       GetTileIndex(geyser.current_tile) == geyserIndex;
+            }
+            catch
+            {
+                return false;
+            }
         }
 
         private bool MarkOrphanedComponent(int origin)
@@ -1862,6 +1921,8 @@ namespace TerrainLab
             _queuedPaintIndices.Clear();
             _recentPaintTimes.Clear();
             _geyserOutlets.Clear();
+            _geyserBuildings.Clear();
+            _missingGeyserSince.Clear();
             _orphanedGeyserMask = null;
             _orphanedGeyserCellCount = 0;
             _driedCells.Clear();

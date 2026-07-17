@@ -86,7 +86,7 @@ namespace TerrainLab
             if (string.Equals(data?.asset_id, "geyser", StringComparison.Ordinal))
             {
                 TerrainLabRuntime.Instance?.WaterDynamics.NotifyGeyserPulse(
-                    __instance.current_tile,
+                    __instance,
                     Math.Min(64, Math.Max(1, pAmount)));
             }
         }

@@ -2,6 +2,16 @@
 
 ## Unreleased
 
+## 1.4.1 - 2026-07-17
+
+- Fixed native geyser sources being retired between small pulses before their
+  water budget could accumulate enough to materialize a channel cell. Source
+  lifetime now follows the patched `Building` instance and uses a short removal
+  grace period before draining a destroyed geyser network.
+- Replaced ineffective `TipButton` components on numeric rows with direct
+  pointer, click, and focus handlers. Every Terrain Laboratory numeric field
+  now opens its localized plain-language explanation on hover or selection.
+
 ## 1.4.0 - 2026-07-17
 
 - Removed the former 50-percent hard live-water ceiling. The maximum-area
