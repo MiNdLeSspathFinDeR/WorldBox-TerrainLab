@@ -35,7 +35,9 @@ under `Code` when the game starts.
 - bounded live-water routing with finite painted sources, auto-starting native
   geyser replenishment, selectable D8/D-infinity/MFD channel routing through
   connected three-cell line/corner fragments without obstacle jumps, local
-  depression filling and connected terminal lakes, absolute
+  depression filling and connected terminal lakes, one-time bounded growth at
+  independent river confluences, cleanup of enclosed one-to-two-cell dry
+  islands while preserving stable triplets, absolute
   0/-5/-150-metre water classes, persistent UInt8 storage,
   evaporation/recharge, gameplay-safe dry-surface restoration, and a
   user-selectable 1-to-100-percent valid-cell ceiling;

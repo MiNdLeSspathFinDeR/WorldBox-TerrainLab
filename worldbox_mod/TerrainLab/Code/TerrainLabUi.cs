@@ -2175,6 +2175,13 @@ namespace TerrainLab
                     water?.TotalConsumedVolume ?? 0L),
                 NeutralText,
                 28f);
+            CreateInfoText(
+                string.Format(
+                    LM.Get("terrain_lab_water_confluence_format"),
+                    service?.ConfluenceCount ?? 0,
+                    service?.ConfluenceBonusVolume ?? 0L),
+                NeutralText,
+                28f);
 
             if (!string.IsNullOrWhiteSpace(service?.LastError))
             {

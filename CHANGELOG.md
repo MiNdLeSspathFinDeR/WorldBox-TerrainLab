@@ -2,6 +2,22 @@
 
 ## Unreleased
 
+## 1.5.0 - 2026-07-17
+
+- Added runtime-only UInt16 source ownership for managed water. When two
+  independently owned river systems first meet, that source pair receives one
+  bounded confluence bonus covering at most four available cells around the
+  junction. Reward history survives in-session routing rebuilds, so erosion
+  cannot repeatedly mint the same bonus.
+- Added incremental topology cleanup for fully water-enclosed dry components.
+  One- and two-cell four-connected islands become managed shallow water, so
+  diagonal pixel contact cannot stabilize a checkerboard; every side-connected
+  three-cell or larger land component remains stable. The cleanup may remove
+  liquid-sensitive trees, plants, fruit, hives, wheat, poop, and minerals, but
+  preserves geysers, cities, creatures, creep, anomalies, and other structures.
+- Added live confluence count and awarded basin volume to the Terrain
+  Laboratory water status.
+
 ## 1.4.1 - 2026-07-17
 
 - Fixed native geyser sources being retired between small pulses before their

@@ -137,6 +137,11 @@ bounded DEM process without replacing WorldBox's own ocean behavior:
    river, lake, or ocean, it selects the lowest, deepest-fill,
    lowest-resistance adjacent seed and grows a connected terminal lake no
    higher than its local Priority-Flood spill level.
+   A runtime UInt16 owner grid distinguishes independently supplied channels.
+   The first junction between a source pair receives one bounded discharge
+   bonus and queues at most four safe cells around the confluence for basin
+   occupation. The rewarded source-origin pair survives in-session routing
+   rebuilds and cannot generate the same bonus repeatedly.
 4. Source volume is integer. Every member of a triplet is charged separately;
    a cell cost combines Priority-Flood depth with a
    material/feature/moisture resistance term. Clay and an established channel
@@ -152,9 +157,17 @@ bounded DEM process without replacing WorldBox's own ocean behavior:
    when another live geyser still reaches the same connected component.
 6. TerrainLab-created water may occupy any user-selected `1..100%` share of
    valid DEM cells. Existing ocean cells do not consume that budget, and
-   hazardous/non-copyable surfaces or non-geyser buildings are never converted.
+   hazardous/non-copyable surfaces and protected buildings are never converted
+   by ordinary channel routing.
    Volume, substrate resistance, obstacles, and the per-tick work limit still
    bound actual spread.
+   Incremental topology cleanup additionally converts only fully
+   water-enclosed one- or two-cell four-connected dry components. Corner-only
+   contact does not merge raster islands, preventing diagonal checkerboard
+   chains. Side-connected dry triplets and all larger components remain stable.
+   Liquid-sensitive vegetation and minerals on tiny islands may be eroded;
+   settlements, creatures, creep, geysers, anomalies, and other structures
+   remain protected.
 7. Marine class follows absolute bed elevation on the zero datum: `0..-5 m` is
    shallow, `-6..-149 m` is shelf, and `-150 m` or lower is deep ocean. Water
    painted onto a known land substrate or reached by routing first receives a

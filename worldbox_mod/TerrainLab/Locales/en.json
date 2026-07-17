@@ -359,6 +359,7 @@
   "terrain_lab_water_dynamics_heading": "LIVE WATER ROUTING",
   "terrain_lab_water_dynamics_status_format": "{0}; managed {1:N0} / {2:N0} cells; sources {3}; pending volume {4:N0}",
   "terrain_lab_water_dynamics_balance_format": "Geyser pulses {0:N0}; injected {1:N0}; consumed {2:N0}",
+  "terrain_lab_water_confluence_format": "River-system confluences: {0:N0}; basin bonus: {1:N0} units",
   "terrain_lab_water_dynamics_enabled": "enabled",
   "terrain_lab_water_dynamics_disabled": "disabled",
   "terrain_lab_water_dynamics_enable": "Enable live water",

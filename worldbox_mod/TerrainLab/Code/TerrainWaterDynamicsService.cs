@@ -15,6 +15,10 @@ namespace TerrainLab
         private const int MaximumRecentPaintCells = 8192;
         private const int ContactBucketColumns = 16;
         private const int ContactBucketRows = 8;
+        private const int MaximumErodedIslandCells = 2;
+        private const int MinimumIslandScanPerTick = 2048;
+        private const int MaximumIslandScanPerTick = 8192;
+        private const int MaximumIslandFillPerTick = 16;
         private const string TerrainLabWindowId = "terrain_lab_window";
 
         private readonly Queue<WorldTile> _paintedWater = new Queue<WorldTile>();
@@ -40,6 +44,7 @@ namespace TerrainLab
         private float _nextTickTime;
         private float _nextClimateTime;
         private bool _pausedByUser;
+        private int _islandScanCursor;
 
         public event Action<IReadOnlyList<int>> CellsChanged;
 
@@ -52,6 +57,11 @@ namespace TerrainLab
         public int ActiveSourceCount => _simulation?.ActiveSourceCount ?? 0;
 
         public long PendingVolume => _simulation?.PendingVolume ?? 0L;
+
+        public int ConfluenceCount => _simulation?.ConfluenceCount ?? 0;
+
+        public long ConfluenceBonusVolume =>
+            _simulation?.ConfluenceBonusVolume ?? 0L;
 
         public int ManagedCellCount =>
             _simulation?.ManagedCellCount ?? _state?.WaterDynamics?.ManagedCellCount ?? 0;
@@ -858,39 +868,37 @@ namespace TerrainLab
                 IReadOnlyList<int> rechargedCells = _simulation.RechargedCells;
                 bool recharged = ApplyRecharge(rechargedCells);
                 changed |= recharged;
-                if (changes.Count == 0)
+                int[] routedIndices = changes.Count == 0
+                    ? Array.Empty<int>()
+                    : changes.Select(item => item.Index).ToArray();
+                if (changes.Count > 0)
                 {
-                    if (climateChanged || sourceLifecycleChanged)
-                    {
-                        NotifyCellsChanged(null);
-                    }
-                    else if (recharged)
-                    {
-                        NotifyCellsChanged(rechargedCells);
-                    }
-
-                    return changed;
+                    ApplyChanges(changes);
+                    changed = true;
                 }
 
-                ApplyChanges(changes);
+                int[] erodedIslands = FillSmallEnclosedLandIslands(
+                    routedIndices);
+                changed |= erodedIslands.Length > 0;
                 if (climateChanged || sourceLifecycleChanged)
                 {
                     NotifyCellsChanged(null);
                 }
-                else if (recharged)
+                else if (routedIndices.Length > 0 ||
+                         erodedIslands.Length > 0 ||
+                         recharged)
                 {
                     List<int> combined = new List<int>(
-                        changes.Count + rechargedCells.Count);
-                    combined.AddRange(changes.Select(item => item.Index));
+                        routedIndices.Length +
+                        erodedIslands.Length +
+                        rechargedCells.Count);
+                    combined.AddRange(routedIndices);
+                    combined.AddRange(erodedIslands);
                     combined.AddRange(rechargedCells);
-                    NotifyCellsChanged(combined);
-                }
-                else
-                {
-                    NotifyCellsChanged(changes.Select(item => item.Index).ToArray());
+                    NotifyCellsChanged(combined.Distinct().ToArray());
                 }
 
-                return true;
+                return changed;
             }
             catch (Exception exception)
             {
@@ -925,7 +933,15 @@ namespace TerrainLab
             IReadOnlyList<TerrainWaterSourceSnapshot> sources =
                 _simulation?.CaptureActiveSources() ??
                 Array.Empty<TerrainWaterSourceSnapshot>();
+            ulong[] rewardedConfluences =
+                _simulation?.CaptureRewardedConfluences() ??
+                Array.Empty<ulong>();
+            long confluenceBonusVolume =
+                _simulation?.ConfluenceBonusVolume ?? 0L;
             BuildSimulation(seedExistingContacts: false);
+            _simulation.RestoreConfluenceState(
+                rewardedConfluences,
+                confluenceBonusVolume);
             foreach (TerrainWaterSourceSnapshot source in sources)
             {
                 _simulation.AddSource(
@@ -1135,6 +1151,196 @@ namespace TerrainLab
             }
 
             return tile.building == null || IsGeyser(tile.building);
+        }
+
+        private int[] FillSmallEnclosedLandIslands(
+            IReadOnlyList<int> routedIndices)
+        {
+            if (_simulation == null || _routing == null ||
+                _simulation.LimitReached)
+            {
+                return Array.Empty<int>();
+            }
+
+            int available = _simulation.FloodCellLimit -
+                            _simulation.ManagedCellCount;
+            int fillLimit = Math.Min(
+                Math.Min(
+                    MaximumIslandFillPerTick,
+                    Math.Max(4, _state.WaterDynamics.Parameters.CellsPerTick / 2)),
+                available);
+            if (fillLimit <= 0)
+            {
+                return Array.Empty<int>();
+            }
+
+            HashSet<int> tested = new HashSet<int>();
+            HashSet<int> accepted = new HashSet<int>();
+            Action<int> inspect = delegate(int candidate)
+            {
+                if (accepted.Count >= fillLimit ||
+                    candidate < 0 || candidate >= _state.CellCount ||
+                    !tested.Add(candidate) ||
+                    _simulation.IsWater(candidate) ||
+                    !CouldBeSmallEnclosedLandIsland(candidate))
+                {
+                    return;
+                }
+
+                int[] island = TerrainWaterTopology.CollectEnclosedDryIsland(
+                    candidate,
+                    _state.Width,
+                    _state.Height,
+                    _simulation.IsWater,
+                    CanErodeSmallIslandCell,
+                    MaximumErodedIslandCells);
+                foreach (int index in island)
+                {
+                    tested.Add(index);
+                }
+
+                if (island.Length == 0 ||
+                    accepted.Count + island.Length > fillLimit ||
+                    island.Any(accepted.Contains))
+                {
+                    return;
+                }
+
+                foreach (int index in island)
+                {
+                    accepted.Add(index);
+                }
+            };
+
+            if (routedIndices != null)
+            {
+                foreach (int index in routedIndices)
+                {
+                    if (index < 0 || index >= _state.CellCount)
+                    {
+                        continue;
+                    }
+
+                    _routing.ForEachNeighbor(index, inspect);
+                }
+            }
+
+            int scanBudget = Math.Min(
+                MaximumIslandScanPerTick,
+                Math.Max(
+                    MinimumIslandScanPerTick,
+                    _state.WaterDynamics.Parameters.CellsPerTick * 16));
+            for (int scanned = 0;
+                 scanned < scanBudget && accepted.Count < fillLimit;
+                 scanned++)
+            {
+                if (_islandScanCursor >= _state.CellCount)
+                {
+                    _islandScanCursor = 0;
+                }
+
+                inspect(_islandScanCursor++);
+            }
+
+            if (accepted.Count == 0)
+            {
+                return Array.Empty<int>();
+            }
+
+            int[] indices = accepted.OrderBy(index => index).ToArray();
+            TerrainWaterCellChange[] changes =
+                new TerrainWaterCellChange[indices.Length];
+            for (int offset = 0; offset < indices.Length; offset++)
+            {
+                int index = indices[offset];
+                _simulation.MarkExternalManagedWater(index);
+                changes[offset] = new TerrainWaterCellChange(
+                    index,
+                    TerrainWaterDepthClass.Shallow,
+                    TerrainWaterDepthModel.ShallowStorageUnits,
+                    0,
+                    -1);
+            }
+
+            ApplyChanges(changes);
+            return indices;
+        }
+
+        private bool CouldBeSmallEnclosedLandIsland(int index)
+        {
+            int x = index % _state.Width;
+            int y = index / _state.Width;
+            if (x <= 0 || x >= _state.Width - 1 ||
+                y <= 0 || y >= _state.Height - 1)
+            {
+                return false;
+            }
+
+            int dryNeighbors = 0;
+            if (!_simulation.IsWater(index - 1))
+            {
+                dryNeighbors++;
+            }
+
+            if (!_simulation.IsWater(index + 1) &&
+                ++dryNeighbors >= MaximumErodedIslandCells)
+            {
+                return false;
+            }
+
+            if (!_simulation.IsWater(index - _state.Width) &&
+                ++dryNeighbors >= MaximumErodedIslandCells)
+            {
+                return false;
+            }
+
+            if (!_simulation.IsWater(index + _state.Width))
+            {
+                dryNeighbors++;
+            }
+
+            return dryNeighbors < MaximumErodedIslandCells;
+        }
+
+        private bool CanErodeSmallIslandCell(int index)
+        {
+            if (index < 0 || index >= _tiles.Length ||
+                _state.Elevation[index] == TerrainElevationEncoding.NoData)
+            {
+                return false;
+            }
+
+            WorldTile tile = _tiles[index];
+            if (tile == null || IsWater(tile) ||
+                !TerrainSurfaceStamp.TryCaptureSafe(tile, out _, out _))
+            {
+                return false;
+            }
+
+            Building building = tile.building;
+            if (building == null)
+            {
+                return true;
+            }
+
+            BuildingData data = building.getData() as BuildingData;
+            BuildingAsset asset = string.IsNullOrWhiteSpace(data?.asset_id)
+                ? null
+                : AssetManager.buildings.get(data.asset_id);
+            if (IsGeyser(building) || asset == null ||
+                !asset.destroy_on_liquid || asset.city_building)
+            {
+                return false;
+            }
+
+            BuildingType type = asset.building_type;
+            return type == BuildingType.Building_Tree ||
+                   type == BuildingType.Building_Fruits ||
+                   type == BuildingType.Building_Hives ||
+                   type == BuildingType.Building_Poops ||
+                   type == BuildingType.Building_Wheat ||
+                   type == BuildingType.Building_Plant ||
+                   type == BuildingType.Building_Mineral;
         }
 
         private void ApplyChanges(IReadOnlyList<TerrainWaterCellChange> changes)
@@ -1917,6 +2123,7 @@ namespace TerrainLab
             _routingRevision = -1;
             _nextTickTime = 0f;
             _nextClimateTime = 0f;
+            _islandScanCursor = 0;
             _paintedWater.Clear();
             _queuedPaintIndices.Clear();
             _recentPaintTimes.Clear();

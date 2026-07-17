@@ -30,6 +30,8 @@ project layer for WorldBox.
    selectable D8/D-infinity/MFD live-water channels grown as connected
    three-cell line/corner fragments, absolute 0/-5/-150 m water
    classes, persistent river/waterbody zones, connected terminal lakes,
+   bounded one-time confluence growth, stable three-cell land components with
+   cleanup of enclosed one-to-two-cell islands,
    geyser-fed recharge and source removal, one-to-two-cell alluvial banks,
    dry sandy ravines, moisture, material resistance, soil degradation,
    bounded DEM channel incision, deterministic erosion, two-point DEM grading,

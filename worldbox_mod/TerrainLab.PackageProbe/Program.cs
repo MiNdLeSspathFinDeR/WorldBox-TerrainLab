@@ -1352,6 +1352,8 @@ internal static class Program
     private static void ValidateWaterDynamicsAlgorithm()
     {
         ValidateWaterDepthAndBalance();
+        ValidateWaterConfluenceBonus();
+        ValidateWaterTopology();
         const int width = 10;
         const int height = 10;
         const int count = width * height;
@@ -1721,6 +1723,156 @@ internal static class Program
 
         Assert(registrySimulation.ActiveSourceCount == 0,
             "Completed external-water sources remained active.");
+    }
+
+    private static void ValidateWaterConfluenceBonus()
+    {
+        const int width = 11;
+        const int height = 7;
+        short[] elevation = new short[width * height];
+        for (int y = 0; y < height; y++)
+        {
+            for (int x = 0; x < width; x++)
+            {
+                elevation[y * width + x] =
+                    (short)(200 - x * 10 + Math.Abs(y - 3) * 4);
+            }
+        }
+
+        TerrainWaterSimulation simulation = new TerrainWaterSimulation(
+            TerrainWaterRouting.Build(width, height, elevation),
+            new byte[elevation.Length],
+            new byte[elevation.Length],
+            new TerrainWaterParameters
+            {
+                MaximumFloodPercent = 100,
+                CellsPerTick = 128
+            },
+            0,
+            new byte[elevation.Length],
+            new byte[elevation.Length],
+            new byte[elevation.Length]);
+        int upperSource = width + 1;
+        int lowerSource = 5 * width + 1;
+        simulation.AddSource(
+            upperSource,
+            elevation[upperSource],
+            64);
+        simulation.Step(128, _ => true);
+        simulation.AddSource(
+            lowerSource,
+            elevation[lowerSource],
+            64);
+        for (int step = 0;
+             step < 8 && simulation.ConfluenceCount == 0;
+             step++)
+        {
+            simulation.Step(128, _ => true);
+        }
+
+        Assert(
+            simulation.ConfluenceCount == 1 &&
+            simulation.ConfluenceBonusVolume > 0,
+            "Independent river systems did not receive one bounded confluence bonus.");
+        long bonus = simulation.ConfluenceBonusVolume;
+        simulation.AddSource(
+            lowerSource,
+            elevation[lowerSource],
+            64);
+        simulation.Step(128, _ => true);
+        Assert(
+            simulation.ConfluenceCount == 1 &&
+            simulation.ConfluenceBonusVolume == bonus,
+            "A known river confluence generated a repeat growth bonus.");
+
+        TerrainWaterSimulation rebuilt = new TerrainWaterSimulation(
+            TerrainWaterRouting.Build(width, height, elevation),
+            new byte[elevation.Length],
+            new byte[elevation.Length],
+            new TerrainWaterParameters());
+        rebuilt.RestoreConfluenceState(
+            simulation.CaptureRewardedConfluences(),
+            simulation.ConfluenceBonusVolume);
+        Assert(
+            rebuilt.ConfluenceCount == 1 &&
+            rebuilt.ConfluenceBonusVolume == bonus,
+            "A routing rebuild forgot already rewarded river confluences.");
+    }
+
+    private static void ValidateWaterTopology()
+    {
+        const int width = 7;
+        const int height = 7;
+        int center = 3 * width + 3;
+
+        bool[] single = Enumerable.Repeat(true, width * height).ToArray();
+        single[center] = false;
+        int[] singleResult = TerrainWaterTopology.CollectEnclosedDryIsland(
+            center,
+            width,
+            height,
+            index => single[index],
+            _ => true);
+        Assert(
+            singleResult.SequenceEqual(new[] { center }),
+            "A one-cell enclosed dry island was not selected for erosion.");
+
+        bool[] pair = Enumerable.Repeat(true, width * height).ToArray();
+        pair[center] = false;
+        pair[center + 1] = false;
+        int[] pairResult = TerrainWaterTopology.CollectEnclosedDryIsland(
+            center,
+            width,
+            height,
+            index => pair[index],
+            _ => true);
+        Assert(
+            pairResult.SequenceEqual(new[] { center, center + 1 }),
+            "A two-cell enclosed dry island was not selected for erosion.");
+
+        bool[] diagonalPair = Enumerable.Repeat(true, width * height).ToArray();
+        diagonalPair[center] = false;
+        diagonalPair[center + width + 1] = false;
+        int[] diagonalPairResult =
+            TerrainWaterTopology.CollectEnclosedDryIsland(
+                center,
+                width,
+                height,
+                index => diagonalPair[index],
+                _ => true);
+        Assert(
+            diagonalPairResult.SequenceEqual(
+                new[] { center }),
+            "Diagonal contact incorrectly stabilized a one-cell dry island.");
+
+        bool[] triplet = Enumerable.Repeat(true, width * height).ToArray();
+        triplet[center] = false;
+        triplet[center + 1] = false;
+        triplet[center + width] = false;
+        int[] tripletResult = TerrainWaterTopology.CollectEnclosedDryIsland(
+            center,
+            width,
+            height,
+            index => triplet[index],
+            _ => true);
+        Assert(
+            tripletResult.Length == 0,
+            "A stable three-cell dry island was incorrectly eroded.");
+
+        bool[] lineTriplet = Enumerable.Repeat(true, width * height).ToArray();
+        lineTriplet[center - 1] = false;
+        lineTriplet[center] = false;
+        lineTriplet[center + 1] = false;
+        int[] lineTripletResult =
+            TerrainWaterTopology.CollectEnclosedDryIsland(
+                center,
+                width,
+                height,
+                index => lineTriplet[index],
+                _ => true);
+        Assert(
+            lineTripletResult.Length == 0,
+            "A stable straight three-cell dry island was incorrectly eroded.");
     }
 
     private static void ValidateWaterDepthAndBalance()

@@ -1079,6 +1079,7 @@ namespace TerrainLab
         private const int MaximumChannelFrontsPerSource = 512;
         private const int ChannelCellsPerBasinCell = 3;
         private const int ChannelTripletSize = 3;
+        private const int ConfluenceBasinCellLimit = 4;
         private const double MinimumFlowPriority = 1e-12;
 
         private readonly TerrainWaterRouting _routing;
@@ -1087,9 +1088,14 @@ namespace TerrainLab
         private readonly byte[] _material;
         private readonly byte[] _hydroFeature;
         private readonly byte[] _moisture;
+        private readonly ushort[] _sourceOwners;
+        private readonly Dictionary<ushort, int> _sourceOwnerOrigins =
+            new Dictionary<ushort, int>();
         private readonly Dictionary<int, WaterSource> _sourceLookup =
             new Dictionary<int, WaterSource>();
         private readonly List<WaterSource> _sources = new List<WaterSource>();
+        private readonly HashSet<ulong> _rewardedConfluences =
+            new HashSet<ulong>();
         private readonly TerrainWaterReceiver[] _receiverBuffer =
             new TerrainWaterReceiver[8];
         private readonly List<int> _rechargedCells = new List<int>();
@@ -1098,6 +1104,8 @@ namespace TerrainLab
         private TerrainWaterParameters _parameters;
         private int _managedCellCount;
         private int _nextSource;
+        private int _nextSourceOwner = 1;
+        private long _confluenceBonusVolume;
 
         public TerrainWaterSimulation(
             TerrainWaterRouting routing,
@@ -1128,6 +1136,7 @@ namespace TerrainLab
             _moisture = moisture != null && moisture.Length == routing.CellCount
                 ? moisture
                 : null;
+            _sourceOwners = new ushort[routing.CellCount];
             _seaLevel = seaLevel;
             _parameters = (parameters ?? new TerrainWaterParameters()).Normalize();
             for (int index = 0; index < managedMask.Length; index++)
@@ -1144,6 +1153,31 @@ namespace TerrainLab
         public int ManagedCellCount => _managedCellCount;
 
         public int ActiveSourceCount => _sources.Count(source => source.CanAdvance);
+
+        public int ConfluenceCount => _rewardedConfluences.Count;
+
+        public long ConfluenceBonusVolume => _confluenceBonusVolume;
+
+        public ulong[] CaptureRewardedConfluences()
+        {
+            return _rewardedConfluences.ToArray();
+        }
+
+        public void RestoreConfluenceState(
+            IEnumerable<ulong> rewardedConfluences,
+            long bonusVolume)
+        {
+            _rewardedConfluences.Clear();
+            if (rewardedConfluences != null)
+            {
+                foreach (ulong key in rewardedConfluences)
+                {
+                    _rewardedConfluences.Add(key);
+                }
+            }
+
+            _confluenceBonusVolume = Math.Max(0L, bonusVolume);
+        }
 
         public int FloodCellLimit => Math.Max(
             1,
@@ -1207,7 +1241,7 @@ namespace TerrainLab
             }
 
             bool added = _managedMask[index] == 0;
-            MarkManagedWater(index);
+            MarkManagedWater(index, 0);
             return added;
         }
 
@@ -1225,6 +1259,7 @@ namespace TerrainLab
             }
 
             _managedMask[index] = 0;
+            _sourceOwners[index] = 0;
             _managedCellCount--;
             return true;
         }
@@ -1266,7 +1301,8 @@ namespace TerrainLab
                 origin,
                 Math.Max(headElevation, _routing.FilledElevation[origin]),
                 volume,
-                _routing.Elevation);
+                _routing.Elevation,
+                AllocateSourceOwner(origin));
             _sourceLookup.Add(origin, source);
             _sources.Add(source);
             return true;
@@ -1410,6 +1446,10 @@ namespace TerrainLab
                         return;
                     }
 
+                    RegisterManagedWaterContact(
+                        source,
+                        candidate,
+                        canFlood);
                     RecordRecharge(candidate);
                     if (candidate != source.Origin &&
                         TerrainRiverValleyModel.NormalizeFeature(
@@ -1479,7 +1519,7 @@ namespace TerrainLab
                 }
 
                 source.Budget -= cost;
-                MarkManagedWater(current);
+                MarkManagedWater(current, source.OwnerId);
                 EnqueueBasin(source, current);
                 source.ChannelCellsSinceBasin++;
                 source.LastChannelCell = current;
@@ -1575,6 +1615,10 @@ namespace TerrainLab
                         return null;
                     }
 
+                    RegisterManagedWaterContact(
+                        source,
+                        candidate,
+                        canFlood);
                     RecordRecharge(candidate);
                     if (source.TerminalLakeActive)
                     {
@@ -1605,7 +1649,7 @@ namespace TerrainLab
                 }
 
                 source.Budget -= cost;
-                MarkManagedWater(candidate);
+                MarkManagedWater(candidate, source.OwnerId);
                 if (source.TerminalLakeActive)
                 {
                     if (_hydroFeature != null)
@@ -1875,6 +1919,124 @@ namespace TerrainLab
             return true;
         }
 
+        private ushort AllocateSourceOwner(int origin)
+        {
+            if (_nextSourceOwner > ushort.MaxValue)
+            {
+                Array.Clear(_sourceOwners, 0, _sourceOwners.Length);
+                _sourceOwnerOrigins.Clear();
+                _nextSourceOwner = 1;
+                foreach (WaterSource source in _sources)
+                {
+                    source.OwnerId = (ushort)_nextSourceOwner++;
+                    _sourceOwnerOrigins[source.OwnerId] = source.Origin;
+                }
+            }
+
+            ushort owner = (ushort)_nextSourceOwner++;
+            _sourceOwnerOrigins[owner] = origin;
+            return owner;
+        }
+
+        private void RegisterManagedWaterContact(
+            WaterSource source,
+            int index,
+            Func<int, bool> canFlood)
+        {
+            if (source == null || index < 0 || index >= _managedMask.Length ||
+                _managedMask[index] == 0)
+            {
+                return;
+            }
+
+            ushort owner = _sourceOwners[index];
+            if (owner == 0)
+            {
+                _sourceOwners[index] = source.OwnerId;
+                return;
+            }
+
+            if (owner == source.OwnerId ||
+                TerrainRiverValleyModel.NormalizeFeature(
+                    _hydroFeature?[index] ?? 0) ==
+                TerrainHydroFeature.Waterbody)
+            {
+                return;
+            }
+
+            if (!_sourceOwnerOrigins.TryGetValue(
+                    owner,
+                    out int otherOrigin))
+            {
+                _sourceOwners[index] = source.OwnerId;
+                return;
+            }
+
+            if (otherOrigin == source.Origin)
+            {
+                _sourceOwners[index] = source.OwnerId;
+                return;
+            }
+
+            int lower = Math.Min(otherOrigin, source.Origin);
+            int upper = Math.Max(otherOrigin, source.Origin);
+            ulong key = ((ulong)(uint)lower << 32) | (uint)upper;
+            if (_rewardedConfluences.Contains(key))
+            {
+                return;
+            }
+
+            long bonus = EnqueueConfluenceBasin(
+                source,
+                index,
+                canFlood);
+            if (bonus <= 0)
+            {
+                return;
+            }
+
+            _rewardedConfluences.Add(key);
+            source.Budget = SaturatingAdd(source.Budget, bonus);
+            _confluenceBonusVolume = SaturatingAdd(
+                _confluenceBonusVolume,
+                bonus);
+        }
+
+        private long EnqueueConfluenceBasin(
+            WaterSource source,
+            int center,
+            Func<int, bool> canFlood)
+        {
+            int accepted = 0;
+            long bonus = 0L;
+            _routing.ForEachNeighbor(center, delegate(int neighbor)
+            {
+                if (accepted >= ConfluenceBasinCellLimit ||
+                    _waterMask[neighbor] != 0 ||
+                    _routing.Elevation[neighbor] ==
+                        TerrainElevationEncoding.NoData ||
+                    _routing.Elevation[neighbor] > source.HeadElevation ||
+                    canFlood != null && !canFlood(neighbor) ||
+                    !source.BasinSeen.Add(neighbor))
+                {
+                    return;
+                }
+
+                source.Basin.Push(neighbor);
+                bonus = SaturatingAdd(bonus, GetCellCost(neighbor));
+                accepted++;
+            });
+
+            if (accepted > 0)
+            {
+                source.ChannelCellsSinceBasin = Math.Max(
+                    source.ChannelCellsSinceBasin,
+                    ChannelCellsPerBasinCell);
+            }
+
+            return bonus;
+        }
+
         private int GetCellCost(int index)
         {
             int depthUnits = _routing.GetFillDepth(index) / _routing.VerticalUnit;
@@ -1908,13 +2070,18 @@ namespace TerrainLab
                 sourceIndex);
         }
 
-        private void MarkManagedWater(int index)
+        private void MarkManagedWater(int index, ushort owner)
         {
             _waterMask[index] = 1;
             if (_managedMask[index] == 0)
             {
                 _managedMask[index] = 1;
                 _managedCellCount++;
+            }
+
+            if (owner != 0 && _sourceOwners[index] == 0)
+            {
+                _sourceOwners[index] = owner;
             }
         }
 
@@ -1964,11 +2131,13 @@ namespace TerrainLab
                 int origin,
                 int headElevation,
                 long budget,
-                short[] elevation)
+                short[] elevation,
+                ushort ownerId)
             {
                 Origin = origin;
                 HeadElevation = headElevation;
                 Budget = budget;
+                OwnerId = ownerId;
                 Basin = new IndexMinHeap(elevation);
                 ResetChannel();
             }
@@ -1976,6 +2145,7 @@ namespace TerrainLab
             public int Origin;
             public int HeadElevation;
             public long Budget;
+            public ushort OwnerId;
             public int ChannelCellsSinceBasin;
             public int LastChannelCell;
             public bool TerminalLakeActive;
