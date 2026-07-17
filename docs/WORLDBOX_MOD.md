@@ -18,7 +18,7 @@ the local game assemblies and copies only TerrainLab source, locales, metadata,
 and resources. It uses normal `dotnet` and file-copy operations; it does not
 compile temporary PowerShell interop assemblies.
 
-## TerrainLab 1.3 workspace
+## TerrainLab 1.4 workspace
 
 The top toolbar keeps routine commands over the map. It stretches with the
 logical canvas, evenly distributes buttons, and wraps into the minimum balanced
@@ -106,17 +106,26 @@ source first receives a persistent `River` or `Waterbody` attribute, so
 freshwater remains shallow at any absolute elevation. A dry negative DEM cell
 is never made water merely because it lies below zero; it must be reached by an
 active source. The simulation
-cannot convert more than the configured 1-50 percent of valid DEM cells, never
+cannot convert more than the configured 1-100 percent of valid DEM cells, never
 overwrites hazardous surfaces or ordinary buildings, pauses with WorldBox and
 modal windows, and does not count the pre-existing ocean against its limit. The
 selector does not alter analytical D8 watersheds, stream order, or erosion
 products.
 
-The native `geyser` building is observed when its real `rain` drop is submitted
-to `DropManager`. Each drop injects volume at the lowest safe adjacent cell, so
-the building is not replaced by its own puddle. Repeated pulses restart an
-exhausted route and replenish existing cells, making the geyser a continuing
-river source without bypassing the same area cap.
+The native `geyser` building is observed at its real
+`Building.spawnBurstSpecial(int)` event. Each burst injects volume at the
+lowest safe outlet found within four cells, so the building is not replaced by
+its own puddle. Repeated pulses restart an exhausted route and replenish
+existing cells, making the geyser a continuing river source without bypassing
+the same area cap. Destroying the geyser removes its pending source. A merged
+river remains supplied if another registered geyser still feeds its connected
+component.
+
+When a route reaches another managed river, it merges into and recharges that
+connected network; an existing lake or ocean terminates it without jumping over
+the sink. A network with no reachable sink seeds a connected local lake at the
+vulnerable terminal depression and grows only through cells at or below its
+local spill level.
 
 Each managed cell also has a saturating UInt8 water store. A configurable
 uniform loss (`0..16` units per 30-second climate step) models the first
@@ -125,17 +134,23 @@ TerrainLab restores the compactly saved pre-water surface. This is a water
 budget extension point for later precipitation, PET, infiltration, and climate
 rasters, not a calibrated climate model. Disabling the toggle stops routing and
 climate updates but leaves valid current WorldBox water visible.
+An orphaned geyser component loses an additional configurable `1..64` storage
+units per climate step even when ordinary evaporation is zero.
 
 Each reached freshwater cell also stores UInt8 moisture and nonlinear
 erodibility plus compact local Horn slope and downslope aspect. The angular
 fields decode to radians but occupy one byte per cell. Material controls flow
 resistance, retention, drying, and detachment: saturated soil or organic cover
 can degrade into sand, and low-energy saturated alluvium can become a
-gameplay-safe clay substrate. Active river cells use a bounded stream-power
-rule to lower the local Int16 DEM bed by `1..3 m` per climate step, with a local
-guard 24 m below the current neighbor floor. Routing is rebuilt after a cut
-while source head and remaining volume are retained, so subsequent geyser
-pulses follow the evolving valley.
+gameplay-safe clay substrate. Established rivers also convert a configurable
+one- or two-cell bank strip into sandy or fine clay/silt alluvium. Active river
+cells use a bounded stream-power rule to lower the local Int16 DEM bed by
+`1..3 m` per climate step, with a local guard 24 m below the current neighbor
+floor. Routing is rebuilt after a cut while source head and remaining volume
+are retained, so subsequent geyser pulses follow the evolving valley. Once an
+orphaned channel drains, its persistent river attribute produces a sandy dry
+bed with deterministic sparse hill and rare mountain shoulders instead of
+erasing the valley history.
 
 The Layers chapter can display the managed-water mask, UInt8 reserve,
 river/waterbody class, moisture, erodibility, local slope, and local aspect
@@ -178,7 +193,7 @@ WorldBox writes `map.wbox` first; TerrainLab then writes
 same vanilla map plus core GIS arrays and optional hydrology, live-water, and
 erosion modules.
 Live-water configuration and all eight state rasters use optional
-`hydrology.water_dynamics` schema `1.6.0`. The managed mask, store,
+`hydrology.water_dynamics` schema `1.7.0`. The managed mask, store,
 river/waterbody class, moisture, erodibility, local slope, and local aspect also
 export to GeoTIFF; restore-surface codes remain package-internal.
 Unknown optional module data survives load/save. Invalid optional data is

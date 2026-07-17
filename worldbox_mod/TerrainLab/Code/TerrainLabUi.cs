@@ -2220,7 +2220,7 @@ namespace TerrainLab
                 "terrain_lab_water_maximum_flood_percent",
                 parameters.MaximumFloodPercent.ToString(),
                 HandleWaterMaximumFloodChanged,
-                2);
+                3);
             CreateNumericInputRow(
                 "TerrainLabWaterInitialVolume",
                 "terrain_lab_water_initial_source_volume",
@@ -2244,6 +2244,18 @@ namespace TerrainLab
                 "terrain_lab_water_evaporation_per_climate_step",
                 parameters.EvaporationPerClimateStep.ToString(),
                 HandleWaterEvaporationChanged,
+                2);
+            CreateNumericInputRow(
+                "TerrainLabWaterBankErosionRadius",
+                "terrain_lab_water_bank_erosion_radius",
+                parameters.BankErosionRadius.ToString(),
+                HandleWaterBankErosionRadiusChanged,
+                1);
+            CreateNumericInputRow(
+                "TerrainLabWaterOrphanedDrain",
+                "terrain_lab_water_orphaned_channel_drain",
+                parameters.OrphanedChannelDrainPerClimateStep.ToString(),
+                HandleWaterOrphanedChannelDrainChanged,
                 2);
         }
 
@@ -3084,6 +3096,25 @@ namespace TerrainLab
                     parameters.EvaporationPerClimateStep = parsed);
         }
 
+        private void HandleWaterBankErosionRadiusChanged(string value)
+        {
+            TryUpdateWaterParameter(
+                value,
+                TerrainWaterParameters.MinimumBankErosionRadius,
+                TerrainWaterParameters.MaximumBankErosionRadius,
+                (parameters, parsed) => parameters.BankErosionRadius = parsed);
+        }
+
+        private void HandleWaterOrphanedChannelDrainChanged(string value)
+        {
+            TryUpdateWaterParameter(
+                value,
+                TerrainWaterParameters.MinimumOrphanedChannelDrain,
+                TerrainWaterParameters.MaximumOrphanedChannelDrain,
+                (parameters, parsed) =>
+                    parameters.OrphanedChannelDrainPerClimateStep = parsed);
+        }
+
         private void CreateWaterRoutingButton(
             Transform parent,
             TerrainWaterRoutingAlgorithm selected,
@@ -3193,6 +3224,9 @@ namespace TerrainLab
                 GeyserPulseVolume = source.GeyserPulseVolume,
                 CellsPerTick = source.CellsPerTick,
                 EvaporationPerClimateStep = source.EvaporationPerClimateStep,
+                BankErosionRadius = source.BankErosionRadius,
+                OrphanedChannelDrainPerClimateStep =
+                    source.OrphanedChannelDrainPerClimateStep,
                 RoutingAlgorithm = source.RoutingAlgorithm
             };
         }
@@ -3784,6 +3818,7 @@ namespace TerrainLab
             int characterLimit = 6)
         {
             Transform row = CreateActionRow(_moduleContent, objectName);
+            ConfigureParameterTooltip(row.gameObject, labelKey);
             Text label = CreateTextLabel(
                 row,
                 objectName + "Label",

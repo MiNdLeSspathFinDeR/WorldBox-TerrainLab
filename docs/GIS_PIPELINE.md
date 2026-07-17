@@ -133,7 +133,10 @@ bounded DEM process without replacing WorldBox's own ocean behavior:
    MFD receivers remain queued as later branches, capped at 512 fronts per
    source. Local depression filling is interleaved only among adjacent cells at
    the same positive-depth spill elevation; it never runs an unrestricted flood
-   fill over a tilted plane.
+   fill over a tilted plane. If the last connected front cannot reach another
+   river, lake, or ocean, it selects the lowest, deepest-fill,
+   lowest-resistance adjacent seed and grows a connected terminal lake no
+   higher than its local Priority-Flood spill level.
 4. Source volume is integer. Every member of a triplet is charged separately;
    a cell cost combines Priority-Flood depth with a
    material/feature/moisture resistance term. Clay and an established channel
@@ -144,11 +147,14 @@ bounded DEM process without replacing WorldBox's own ocean behavior:
    routing state automatically; every burst adds configurable volume at the
    lowest safe outlet on the nearest available ring, searching up to four cells
    outside the building footprint. A live geyser therefore behaves as a
-   continuing river source without replacing itself.
-6. TerrainLab-created water may occupy at most the configured 1-50 percent of
-   valid DEM cells. Fifty percent is a non-bypassable hard maximum. Existing
-   ocean cells do not consume that budget, and hazardous/non-copyable surfaces
-   or non-geyser buildings are never converted.
+   continuing river source without replacing itself. Destroying that building
+   removes its pending source immediately. A merged channel remains supplied
+   when another live geyser still reaches the same connected component.
+6. TerrainLab-created water may occupy any user-selected `1..100%` share of
+   valid DEM cells. Existing ocean cells do not consume that budget, and
+   hazardous/non-copyable surfaces or non-geyser buildings are never converted.
+   Volume, substrate resistance, obstacles, and the per-tick work limit still
+   bound actual spread.
 7. Marine class follows absolute bed elevation on the zero datum: `0..-5 m` is
    shallow, `-6..-149 m` is shelf, and `-150 m` or lower is deep ocean. Water
    painted onto a known land substrate or reached by routing first receives a
@@ -158,6 +164,9 @@ bounded DEM process without replacing WorldBox's own ocean behavior:
 8. Managed water stores one UInt8 depth/reserve value and one UInt8 palette code
    for the pre-water surface. Uniform configurable evaporation runs every 30
    seconds; routed flow recharges cells, and a zero store restores that surface.
+   A connected component orphaned by geyser destruction also loses a
+   configurable `1..64` reserve units per climate step, even when uniform
+   evaporation is zero.
    The mask and store export as `managed_water.tif` and `water_storage.tif`.
 9. Five additional one-byte fields describe river-valley state: persistent
    hydro feature, moisture, nonlinear erodibility, local Horn slope, and local
@@ -169,9 +178,14 @@ bounded DEM process without replacing WorldBox's own ocean behavior:
 10. Every 30-second climate pass updates moisture and erodibility only for wet,
     hydro-feature, or still-moist cells. Saturated soil/organic material may
     degrade to sand; saturated convergent alluvium may become gameplay-safe
-    clay. A bounded stream-power proxy may incise an active river by `1..3 m`,
-    guarded against cutting more than 24 m below its local neighbor floor.
-    Routing is rebuilt on the changed DEM while active source volume is retained.
+    clay. An established river moistens and degrades safe erodible terrain in a
+    configurable one- or two-cell bank strip into sand or fine clay/silt
+    alluvium. A bounded stream-power proxy may incise an active river by
+    `1..3 m`, guarded against cutting more than 24 m below its local neighbor
+    floor. After its last source disappears, the stored river class remains:
+    drainage exposes a sandy channel and deterministic sparse hill/rare
+    mountain shoulders as a game-scale ravine. Routing is rebuilt on the
+    changed DEM while active source volume is retained.
 11. Managed mask, store, hydro feature, moisture, erodibility, local slope, and
     local aspect are visible as live overlays and export as UInt8 GeoTIFFs.
     A valid all-zero layer remains active and starts drawing incrementally when
@@ -190,18 +204,19 @@ calibrated shallow-water or climate solver. Moisture and resistance are bounded
 state proxies; velocity, physical infiltration, spatial precipitation, and
 potential evapotranspiration are not yet calibrated.
 
-Connected filling follows the seed-and-target-level contract described by
-[GRASS `r.lake`](https://grass.osgeo.org/grass-stable/manuals/r.lake.html).
+Connected terminal filling follows the seed-and-target-level contract described
+by [GRASS `r.lake`](https://grass.osgeo.org/grass-stable/manuals/r.lake.html).
 The climate extension point follows the standard precipitation/inflow versus
 ET/outflow/storage accounting summarized by the
 [USGS water-budget framework](https://pubs.usgs.gov/circ/2007/1308/pdf/C1308_508.pdf).
 
 The design follows the same separation used by SAGA's
-[Wang & Liu depression filling](https://saga-gis.sourceforge.io/saga_tool_doc/7.8.1/ta_preprocessor_4.html)
-and [D8 channel-network](https://saga-gis.sourceforge.io/saga_tool_doc/9.11.1/ta_channels_5.html)
-tools: first condition the DEM and derive flow connectivity, then extract or
-evolve the channel process. TerrainLab uses its own bounded integer runtime
-implementation rather than embedding SAGA binaries.
+[Channel Network](https://saga-gis.sourceforge.io/saga_tool_doc/9.12.0/ta_channels_0.html)
+and GRASS
+[`r.watershed`](https://grass.osgeo.org/grass-stable/manuals/r.watershed.html):
+condition the DEM, derive flow connectivity and accumulation, then extract or
+evolve channels. TerrainLab uses its own bounded integer runtime implementation
+rather than embedding SAGA or GRASS binaries.
 
 The detachment/resistance split follows the same modeling separation exposed by
 [GRASS `r.sim.sediment`](https://grass.osgeo.org/grass-stable/manuals/r.sim.sediment.html):

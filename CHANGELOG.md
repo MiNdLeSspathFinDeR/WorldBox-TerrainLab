@@ -2,6 +2,27 @@
 
 ## Unreleased
 
+## 1.4.0 - 2026-07-17
+
+- Removed the former 50-percent hard live-water ceiling. The maximum-area
+  control now accepts the complete `1..100%` range; finite source volume,
+  terrain resistance, gameplay obstacles, and per-tick work still bound spread.
+- Added connected terminal lakes for channel fronts that cannot reach another
+  river, lake, ocean, or map boundary. The local seed prefers a deep
+  Priority-Flood depression, low elevation, and low substrate resistance, then
+  fills only connected cells at or below its spill level.
+- Established rivers now moisten and degrade a configurable one- or two-cell
+  bank strip into sand or fine clay/silt alluvium.
+- Destroying a registered native geyser cancels its pending source and applies
+  configurable drainage to the orphaned connected channel. Shared networks
+  remain wet while another live geyser feeds them. Drained rivers retain their
+  hydro identity and expose a sandy channel with sparse hill and rare mountain
+  ravine shoulders.
+- Extended every live-water numeric control with English and Russian
+  whole-row hover help. Added bank-width and destroyed-source drain controls.
+- Advanced `hydrology.water_dynamics` to schema `1.7.0`; no additional
+  persistent WBXGEO raster is added.
+
 ## 1.3.0 - 2026-07-17
 
 - Live channel growth now materializes up to three consecutive receiver cells

@@ -20,7 +20,7 @@ against screen edges and can be collapsed independently.
 
 ## Implementation status
 
-Version 1.3.0 implements the standalone side button, an adaptive top GIS
+Version 1.4.0 implements the standalone side button, an adaptive top GIS
 toolbar, and a stock WorldBox internal window. The toolbar copies the bottom
 WorldBox panel and button sprites, stretches to the logical canvas width, and
 balances commands across as few rows as the current UI scale permits. Its frame
@@ -64,16 +64,18 @@ settings; it does not duplicate routine map commands.
 The Analysis chapter also exposes `Live DEM water` with WorldBox's native rain
 icon. It is a repeat-click toggle with a green native activity lamp; the lamp
 turns amber when the configured area ceiling is reached. The Parameters page
-contains maximum flooded area, finite contact volume, geyser pulse volume, and
-cells-per-tick controls, a `0..16` evaporation-per-30-second field, and live
+contains a `1..100%` maximum flooded area, finite contact volume, geyser pulse
+volume, cells-per-tick, a `0..16` evaporation-per-30-second field,
+one-to-two-cell bank width, and destroyed-source drain rate. It also shows live
 managed-cell/source diagnostics plus geyser, injected-volume, and
 consumed-volume counters. A segmented `D8 | D-infinity | MFD` selector changes
 only future live channel routing and
 highlights the active method; each option has a method-specific hover summary.
 Channel operations create connected three-cell line/corner fragments whenever
 budget, obstacles, and the per-tick limit permit. Every numeric parameter label
-and value field uses the native WorldBox tooltip and explains its range, the
-effect of increasing it, and any performance tradeoff in English and Russian.
+and value field, plus its complete input row, uses the native WorldBox tooltip
+and explains its range, the effect of increasing it, and any performance
+tradeoff in English and Russian.
 
 The Layers chapter also exposes the authoritative Int16 DEM directly, without
 requiring relief analysis. It renders one point-filtered texture pixel per world

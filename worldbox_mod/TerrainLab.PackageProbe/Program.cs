@@ -822,6 +822,8 @@ internal static class Program
         water.Parameters.GeyserPulseVolume = 3;
         water.Parameters.CellsPerTick = 11;
         water.Parameters.EvaporationPerClimateStep = 3;
+        water.Parameters.BankErosionRadius = 1;
+        water.Parameters.OrphanedChannelDrainPerClimateStep = 13;
         water.Parameters.RoutingAlgorithm =
             TerrainWaterRoutingAlgorithm.DInfinity;
         water.ManagedMask[2] = 1;
@@ -926,6 +928,9 @@ internal static class Program
             loaded.WaterDynamics.Parameters.MaximumFloodPercent == 37 &&
             loaded.WaterDynamics.Parameters.GeyserPulseVolume == 3 &&
             loaded.WaterDynamics.Parameters.EvaporationPerClimateStep == 3 &&
+            loaded.WaterDynamics.Parameters.BankErosionRadius == 1 &&
+            loaded.WaterDynamics.Parameters.OrphanedChannelDrainPerClimateStep ==
+                13 &&
             loaded.WaterDynamics.Parameters.RoutingAlgorithm ==
             TerrainWaterRoutingAlgorithm.DInfinity,
             "Water dynamics state changed during package round-trip.");
@@ -1363,7 +1368,7 @@ internal static class Program
             "A legacy live-water payload did not default to D8.");
         TerrainWaterParameters cappedParameters = new TerrainWaterParameters
         {
-            MaximumFloodPercent = 99,
+            MaximumFloodPercent = 100,
             InitialSourceVolume = 100,
             GeyserPulseVolume = 2,
             CellsPerTick = 100
@@ -1373,8 +1378,9 @@ internal static class Program
             new byte[count],
             new byte[count],
             cappedParameters);
-        Assert(capped.FloodCellLimit == routing.ValidCellCount / 2,
-            "Water dynamics exceeded its hard 50-percent cell cap.");
+        Assert(
+            capped.FloodCellLimit == routing.ValidCellCount,
+            "Water dynamics did not allow the full valid DEM area.");
 
         TerrainWaterParameters finiteParameters = new TerrainWaterParameters
         {
@@ -1467,7 +1473,11 @@ internal static class Program
             routing,
             new byte[count],
             new byte[count],
-            finiteParameters);
+            finiteParameters,
+            0,
+            null,
+            new byte[count],
+            new byte[count]);
         blocked.AddSource(source, elevation[source], 3);
         int[] blockedPath = blocked.Step(
                 3,
@@ -1475,9 +1485,137 @@ internal static class Program
             .Select(change => change.Index)
             .ToArray();
         Assert(
-            blockedPath.SequenceEqual(new[] { source }) &&
+            blockedPath.Length == 3 &&
+            blockedPath[0] == source &&
+            !blockedPath.Contains(blockedReceiver) &&
             !blocked.IsWater(blockedReceiver),
-            "A blocked D8 channel jumped across an unavailable cell.");
+            "A blocked D8 channel neither stayed connected nor formed a local lake.");
+        AssertConnectedChannelTriplet(
+            blockedPath,
+            width,
+            "blocked-end terminal lake");
+
+        const int terminalWidth = 8;
+        const int terminalHeight = 7;
+        short[] terminalElevation = new short[terminalWidth * terminalHeight];
+        for (int y = 0; y < terminalHeight; y++)
+        {
+            for (int x = 0; x < terminalWidth; x++)
+            {
+                terminalElevation[y * terminalWidth + x] =
+                    (short)(100 - x * 10 + Math.Abs(y - 3) * 2);
+            }
+        }
+
+        byte[] terminalFeature = new byte[terminalElevation.Length];
+        TerrainWaterRouting terminalRouting = TerrainWaterRouting.Build(
+            terminalWidth,
+            terminalHeight,
+            terminalElevation);
+        TerrainWaterSimulation longBlocked = new TerrainWaterSimulation(
+            terminalRouting,
+            new byte[terminalElevation.Length],
+            new byte[terminalElevation.Length],
+            finiteParameters,
+            0,
+            null,
+            terminalFeature,
+            new byte[terminalElevation.Length]);
+        int terminalSource = 3 * terminalWidth + 1;
+        longBlocked.AddSource(
+            terminalSource,
+            terminalElevation[terminalSource],
+            10);
+        int[] terminalPath = longBlocked.Step(
+                10,
+                index => index % terminalWidth != 4)
+            .Select(change => change.Index)
+            .ToArray();
+        Assert(
+            terminalPath.Length > 3 &&
+            terminalPath.Take(3).SequenceEqual(new[]
+            {
+                terminalSource,
+                terminalSource + 1,
+                terminalSource + 2
+            }) &&
+            terminalPath.Skip(3).All(index =>
+                Math.Abs(
+                    index / terminalWidth -
+                    terminalPath[2] / terminalWidth) == 1 &&
+                index % terminalWidth ==
+                    terminalPath[2] % terminalWidth &&
+                terminalFeature[index] ==
+                    (byte)TerrainHydroFeature.Waterbody),
+            "A multi-cell river mistook its own upstream channel for a terminal sink: " +
+            string.Join(",", terminalPath) +
+            "; features=" +
+            string.Join(",", terminalPath.Select(index => terminalFeature[index])) +
+            "; fill=" + terminalRouting.GetFillDepth(terminalSource + 2));
+
+        TerrainWaterReceiver[] sinkReceivers = new TerrainWaterReceiver[8];
+        int sinkReceiverCount = routing.GetReceivers(
+            source,
+            TerrainWaterRoutingAlgorithm.D8,
+            sinkReceivers);
+        Assert(sinkReceiverCount == 1,
+            "External-water sink test did not find a receiver.");
+        int sink = sinkReceivers[0].Index;
+        byte[] sinkWater = new byte[count];
+        sinkWater[sink] = 1;
+        TerrainWaterSimulation externalSink = new TerrainWaterSimulation(
+            routing,
+            sinkWater,
+            new byte[count],
+            finiteParameters);
+        externalSink.AddSource(source, elevation[source], 10);
+        int[] sinkPath = externalSink.Step(10, _ => true)
+            .Select(change => change.Index)
+            .ToArray();
+        Assert(
+            sinkPath.SequenceEqual(new[] { source }) &&
+            externalSink.ActiveSourceCount == 0 &&
+            externalSink.PendingVolume == 0 &&
+            externalSink.IsWater(sink),
+            "A river did not terminate when it reached existing external water.");
+
+        byte[] managedSinkWater = new byte[count];
+        byte[] managedSinkMask = new byte[count];
+        byte[] managedSinkFeature = new byte[count];
+        managedSinkWater[sink] = 1;
+        managedSinkMask[sink] = 1;
+        managedSinkFeature[sink] = (byte)TerrainHydroFeature.Waterbody;
+        TerrainWaterSimulation managedSink = new TerrainWaterSimulation(
+            routing,
+            managedSinkWater,
+            managedSinkMask,
+            finiteParameters,
+            0,
+            null,
+            managedSinkFeature,
+            new byte[count]);
+        managedSink.AddSource(source, elevation[source], 10);
+        int[] managedSinkPath = managedSink.Step(10, _ => true)
+            .Select(change => change.Index)
+            .ToArray();
+        Assert(
+            managedSinkPath.SequenceEqual(new[] { source }) &&
+            managedSink.ActiveSourceCount == 0 &&
+            managedSink.RechargedCells.Contains(sink),
+            "A river expanded past an existing managed lake.");
+
+        TerrainWaterSimulation removableSource = new TerrainWaterSimulation(
+            routing,
+            new byte[count],
+            new byte[count],
+            finiteParameters);
+        removableSource.AddSource(source, elevation[source], 20);
+        Assert(
+            removableSource.RemoveSource(source) &&
+            removableSource.ActiveSourceCount == 0 &&
+            removableSource.PendingVolume == 0 &&
+            removableSource.Step(10, _ => true).Count == 0,
+            "Destroying a persistent source did not cancel its pending water.");
 
         const int basinWidth = 7;
         const int basinHeight = 7;
@@ -1622,6 +1760,20 @@ internal static class Program
             dried.SequenceEqual(new[] { 0 }) &&
             storage.SequenceEqual(new byte[] { 0, 145, 0 }),
             "Dynamic-water evaporation balance is inconsistent.");
+
+        byte[] orphanedManaged = { 1, 1, 1, 0 };
+        byte[] orphanedStorage = { 6, 20, 30, 40 };
+        List<int> orphanedDried = new List<int>();
+        Assert(
+            TerrainWaterBalance.ApplyTargetedLoss(
+                orphanedManaged,
+                orphanedStorage,
+                new[] { 0, 1, 1, 3 },
+                8,
+                orphanedDried) == 2 &&
+            orphanedDried.SequenceEqual(new[] { 0 }) &&
+            orphanedStorage.SequenceEqual(new byte[] { 0, 12, 30, 40 }),
+            "Destroyed-source drainage changed unrelated cells or double-counted a cell.");
     }
 
     private static void ValidateRiverValleyModel()
@@ -1715,6 +1867,16 @@ internal static class Program
             32);
         Assert(evolution.SandIndices.Contains(channel),
             "Saturated erodible soil did not degrade into alluvium.");
+        int[] bankSediment = evolution.BankSandIndices
+            .Concat(evolution.BankClayIndices)
+            .Distinct()
+            .ToArray();
+        Assert(
+            bankSediment.Length > 0 &&
+            bankSediment.All(index =>
+                Math.Abs(index % width - channel % width) <= 2 &&
+                Math.Abs(index / width - channel / width) <= 2),
+            "An established river did not degrade its one-to-two-cell bank strip.");
         Assert(evolution.IncisionIndices.Contains(channel),
             "A high-energy river did not incise its local DEM channel.");
         int incisionOffset = Array.IndexOf(evolution.IncisionIndices, channel);
@@ -1722,6 +1884,35 @@ internal static class Program
             incisionOffset >= 0 &&
             evolution.IncisionElevations[incisionOffset] < elevation[channel],
             "River incision did not lower the bed elevation.");
+
+        foreach (int index in evolution.BankSandIndices)
+        {
+            state.Material[index] = (byte)TerrainMaterial.Sand;
+            state.Landform[index] = (byte)TerrainLandform.Plain;
+        }
+
+        foreach (int index in evolution.BankClayIndices)
+        {
+            state.Material[index] = (byte)TerrainMaterial.Clay;
+            state.Landform[index] = (byte)TerrainLandform.Lowland;
+        }
+
+        water.ManagedMask[channel] = 0;
+        water.WaterStorage[channel] = 0;
+        water.Moisture[channel] = 160;
+        state.Material[channel] = (byte)TerrainMaterial.Soil;
+        state.Landform[channel] = (byte)TerrainLandform.Channel;
+        TerrainRiverEvolution dryEvolution = TerrainRiverValleyModel.Step(
+            state,
+            water,
+            64);
+        Assert(
+            dryEvolution.DrySandIndices.Contains(channel) &&
+            dryEvolution.DryHillIndices.Length +
+                dryEvolution.DryMountainIndices.Length > 0 &&
+            dryEvolution.DryMountainIndices.Length <=
+                dryEvolution.DryHillIndices.Length + 1,
+            "A dry established river did not leave sand and sparse ravine shoulders.");
 
         TerrainRiverValleyModel.ClearCell(state, water, channel);
         Assert(
@@ -2401,8 +2592,8 @@ internal static class Program
                 Assert(
                     (string)manifest["modules"].Single(module =>
                         (string)module["id"] == "hydrology.water_dynamics")
-                        ["schema_version"] == "1.6.0",
-                    "Water dynamics schema does not identify triplet routing.");
+                        ["schema_version"] == "1.7.0",
+                    "Water dynamics schema does not identify source lifecycle and bank evolution.");
                 Assert(
                     manifest["modules"].Any(module =>
                         (string)module["id"] == "erosion.hydraulic"),

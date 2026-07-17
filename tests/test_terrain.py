@@ -35,6 +35,8 @@ PARAMETER_TOOLTIP_KEYS = (
     "terrain_lab_water_geyser_pulse_volume",
     "terrain_lab_water_cells_per_tick",
     "terrain_lab_water_evaporation_per_climate_step",
+    "terrain_lab_water_bank_erosion_radius",
+    "terrain_lab_water_orphaned_channel_drain",
 )
 
 
@@ -51,6 +53,21 @@ class TerrainConversionTests(unittest.TestCase):
             for key in PARAMETER_TOOLTIP_KEYS:
                 self.assertTrue(locale[key])
                 self.assertTrue(locale[f"{key}_description"])
+
+        ui_source = (
+            ROOT / "worldbox_mod" / "TerrainLab" / "Code" / "TerrainLabUi.cs"
+        ).read_text(encoding="utf-8")
+        self.assertIn(
+            "ConfigureParameterTooltip(row.gameObject, labelKey);",
+            ui_source,
+        )
+        self.assertIn(
+            '"terrain_lab_water_maximum_flood_percent",\n'
+            "                parameters.MaximumFloodPercent.ToString(),\n"
+            "                HandleWaterMaximumFloodChanged,\n"
+            "                3);",
+            ui_source,
+        )
 
     def test_elevation_nodata_is_reserved(self) -> None:
         self.assertEqual(ELEVATION_NODATA, 9999)

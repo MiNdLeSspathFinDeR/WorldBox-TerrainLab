@@ -143,10 +143,14 @@ namespace TerrainLab
 
     public sealed class TerrainWaterParameters
     {
-        public const int HardMaximumFloodPercent = 50;
+        public const int HardMaximumFloodPercent = 100;
+        public const int MinimumBankErosionRadius = 1;
+        public const int MaximumBankErosionRadius = 2;
+        public const int MinimumOrphanedChannelDrain = 1;
+        public const int MaximumOrphanedChannelDrain = 64;
 
         [JsonProperty("maximum_flood_percent")]
-        public int MaximumFloodPercent { get; set; } = HardMaximumFloodPercent;
+        public int MaximumFloodPercent { get; set; } = 50;
 
         [JsonProperty("initial_source_volume")]
         public int InitialSourceVolume { get; set; } = 32;
@@ -159,6 +163,12 @@ namespace TerrainLab
 
         [JsonProperty("evaporation_per_climate_step")]
         public int EvaporationPerClimateStep { get; set; } = 1;
+
+        [JsonProperty("bank_erosion_radius")]
+        public int BankErosionRadius { get; set; } = MaximumBankErosionRadius;
+
+        [JsonProperty("orphaned_channel_drain_per_climate_step")]
+        public int OrphanedChannelDrainPerClimateStep { get; set; } = 8;
 
         [JsonIgnore]
         public TerrainWaterRoutingAlgorithm RoutingAlgorithm { get; set; } =
@@ -185,6 +195,14 @@ namespace TerrainLab
                 EvaporationPerClimateStep = Math.Max(
                     0,
                     Math.Min(16, EvaporationPerClimateStep)),
+                BankErosionRadius = Math.Max(
+                    MinimumBankErosionRadius,
+                    Math.Min(MaximumBankErosionRadius, BankErosionRadius)),
+                OrphanedChannelDrainPerClimateStep = Math.Max(
+                    MinimumOrphanedChannelDrain,
+                    Math.Min(
+                        MaximumOrphanedChannelDrain,
+                        OrphanedChannelDrainPerClimateStep)),
                 RoutingAlgorithm = TerrainWaterRoutingAlgorithms.Normalize(
                     RoutingAlgorithm)
             };
@@ -437,6 +455,56 @@ namespace TerrainLab
 
             return dried;
         }
+
+        public static int ApplyTargetedLoss(
+            byte[] managedMask,
+            byte[] waterStorage,
+            IEnumerable<int> indices,
+            int loss,
+            ICollection<int> driedCells)
+        {
+            if (managedMask == null || waterStorage == null ||
+                managedMask.Length != waterStorage.Length)
+            {
+                throw new ArgumentException("Water balance layers have different sizes.");
+            }
+
+            if (indices == null)
+            {
+                return 0;
+            }
+
+            int normalizedLoss = Math.Max(0, Math.Min(byte.MaxValue, loss));
+            if (normalizedLoss == 0)
+            {
+                return 0;
+            }
+
+            int changed = 0;
+            HashSet<int> visited = new HashSet<int>();
+            foreach (int index in indices)
+            {
+                if (index < 0 || index >= managedMask.Length ||
+                    !visited.Add(index) || managedMask[index] == 0 ||
+                    waterStorage[index] == 0)
+                {
+                    continue;
+                }
+
+                int remaining = waterStorage[index] - normalizedLoss;
+                changed++;
+                if (remaining > 0)
+                {
+                    waterStorage[index] = (byte)remaining;
+                    continue;
+                }
+
+                waterStorage[index] = 0;
+                driedCells?.Add(index);
+            }
+
+            return changed;
+        }
     }
 
     public readonly struct TerrainWaterReceiver
@@ -658,6 +726,18 @@ namespace TerrainLab
                     action(neighborY * Width + neighborX);
                 }
             }
+        }
+
+        internal bool IsBoundary(int index)
+        {
+            if (index < 0 || index >= CellCount)
+            {
+                return false;
+            }
+
+            int x = index % Width;
+            int y = index / Width;
+            return x == 0 || y == 0 || x == Width - 1 || y == Height - 1;
         }
 
         private int GetD8Receiver(int index, TerrainWaterReceiver[] output)
@@ -1192,6 +1272,34 @@ namespace TerrainLab
             return true;
         }
 
+        public bool RemoveSource(int origin)
+        {
+            if (!_sourceLookup.TryGetValue(origin, out WaterSource source))
+            {
+                return false;
+            }
+
+            int index = _sources.IndexOf(source);
+            _sourceLookup.Remove(origin);
+            if (index < 0)
+            {
+                return true;
+            }
+
+            _sources.RemoveAt(index);
+            if (_nextSource > index)
+            {
+                _nextSource--;
+            }
+
+            if (_nextSource >= _sources.Count)
+            {
+                _nextSource = 0;
+            }
+
+            return true;
+        }
+
         public IReadOnlyList<TerrainWaterCellChange> Step(
             int maximumChanges,
             Func<int, bool> canFlood)
@@ -1256,7 +1364,23 @@ namespace TerrainLab
 
             if (source.Channel.Count == 0)
             {
-                source.Budget = 0;
+                if (TryStartTerminalLake(
+                        source,
+                        source.LastChannelCell,
+                        canFlood))
+                {
+                    TerrainWaterCellChange? terminalChange =
+                        AdvanceBasin(source, canFlood);
+                    if (terminalChange.HasValue)
+                    {
+                        changes.Add(terminalChange.Value);
+                    }
+                }
+                else
+                {
+                    source.Complete();
+                }
+
                 return;
             }
 
@@ -1282,10 +1406,20 @@ namespace TerrainLab
                 {
                     if (candidate != source.Origin && _managedMask[candidate] == 0)
                     {
-                        continue;
+                        source.Complete();
+                        return;
                     }
 
                     RecordRecharge(candidate);
+                    if (candidate != source.Origin &&
+                        TerrainRiverValleyModel.NormalizeFeature(
+                            _hydroFeature?[candidate] ?? 0) ==
+                        TerrainHydroFeature.Waterbody)
+                    {
+                        source.Complete();
+                        return;
+                    }
+
                     EnqueueBasin(source, candidate);
                     EnqueueReceivers(source, candidate, front.Priority);
                     continue;
@@ -1348,6 +1482,7 @@ namespace TerrainLab
                 MarkManagedWater(current);
                 EnqueueBasin(source, current);
                 source.ChannelCellsSinceBasin++;
+                source.LastChannelCell = current;
                 changes.Add(CreateChange(current, cost, source.Origin));
 
                 int receiver = -1;
@@ -1434,7 +1569,21 @@ namespace TerrainLab
                 int candidate = source.Basin.Pop();
                 if (_waterMask[candidate] != 0)
                 {
+                    if (_managedMask[candidate] == 0)
+                    {
+                        source.Complete();
+                        return null;
+                    }
+
                     RecordRecharge(candidate);
+                    if (source.TerminalLakeActive)
+                    {
+                        EnqueueTerminalLakeNeighbors(
+                            source,
+                            candidate,
+                            canFlood);
+                    }
+
                     continue;
                 }
 
@@ -1457,12 +1606,181 @@ namespace TerrainLab
 
                 source.Budget -= cost;
                 MarkManagedWater(candidate);
-                EnqueueBasin(source, candidate);
+                if (source.TerminalLakeActive)
+                {
+                    if (_hydroFeature != null)
+                    {
+                        _hydroFeature[candidate] =
+                            (byte)TerrainHydroFeature.Waterbody;
+                    }
+
+                    EnqueueTerminalLakeNeighbors(
+                        source,
+                        candidate,
+                        canFlood);
+                }
+                else
+                {
+                    EnqueueBasin(source, candidate);
+                }
+
                 source.ChannelCellsSinceBasin = 0;
                 return CreateChange(candidate, cost, source.Origin);
             }
 
             return null;
+        }
+
+        private bool TryStartTerminalLake(
+            WaterSource source,
+            int endpoint,
+            Func<int, bool> canFlood)
+        {
+            if (endpoint < 0 || endpoint >= _routing.CellCount)
+            {
+                return false;
+            }
+
+            bool reachedSink = false;
+            int selected = -1;
+            int selectedFillDepth = int.MinValue;
+            int selectedElevation = int.MaxValue;
+            int selectedResistance = int.MaxValue;
+            _routing.ForEachNeighbor(endpoint, delegate(int neighbor)
+            {
+                if (reachedSink)
+                {
+                    return;
+                }
+
+                if (_waterMask[neighbor] != 0)
+                {
+                    if (neighbor != source.Origin &&
+                        !source.ChannelSeen.Contains(neighbor))
+                    {
+                        reachedSink = true;
+                    }
+
+                    return;
+                }
+
+                if (_routing.Elevation[neighbor] ==
+                        TerrainElevationEncoding.NoData ||
+                    _routing.Elevation[neighbor] > source.HeadElevation ||
+                    source.ChannelSeen.Contains(neighbor) ||
+                    canFlood != null && !canFlood(neighbor))
+                {
+                    return;
+                }
+
+                int fillDepth = _routing.GetFillDepth(neighbor);
+                int elevation = _routing.Elevation[neighbor];
+                int resistance = _material == null
+                    ? 0
+                    : TerrainRiverValleyModel.GetFlowResistance(
+                        _material[neighbor],
+                        _hydroFeature?[neighbor] ?? 0,
+                        _moisture?[neighbor] ?? 0);
+                if (selected < 0 ||
+                    fillDepth > selectedFillDepth ||
+                    fillDepth == selectedFillDepth &&
+                    (elevation < selectedElevation ||
+                     elevation == selectedElevation &&
+                     (resistance < selectedResistance ||
+                      resistance == selectedResistance && neighbor < selected)))
+                {
+                    selected = neighbor;
+                    selectedFillDepth = fillDepth;
+                    selectedElevation = elevation;
+                    selectedResistance = resistance;
+                }
+            });
+
+            if (reachedSink || _routing.IsBoundary(endpoint))
+            {
+                source.Complete();
+                return false;
+            }
+
+            if (selected < 0)
+            {
+                return false;
+            }
+
+            int waterLevel = Math.Min(
+                source.HeadElevation,
+                Math.Max(
+                    _routing.Elevation[selected],
+                    _routing.FilledElevation[selected]));
+            source.BeginTerminalLake(endpoint, waterLevel);
+            QueueTerminalLakeCell(source, selected);
+            return source.Basin.Count > 0;
+        }
+
+        private void EnqueueTerminalLakeNeighbors(
+            WaterSource source,
+            int center,
+            Func<int, bool> canFlood)
+        {
+            if (!source.TerminalLakeActive)
+            {
+                return;
+            }
+
+            bool reachedSink = false;
+            _routing.ForEachNeighbor(center, delegate(int neighbor)
+            {
+                if (reachedSink)
+                {
+                    return;
+                }
+
+                if (_waterMask[neighbor] != 0)
+                {
+                    if (_managedMask[neighbor] == 0)
+                    {
+                        reachedSink = true;
+                        return;
+                    }
+
+                    if (source.TerminalLakeSeen.Add(neighbor))
+                    {
+                        RecordRecharge(neighbor);
+                        source.BasinSeen.Add(neighbor);
+                        source.Basin.Push(neighbor);
+                    }
+
+                    return;
+                }
+
+                if (_routing.Elevation[neighbor] ==
+                        TerrainElevationEncoding.NoData ||
+                    _routing.Elevation[neighbor] > source.TerminalWaterLevel ||
+                    canFlood != null && !canFlood(neighbor))
+                {
+                    return;
+                }
+
+                QueueTerminalLakeCell(source, neighbor);
+            });
+
+            if (reachedSink)
+            {
+                source.Complete();
+            }
+        }
+
+        private static void QueueTerminalLakeCell(
+            WaterSource source,
+            int index)
+        {
+            if (!source.TerminalLakeSeen.Add(index) ||
+                !source.BasinSeen.Add(index))
+            {
+                return;
+            }
+
+            source.Basin.Push(index);
         }
 
         private void EnqueueBasin(WaterSource source, int center)
@@ -1659,10 +1977,14 @@ namespace TerrainLab
             public int HeadElevation;
             public long Budget;
             public int ChannelCellsSinceBasin;
+            public int LastChannelCell;
+            public bool TerminalLakeActive;
+            public int TerminalWaterLevel;
             public bool CanReceive => Channel.Count > 0 || Basin.Count > 0;
-            public bool CanAdvance => Budget > 0 && CanReceive;
+            public bool CanAdvance => Budget > 0;
             public readonly HashSet<int> ChannelSeen = new HashSet<int>();
             public readonly HashSet<int> BasinSeen = new HashSet<int>();
+            public readonly HashSet<int> TerminalLakeSeen = new HashSet<int>();
             public readonly ChannelMaxHeap Channel = new ChannelMaxHeap();
             public readonly IndexMinHeap Basin;
 
@@ -1675,7 +1997,32 @@ namespace TerrainLab
                 Basin.Clear();
                 BasinSeen.Clear();
                 BasinSeen.Add(Origin);
+                TerminalLakeSeen.Clear();
+                TerminalLakeActive = false;
+                TerminalWaterLevel = int.MinValue;
                 ChannelCellsSinceBasin = 0;
+                LastChannelCell = Origin;
+            }
+
+            public void BeginTerminalLake(int anchor, int waterLevel)
+            {
+                Channel.Clear();
+                Basin.Clear();
+                BasinSeen.Clear();
+                TerminalLakeSeen.Clear();
+                TerminalLakeActive = true;
+                TerminalWaterLevel = waterLevel;
+                TerminalLakeSeen.Add(anchor);
+                BasinSeen.Add(anchor);
+                LastChannelCell = anchor;
+            }
+
+            public void Complete()
+            {
+                Budget = 0;
+                Channel.Clear();
+                Basin.Clear();
+                TerminalLakeActive = false;
             }
         }
 
@@ -1890,7 +2237,7 @@ namespace TerrainLab
 
         public string Id => "hydrology.water_dynamics";
 
-        public string SchemaVersion => "1.6.0";
+        public string SchemaVersion => "1.7.0";
 
         public bool IsRequired => false;
 

@@ -1,6 +1,6 @@
 # TerrainLab WorldBox mod
 
-TerrainLab 1.3 is an NML source mod that adds an in-game GIS workspace without
+TerrainLab 1.4 is an NML source mod that adds an in-game GIS workspace without
 replacing WorldBox's normal save format. Its standalone transparent side icon
 opens an adaptive map toolbar styled from WorldBox's bottom panel and a stock
 internal window. Routine map commands stay in the toolbar, while project/import
@@ -11,7 +11,7 @@ window. Custom GIS data is stored in an adjacent WBXGEO project and a vanilla
 The source mod installs to `<WorldBox>/Mods/TerrainLab`. NML compiles the files
 under `Code` when the game starts.
 
-## Implemented 1.3 surface
+## Implemented 1.4 surface
 
 - signed Int16 elevation in `-20000..9000 m`, sea level `0`, and reserved
   `NODATA=9999`, independent from vanilla terrain morphotypes;
@@ -35,13 +35,15 @@ under `Code` when the game starts.
 - bounded live-water routing with finite painted sources, auto-starting native
   geyser replenishment, selectable D8/D-infinity/MFD channel routing through
   connected three-cell line/corner fragments without obstacle jumps, local
-  depression filling, absolute 0/-5/-150-metre water classes, persistent UInt8 storage,
+  depression filling and connected terminal lakes, absolute
+  0/-5/-150-metre water classes, persistent UInt8 storage,
   evaporation/recharge, gameplay-safe dry-surface restoration, and a
-  non-bypassable 50-percent valid-cell ceiling;
+  user-selectable 1-to-100-percent valid-cell ceiling;
 - persistent river/waterbody semantics at any elevation, compact UInt8
   moisture, full-grid erodibility and local slope/aspect, material resistance
-  and retention, soil-to-sand-to-clay evolution, and bounded local DEM channel
-  incision;
+  and retention, soil-to-sand-to-clay evolution, one-to-two-cell alluvial bank
+  degradation, bounded local DEM channel incision, and sandy ravine formation
+  after a destroyed geyser stops feeding its connected river;
 - live managed-water, storage, hydro-feature, moisture, erodibility, local
   slope, and local aspect overlays that update during growth, recharge, drying,
   erosion, and evaporation;

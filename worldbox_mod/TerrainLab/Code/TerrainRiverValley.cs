@@ -16,12 +16,22 @@ namespace TerrainLab
             bool dynamicChanged,
             int[] sandIndices,
             int[] clayIndices,
+            int[] bankSandIndices,
+            int[] bankClayIndices,
+            int[] drySandIndices,
+            int[] dryHillIndices,
+            int[] dryMountainIndices,
             int[] incisionIndices,
             short[] incisionElevations)
         {
             DynamicChanged = dynamicChanged;
             SandIndices = sandIndices ?? Array.Empty<int>();
             ClayIndices = clayIndices ?? Array.Empty<int>();
+            BankSandIndices = bankSandIndices ?? Array.Empty<int>();
+            BankClayIndices = bankClayIndices ?? Array.Empty<int>();
+            DrySandIndices = drySandIndices ?? Array.Empty<int>();
+            DryHillIndices = dryHillIndices ?? Array.Empty<int>();
+            DryMountainIndices = dryMountainIndices ?? Array.Empty<int>();
             IncisionIndices = incisionIndices ?? Array.Empty<int>();
             IncisionElevations = incisionElevations ?? Array.Empty<short>();
         }
@@ -32,13 +42,30 @@ namespace TerrainLab
 
         public int[] ClayIndices { get; }
 
+        public int[] BankSandIndices { get; }
+
+        public int[] BankClayIndices { get; }
+
+        public int[] DrySandIndices { get; }
+
+        public int[] DryHillIndices { get; }
+
+        public int[] DryMountainIndices { get; }
+
         public int[] IncisionIndices { get; }
 
         public short[] IncisionElevations { get; }
 
-        public bool HasChanges => DynamicChanged || SandIndices.Length > 0 ||
-                                  ClayIndices.Length > 0 ||
-                                  IncisionIndices.Length > 0;
+        public bool HasChanges =>
+            DynamicChanged ||
+            SandIndices.Length > 0 ||
+            ClayIndices.Length > 0 ||
+            BankSandIndices.Length > 0 ||
+            BankClayIndices.Length > 0 ||
+            DrySandIndices.Length > 0 ||
+            DryHillIndices.Length > 0 ||
+            DryMountainIndices.Length > 0 ||
+            IncisionIndices.Length > 0;
     }
 
     public static class TerrainRiverValleyModel
@@ -53,6 +80,7 @@ namespace TerrainLab
         private const int SoilToSandErodibility = 198;
         private const int SandToClayMoisture = 212;
         private const int IncisionPowerThreshold = 24;
+        private const int EstablishedRiverMoisture = 120;
 
         public static byte[] CreateNoDataLayer(int cellCount)
         {
@@ -495,6 +523,11 @@ namespace TerrainLab
                     Array.Empty<int>(),
                     Array.Empty<int>(),
                     Array.Empty<int>(),
+                    Array.Empty<int>(),
+                    Array.Empty<int>(),
+                    Array.Empty<int>(),
+                    Array.Empty<int>(),
+                    Array.Empty<int>(),
                     Array.Empty<short>());
             }
 
@@ -502,8 +535,15 @@ namespace TerrainLab
             int changeLimit = Math.Max(1, Math.Min(8192, maximumMorphologyChanges));
             List<int> sand = new List<int>();
             List<int> clay = new List<int>();
+            List<int> bankSand = new List<int>();
+            List<int> bankClay = new List<int>();
+            List<int> drySand = new List<int>();
+            List<int> dryHills = new List<int>();
+            List<int> dryMountains = new List<int>();
             List<int> incision = new List<int>();
             List<short> incisionElevation = new List<short>();
+            List<int> establishedRivers = new List<int>();
+            List<int> dryRivers = new List<int>();
             bool dynamicChanged = false;
 
             for (int index = 0; index < state.CellCount; index++)
@@ -567,6 +607,18 @@ namespace TerrainLab
                 {
                     water.Moisture[index] = (byte)newMoisture;
                     dynamicChanged = true;
+                }
+
+                if (feature == TerrainHydroFeature.River)
+                {
+                    if (wet && newMoisture >= EstablishedRiverMoisture)
+                    {
+                        establishedRivers.Add(index);
+                    }
+                    else if (!wet && newMoisture > 0)
+                    {
+                        dryRivers.Add(index);
+                    }
                 }
 
                 int baseErodibility = GetBaseErodibility(
@@ -664,13 +716,326 @@ namespace TerrainLab
                 }
             }
 
+            int bankRadius = (water.Parameters ?? new TerrainWaterParameters())
+                .Normalize()
+                .BankErosionRadius;
+            dynamicChanged |= CollectBankMorphology(
+                state,
+                water,
+                establishedRivers,
+                bankRadius,
+                Math.Max(0, changeLimit - sand.Count - clay.Count),
+                bankSand,
+                bankClay);
+            CollectDryValleyMorphology(
+                state,
+                water,
+                dryRivers,
+                bankRadius,
+                changeLimit,
+                sand.Count + clay.Count + bankSand.Count + bankClay.Count,
+                drySand,
+                dryHills,
+                dryMountains);
+
             water.IsDirty |= dynamicChanged;
             return new TerrainRiverEvolution(
                 dynamicChanged,
                 sand.ToArray(),
                 clay.ToArray(),
+                bankSand.ToArray(),
+                bankClay.ToArray(),
+                drySand.ToArray(),
+                dryHills.ToArray(),
+                dryMountains.ToArray(),
                 incision.ToArray(),
                 incisionElevation.ToArray());
+        }
+
+        private static bool CollectBankMorphology(
+            TerrainWorldState state,
+            TerrainWaterState water,
+            IReadOnlyList<int> riverCells,
+            int radius,
+            int maximumChanges,
+            ICollection<int> sand,
+            ICollection<int> clay)
+        {
+            if (riverCells == null || riverCells.Count == 0)
+            {
+                return false;
+            }
+
+            int normalizedRadius = Math.Max(
+                TerrainWaterParameters.MinimumBankErosionRadius,
+                Math.Min(TerrainWaterParameters.MaximumBankErosionRadius, radius));
+            int remaining = Math.Max(0, maximumChanges);
+            bool dynamicChanged = false;
+            HashSet<int> visited = new HashSet<int>();
+            foreach (int river in riverCells)
+            {
+                int centerX = river % state.Width;
+                int centerY = river / state.Width;
+                for (int offsetY = -normalizedRadius;
+                     offsetY <= normalizedRadius;
+                     offsetY++)
+                {
+                    int y = centerY + offsetY;
+                    if (y < 0 || y >= state.Height)
+                    {
+                        continue;
+                    }
+
+                    for (int offsetX = -normalizedRadius;
+                         offsetX <= normalizedRadius;
+                         offsetX++)
+                    {
+                        int distance = Math.Max(
+                            Math.Abs(offsetX),
+                            Math.Abs(offsetY));
+                        if (distance == 0 || distance > normalizedRadius)
+                        {
+                            continue;
+                        }
+
+                        int x = centerX + offsetX;
+                        if (x < 0 || x >= state.Width)
+                        {
+                            continue;
+                        }
+
+                        int index = y * state.Width + x;
+                        if (!visited.Add(index) ||
+                            state.Elevation[index] ==
+                                TerrainElevationEncoding.NoData ||
+                            water.ManagedMask[index] != 0 ||
+                            NormalizeFeature(water.HydroFeature[index]) !=
+                                TerrainHydroFeature.None)
+                        {
+                            continue;
+                        }
+
+                        int targetMoisture = distance == 1 ? 144 : 96;
+                        if (water.Moisture[index] < targetMoisture)
+                        {
+                            water.Moisture[index] = (byte)targetMoisture;
+                            dynamicChanged = true;
+                        }
+
+                        int baseErodibility = GetBaseErodibility(
+                            state.Material[index],
+                            state.Landform[index]);
+                        int targetErodibility = Math.Min(
+                            MaximumEncodedValue,
+                            baseErodibility + (normalizedRadius - distance + 1) * 12);
+                        if (water.Erodibility[index] < targetErodibility)
+                        {
+                            water.Erodibility[index] = (byte)targetErodibility;
+                            dynamicChanged = true;
+                        }
+
+                        TerrainMaterial material =
+                            (TerrainMaterial)state.Material[index];
+                        if (remaining <= 0 ||
+                            material != TerrainMaterial.Soil &&
+                            material != TerrainMaterial.Organic)
+                        {
+                            continue;
+                        }
+
+                        CalculateLocalTerrain(
+                            state.Width,
+                            state.Height,
+                            state.Elevation,
+                            index,
+                            state.HorizontalMetresPerCell,
+                            out byte slope,
+                            out _,
+                            out int convergence);
+                        bool depositional =
+                            distance == 1 &&
+                            slope != NoDirection &&
+                            slope <= 32 &&
+                            convergence >= 0 &&
+                            state.Elevation[index] <=
+                                state.Elevation[river] + 4;
+                        if (depositional)
+                        {
+                            clay.Add(index);
+                        }
+                        else
+                        {
+                            sand.Add(index);
+                        }
+
+                        remaining--;
+                    }
+                }
+            }
+
+            return dynamicChanged;
+        }
+
+        private static void CollectDryValleyMorphology(
+            TerrainWorldState state,
+            TerrainWaterState water,
+            IReadOnlyList<int> dryRiverCells,
+            int radius,
+            int changeLimit,
+            int changesAlreadyQueued,
+            ICollection<int> drySand,
+            ICollection<int> hills,
+            ICollection<int> mountains)
+        {
+            int remaining = Math.Max(0, changeLimit - changesAlreadyQueued);
+            if (remaining == 0 || dryRiverCells == null || dryRiverCells.Count == 0)
+            {
+                return;
+            }
+
+            int normalizedRadius = Math.Max(
+                TerrainWaterParameters.MinimumBankErosionRadius,
+                Math.Min(TerrainWaterParameters.MaximumBankErosionRadius, radius));
+            HashSet<int> queued = new HashSet<int>();
+            foreach (int river in dryRiverCells)
+            {
+                if (remaining == 0)
+                {
+                    break;
+                }
+
+                TerrainMaterial riverMaterial =
+                    (TerrainMaterial)state.Material[river];
+                if (riverMaterial != TerrainMaterial.Sand &&
+                    (riverMaterial == TerrainMaterial.Clay ||
+                     !IsResistantMaterial(riverMaterial)) &&
+                    queued.Add(river))
+                {
+                    drySand.Add(river);
+                    remaining--;
+                    if (remaining == 0)
+                    {
+                        break;
+                    }
+                }
+
+                int centerX = river % state.Width;
+                int centerY = river / state.Width;
+                int primaryShoulder = -1;
+                int primaryRise = int.MinValue;
+                bool visibleShoulderQueued = false;
+                bool existingShoulder = false;
+                for (int offsetY = -normalizedRadius;
+                     offsetY <= normalizedRadius;
+                     offsetY++)
+                {
+                    int y = centerY + offsetY;
+                    if (y < 0 || y >= state.Height)
+                    {
+                        continue;
+                    }
+
+                    for (int offsetX = -normalizedRadius;
+                         offsetX <= normalizedRadius;
+                         offsetX++)
+                    {
+                        int distance = Math.Max(
+                            Math.Abs(offsetX),
+                            Math.Abs(offsetY));
+                        if (distance == 0 || distance > normalizedRadius)
+                        {
+                            continue;
+                        }
+
+                        int x = centerX + offsetX;
+                        if (x < 0 || x >= state.Width)
+                        {
+                            continue;
+                        }
+
+                        int index = y * state.Width + x;
+                        if (state.Elevation[index] ==
+                                TerrainElevationEncoding.NoData ||
+                            water.ManagedMask[index] != 0 ||
+                            NormalizeFeature(water.HydroFeature[index]) !=
+                                TerrainHydroFeature.None)
+                        {
+                            continue;
+                        }
+
+                        TerrainMaterial material =
+                            (TerrainMaterial)state.Material[index];
+                        TerrainLandform landform =
+                            (TerrainLandform)state.Landform[index];
+                        if (landform == TerrainLandform.Hill ||
+                            landform == TerrainLandform.Mountain ||
+                            landform == TerrainLandform.Summit)
+                        {
+                            existingShoulder = true;
+                            continue;
+                        }
+
+                        if (material != TerrainMaterial.Sand &&
+                            material != TerrainMaterial.Clay &&
+                            material != TerrainMaterial.Soil &&
+                            material != TerrainMaterial.Organic)
+                        {
+                            continue;
+                        }
+
+                        int rise = state.Elevation[index] -
+                                   state.Elevation[river];
+                        if (distance == 1 && rise > primaryRise)
+                        {
+                            primaryShoulder = index;
+                            primaryRise = rise;
+                        }
+
+                        uint signature = MorphologySignature(river, index);
+                        bool mountain = distance == 1 && rise >= 8 &&
+                                        signature % 23u == 0u;
+                        bool hill = rise >= 2 && signature % 5u <= 1u;
+                        if ((!mountain && !hill) || !queued.Add(index))
+                        {
+                            continue;
+                        }
+
+                        if (mountain)
+                        {
+                            mountains.Add(index);
+                        }
+                        else
+                        {
+                            hills.Add(index);
+                        }
+
+                        visibleShoulderQueued = true;
+                        if (--remaining == 0)
+                        {
+                            return;
+                        }
+                    }
+                }
+
+                if (!visibleShoulderQueued && !existingShoulder &&
+                    primaryShoulder >= 0 &&
+                    primaryRise >= 1 && queued.Add(primaryShoulder))
+                {
+                    hills.Add(primaryShoulder);
+                    remaining--;
+                }
+            }
+        }
+
+        private static uint MorphologySignature(int first, int second)
+        {
+            unchecked
+            {
+                uint value = (uint)first * 2654435761u;
+                value ^= (uint)second * 2246822519u;
+                value ^= value >> 13;
+                return value * 3266489917u;
+            }
         }
 
         private static int GetWaterRetention(byte material)

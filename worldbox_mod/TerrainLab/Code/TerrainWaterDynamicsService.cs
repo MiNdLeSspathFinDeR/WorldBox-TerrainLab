@@ -25,6 +25,8 @@ namespace TerrainLab
         private readonly Dictionary<int, TerrainSurfaceStamp> _autoDriedSurfaces =
             new Dictionary<int, TerrainSurfaceStamp>();
         private readonly List<int> _driedCells = new List<int>();
+        private byte[] _orphanedGeyserMask;
+        private int _orphanedGeyserCellCount;
         private TerrainWorldState _state;
         private TerrainWaterRouting _routing;
         private TerrainWaterSimulation _simulation;
@@ -252,6 +254,7 @@ namespace TerrainLab
                     _state.Elevation[origin]);
                 if (_simulation.AddSource(origin, head, volume))
                 {
+                    ClearOrphanedComponent(origin);
                     water.TotalInjectedVolume = SaturatingAdd(
                         water.TotalInjectedVolume,
                         volume);
@@ -390,6 +393,210 @@ namespace TerrainLab
             return TerrainSurfaceStamp.TryCaptureSafe(candidate, out _, out _);
         }
 
+        private bool PruneDestroyedGeysers()
+        {
+            if (_geyserOutlets.Count == 0 || _tiles == null || _simulation == null)
+            {
+                return false;
+            }
+
+            List<int> destroyed = new List<int>();
+            foreach (KeyValuePair<int, int> pair in _geyserOutlets)
+            {
+                int geyserIndex = pair.Key;
+                if (geyserIndex < 0 || geyserIndex >= _tiles.Length ||
+                    !IsGeyser(_tiles[geyserIndex]?.building))
+                {
+                    destroyed.Add(geyserIndex);
+                }
+            }
+
+            if (destroyed.Count == 0)
+            {
+                return false;
+            }
+
+            HashSet<int> orphanedOutlets = new HashSet<int>();
+            foreach (int geyserIndex in destroyed)
+            {
+                if (_geyserOutlets.TryGetValue(geyserIndex, out int outlet))
+                {
+                    orphanedOutlets.Add(outlet);
+                }
+
+                _geyserOutlets.Remove(geyserIndex);
+            }
+
+            bool changed = false;
+            foreach (int outlet in orphanedOutlets)
+            {
+                if (_geyserOutlets.Values.Contains(outlet))
+                {
+                    continue;
+                }
+
+                changed |= _simulation.RemoveSource(outlet);
+                changed |= MarkOrphanedComponent(outlet);
+            }
+
+            foreach (int activeOutlet in _geyserOutlets.Values.Distinct())
+            {
+                ClearOrphanedComponent(activeOutlet);
+            }
+
+            if (changed)
+            {
+                _state.WaterDynamics.IsDirty = true;
+                _nextClimateTime = Math.Min(
+                    _nextClimateTime,
+                    Time.unscaledTime);
+            }
+
+            return changed;
+        }
+
+        private bool MarkOrphanedComponent(int origin)
+        {
+            EnsureOrphanedMask();
+            if (_orphanedGeyserMask == null)
+            {
+                return false;
+            }
+
+            bool changed = false;
+            ForEachConnectedManagedCell(origin, delegate(int index)
+            {
+                if (_orphanedGeyserMask[index] != 0)
+                {
+                    return;
+                }
+
+                _orphanedGeyserMask[index] = 1;
+                _orphanedGeyserCellCount++;
+                changed = true;
+            });
+
+            return changed;
+        }
+
+        private void ClearOrphanedComponent(int origin)
+        {
+            if (_orphanedGeyserCellCount == 0)
+            {
+                return;
+            }
+
+            ForEachConnectedManagedCell(
+                origin,
+                ClearOrphanedCell);
+        }
+
+        private void ForEachConnectedManagedCell(
+            int origin,
+            Action<int> action)
+        {
+            TerrainWaterState water = _state?.WaterDynamics;
+            if (water == null || _routing == null || action == null || origin < 0 ||
+                origin >= water.ManagedMask.Length ||
+                water.ManagedMask[origin] == 0)
+            {
+                return;
+            }
+
+            byte[] visited = new byte[water.ManagedMask.Length];
+            Queue<int> pending = new Queue<int>();
+            visited[origin] = 1;
+            pending.Enqueue(origin);
+            while (pending.Count > 0)
+            {
+                int current = pending.Dequeue();
+                action(current);
+                _routing.ForEachNeighbor(current, delegate(int neighbor)
+                {
+                    if (water.ManagedMask[neighbor] == 0 ||
+                        TerrainRiverValleyModel.NormalizeFeature(
+                            water.HydroFeature[neighbor]) ==
+                        TerrainHydroFeature.None ||
+                        visited[neighbor] != 0)
+                    {
+                        return;
+                    }
+
+                    visited[neighbor] = 1;
+                    pending.Enqueue(neighbor);
+                });
+            }
+        }
+
+        private void EnsureOrphanedMask()
+        {
+            int cellCount = _state?.CellCount ?? 0;
+            if (cellCount <= 0)
+            {
+                return;
+            }
+
+            if (_orphanedGeyserMask == null ||
+                _orphanedGeyserMask.Length != cellCount)
+            {
+                _orphanedGeyserMask = new byte[cellCount];
+                _orphanedGeyserCellCount = 0;
+            }
+        }
+
+        private IEnumerable<int> EnumerateOrphanedCells()
+        {
+            if (_orphanedGeyserMask == null ||
+                _orphanedGeyserCellCount == 0)
+            {
+                yield break;
+            }
+
+            for (int index = 0; index < _orphanedGeyserMask.Length; index++)
+            {
+                if (_orphanedGeyserMask[index] != 0)
+                {
+                    yield return index;
+                }
+            }
+        }
+
+        private void ClearOrphanedCell(int index)
+        {
+            if (_orphanedGeyserMask == null || index < 0 ||
+                index >= _orphanedGeyserMask.Length ||
+                _orphanedGeyserMask[index] == 0)
+            {
+                return;
+            }
+
+            _orphanedGeyserMask[index] = 0;
+            _orphanedGeyserCellCount--;
+        }
+
+        private void PruneOrphanedMask(byte[] managedMask)
+        {
+            if (_orphanedGeyserMask == null ||
+                _orphanedGeyserCellCount == 0 ||
+                managedMask == null ||
+                managedMask.Length != _orphanedGeyserMask.Length)
+            {
+                return;
+            }
+
+            for (int index = 0;
+                 index < _orphanedGeyserMask.Length &&
+                 _orphanedGeyserCellCount > 0;
+                 index++)
+            {
+                if (_orphanedGeyserMask[index] != 0 &&
+                    managedMask[index] == 0)
+                {
+                    ClearOrphanedCell(index);
+                }
+            }
+        }
+
         public void NotifySurfaceLayerPainted(WorldTile tile, bool waterLayer)
         {
             NotifySurfaceLayerPainted(
@@ -509,6 +716,7 @@ namespace TerrainLab
                     changed = true;
                 }
 
+                ClearOrphanedCell(index);
                 if (water != null)
                 {
                     changed |= TerrainRiverValleyModel.NormalizeFeature(
@@ -570,12 +778,13 @@ namespace TerrainLab
             try
             {
                 EnsureSimulation();
+                bool sourceLifecycleChanged = PruneDestroyedGeysers();
                 ProcessPaintedWater();
                 bool climateChanged = ProcessClimate();
-                bool changed = climateChanged;
+                bool changed = climateChanged || sourceLifecycleChanged;
                 if (Time.unscaledTime < _nextTickTime || _simulation.LimitReached)
                 {
-                    if (climateChanged)
+                    if (climateChanged || sourceLifecycleChanged)
                     {
                         NotifyCellsChanged(null);
                     }
@@ -592,7 +801,7 @@ namespace TerrainLab
                 changed |= recharged;
                 if (changes.Count == 0)
                 {
-                    if (climateChanged)
+                    if (climateChanged || sourceLifecycleChanged)
                     {
                         NotifyCellsChanged(null);
                     }
@@ -605,7 +814,7 @@ namespace TerrainLab
                 }
 
                 ApplyChanges(changes);
-                if (climateChanged)
+                if (climateChanged || sourceLifecycleChanged)
                 {
                     NotifyCellsChanged(null);
                 }
@@ -710,6 +919,7 @@ namespace TerrainLab
                 water.IsDirty = true;
             }
 
+            PruneOrphanedMask(water.ManagedMask);
             _simulation = new TerrainWaterSimulation(
                 _routing,
                 currentWater,
@@ -961,6 +1171,8 @@ namespace TerrainLab
                     water.WaterStorage[index] = target;
                     changed = true;
                 }
+
+                ClearOrphanedCell(index);
             }
 
             water.IsDirty |= changed;
@@ -978,16 +1190,30 @@ namespace TerrainLab
             TerrainWaterState water = _state.WaterDynamics;
             int evaporation = water.Parameters.EvaporationPerClimateStep;
             bool changed = false;
+            _driedCells.Clear();
+            bool storageChanged = false;
             if (evaporation > 0 && water.ManagedCellCount > 0)
             {
-                _driedCells.Clear();
                 TerrainWaterBalance.ApplyEvaporation(
                     water.ManagedMask,
                     water.WaterStorage,
                     evaporation,
                     _driedCells);
-                changed = true;
+                storageChanged = true;
+            }
 
+            int orphanedChanged = TerrainWaterBalance.ApplyTargetedLoss(
+                water.ManagedMask,
+                water.WaterStorage,
+                EnumerateOrphanedCells(),
+                water.Parameters.OrphanedChannelDrainPerClimateStep,
+                _driedCells);
+            storageChanged |= orphanedChanged > 0;
+            changed |= storageChanged;
+            PruneOrphanedMask(water.ManagedMask);
+
+            if (_driedCells.Count > 0)
+            {
                 Dictionary<TerrainSurfaceStamp, List<int>> restoreGroups =
                     new Dictionary<TerrainSurfaceStamp, List<int>>();
                 List<int> clearedCells = new List<int>(_driedCells.Count);
@@ -1036,6 +1262,7 @@ namespace TerrainLab
                 foreach (int index in clearedCells)
                 {
                     _simulation.MarkExternalDry(index);
+                    ClearOrphanedCell(index);
                     water.ClearManagedStorage(index);
                     TerrainHydroFeature feature =
                         TerrainRiverValleyModel.NormalizeFeature(
@@ -1096,6 +1323,61 @@ namespace TerrainLab
                     (byte)TerrainMaterial.Clay);
             }
 
+            int[] bankSand = ApplyMorphologySurface(
+                evolution.BankSandIndices,
+                "sand");
+            foreach (int index in bankSand)
+            {
+                _state.Landform[index] = (byte)TerrainLandform.Plain;
+                _state.Material[index] = (byte)TerrainMaterial.Sand;
+                water.Erodibility[index] =
+                    TerrainRiverValleyModel.GetBaseErodibility(
+                        _state.Material[index],
+                        _state.Landform[index]);
+            }
+
+            int[] bankClay = ApplyMorphologySurface(
+                evolution.BankClayIndices,
+                "sand");
+            foreach (int index in bankClay)
+            {
+                _state.Landform[index] = (byte)TerrainLandform.Lowland;
+                _state.Material[index] = (byte)TerrainMaterial.Clay;
+                water.Erodibility[index] =
+                    TerrainRiverValleyModel.GetBaseErodibility(
+                        _state.Material[index],
+                        _state.Landform[index]);
+                semanticChanged = true;
+            }
+
+            int[] dryHills = ApplyMorphologySurface(
+                evolution.DryHillIndices,
+                "hills");
+            int[] dryMountains = ApplyMorphologySurface(
+                evolution.DryMountainIndices,
+                "mountains");
+            int[] drySand = ApplyMorphologySurface(
+                evolution.DrySandIndices,
+                "sand");
+            foreach (int index in drySand)
+            {
+                _state.Landform[index] = (byte)TerrainLandform.Channel;
+                _state.Material[index] = (byte)TerrainMaterial.Sand;
+                water.Erodibility[index] =
+                    TerrainRiverValleyModel.GetBaseErodibility(
+                        _state.Material[index],
+                        _state.Landform[index]);
+                semanticChanged = true;
+            }
+
+            foreach (int index in dryHills.Concat(dryMountains))
+            {
+                water.Erodibility[index] =
+                    TerrainRiverValleyModel.GetBaseErodibility(
+                        _state.Material[index],
+                        _state.Landform[index]);
+            }
+
             if (semanticChanged)
             {
                 _state.MarkSemanticLayersChanged();
@@ -1115,6 +1397,63 @@ namespace TerrainLab
 
             water.IsDirty = true;
             return true;
+        }
+
+        private int[] ApplyMorphologySurface(
+            IEnumerable<int> candidateIndices,
+            string mainTypeId)
+        {
+            if (candidateIndices == null || string.IsNullOrWhiteSpace(mainTypeId))
+            {
+                return Array.Empty<int>();
+            }
+
+            Dictionary<TerrainSurfaceStamp, List<int>> groups =
+                new Dictionary<TerrainSurfaceStamp, List<int>>();
+            HashSet<int> accepted = new HashSet<int>();
+            foreach (int index in candidateIndices)
+            {
+                if (index < 0 || index >= _tiles.Length ||
+                    !accepted.Add(index))
+                {
+                    continue;
+                }
+
+                WorldTile tile = _tiles[index];
+                if (tile == null || tile.building != null || IsWater(tile))
+                {
+                    accepted.Remove(index);
+                    continue;
+                }
+
+                TerrainSurfaceStamp before = TerrainSurfaceStamp.Capture(tile);
+                TerrainSurfaceStamp target = new TerrainSurfaceStamp(
+                    mainTypeId,
+                    before.TopTypeId,
+                    before.Frozen);
+                if (!target.TryResolve(out _, out _, out _))
+                {
+                    target = new TerrainSurfaceStamp(
+                        mainTypeId,
+                        string.Empty,
+                        before.Frozen);
+                }
+
+                if (!groups.TryGetValue(target, out List<int> indices))
+                {
+                    indices = new List<int>();
+                    groups.Add(target, indices);
+                }
+
+                indices.Add(index);
+            }
+
+            foreach (KeyValuePair<TerrainSurfaceStamp, List<int>> group in groups)
+            {
+                _state.ApplySurfaceCells(group.Value.ToArray(), group.Key);
+            }
+
+            return accepted.ToArray();
         }
 
         private TerrainSurfaceStamp GetRestoreSurface(
@@ -1523,6 +1862,8 @@ namespace TerrainLab
             _queuedPaintIndices.Clear();
             _recentPaintTimes.Clear();
             _geyserOutlets.Clear();
+            _orphanedGeyserMask = null;
+            _orphanedGeyserCellCount = 0;
             _driedCells.Clear();
             LastError = null;
             if (!keepState)

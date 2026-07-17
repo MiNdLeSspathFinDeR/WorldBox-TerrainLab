@@ -241,11 +241,14 @@ one module; it does not invalidate the core project.
 
 ### Live water module
 
-TerrainLab implements optional module `hydrology.water_dynamics` schema `1.6.0`.
+TerrainLab implements optional module `hydrology.water_dynamics` schema `1.7.0`.
 `state.json` stores whether routing is enabled, normalized integer parameters,
 managed-cell count, injected/consumed volume counters, and observed native
 geyser pulse count. Parameter `routing_algorithm` is one of `d8`, `dinf`, or
 `mfd`; valid `1.0.x` payloads without it migrate to `d8`.
+`maximum_flood_percent` accepts `1..100`, `bank_erosion_radius` accepts one or
+two cells, and `orphaned_channel_drain_per_climate_step` accepts `1..64`
+UInt8-storage units. Missing new parameters receive deterministic defaults.
 
 | Layer | Storage | NODATA | Meaning |
 |---|---|---:|---|
@@ -273,9 +276,13 @@ receive those values deterministically during load.
 Schema `1.6.x` identifies connected triplet channel routing and does not add or
 remove stored fields. Each operation follows up to three consecutive receivers;
 blocked cells terminate that route without a non-adjacent bypass.
-Later native geyser pulses can continue replenishing a source. The configured
-flood percentage is normalized to `1..50`, and runtime
-code always enforces the same hard 50-percent ceiling over valid DEM cells.
+Schema `1.7.x` adds source-lifecycle, connected terminal-lake, one-to-two-cell
+alluvial-bank, and dry-ravine behavior. It adds only normalized parameters, not
+rasters; the existing hydro-feature, moisture, erodibility, landform, and
+material fields carry the resulting state. Later native geyser pulses can
+continue replenishing a source, while destruction cancels its runtime queue.
+The configured flood percentage is normalized to `1..100`, so the user may
+permit the complete valid DEM while volume and terrain still bound actual flow.
 The algorithm choice controls only new live-water channel fronts; analytical
 hydrology and erosion remain on their independently versioned D8 graphs.
 
