@@ -2,6 +2,7 @@ __pycache__/
 *.py[cod]
 .pytest_cache/
 *.egg-info/
+tests/_tmp/
 
 # Local reference maps. Keep third-party game artwork out of the public repo.
 /botw_map.jpeg

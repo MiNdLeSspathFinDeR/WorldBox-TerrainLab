@@ -6,12 +6,13 @@ from typing import Any, Dict, Iterable, Iterator, Optional, Tuple
 from pathlib import Path
 from PIL import Image as Img
 
-from . import convert
+from . import convert, fit_map_size_to_budget
 from .consts import SAFE_TILES_TUPLE, TILES_TUPLE
 from .saves import (
     find_worldbox_stats_template,
     next_worldbox_save_slot,
     resolve_worldbox_saves_dir,
+    write_game_save_atomically,
     write_map_folder,
 )
 from .utils import json_loads
@@ -138,6 +139,18 @@ parser.add_argument(
     type=float,
     default=2.0,
 )
+parser.add_argument(
+    "--fit-budget",
+    help="Fit automatic dimensions to the largest aspect-preserving TerrainLab map",
+    action="store_true",
+    default=False,
+)
+parser.add_argument(
+    "--strict",
+    help=argparse.SUPPRESS,
+    action="store_true",
+    default=False,
+)
 
 
 def process_args() -> Dict[str, Any]:
@@ -175,6 +188,8 @@ def process_args() -> Dict[str, Any]:
         "game_saves_dir",
         "watch",
         "watch_interval",
+        "fit_budget",
+        "strict",
     ):
         args[arg] = getattr(parsed_args, arg)
 
@@ -283,11 +298,15 @@ def process_image(image_path: Path, args: Dict[str, Any], tiles: Iterable[str]) 
     output_path = get_output_path(image_path=image_path, args=args)
 
     with Img.open(image_path) as image:
+        width = args["width"]
+        height = args["height"]
+        if args["fit_budget"] and width == 0 and height == 0:
+            width, height = fit_map_size_to_budget(*image.size)
         converted_map = convert(
             image=image,
             dither=args["dither"],
-            width=args["width"],
-            height=args["height"],
+            width=width,
+            height=height,
             tiles=tiles,
             name=map_name,
             algorithm=args["algorithm"],
@@ -296,15 +315,24 @@ def process_image(image_path: Path, args: Dict[str, Any], tiles: Iterable[str]) 
             terrain_min_region=args["terrain_min_region"],
         )
 
-    write_map_folder(
-        output_path=output_path,
-        converted_map=converted_map,
-        name=map_name,
-        include_game_files=args["save_to_game"],
-        stats_template=args.get("stats_template"),
-    )
+    if args["save_to_game"]:
+        write_game_save_atomically(
+            output_path=output_path,
+            converted_map=converted_map,
+            name=map_name,
+            stats_template=args.get("stats_template"),
+        )
+    else:
+        write_map_folder(
+            output_path=output_path,
+            converted_map=converted_map,
+            name=map_name,
+        )
 
-    print(f"Converted {image_path} -> {output_path}")
+    print(
+        f"Converted {image_path} -> {output_path} "
+        f"({converted_map.width}x{converted_map.height} blocks)"
+    )
 
 
 def watch_images(args: Dict[str, Any], tiles: Iterable[str]) -> None:
@@ -358,6 +386,8 @@ def main() -> None:
             process_image(image_path, args, tiles)
         except Exception as exc:
             print(f"Error converting '{image_path}': {exc}")
+            if args["strict"]:
+                raise
 
 
 if __name__ == "__main__":

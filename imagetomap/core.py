@@ -4,6 +4,7 @@ from copy import deepcopy
 from decimal import ROUND_CEILING as CEILING, ROUND_HALF_EVEN as HALF_EVEN, Decimal
 
 from itertools import groupby
+from math import ceil
 import zlib
 
 from PIL import Image as Img
@@ -105,6 +106,58 @@ def resize_to_map(
     resized_image = image.resize(size=size, resample=resample).convert("RGB")
 
     return resized_image, (map_width, map_height)
+
+
+def fit_map_size_to_budget(
+    pixel_width: int,
+    pixel_height: int,
+    maximum_cells: int = MAX_MAP_CELLS,
+) -> Tuple[int, int]:
+    """Fit an image aspect ratio to the largest practical WorldBox grid."""
+    if pixel_width <= 0 or pixel_height <= 0:
+        raise ValueError("image dimensions must be greater than 0")
+    if maximum_cells < CHUNK_SIZE * CHUNK_SIZE:
+        raise ValueError("maximum cell budget cannot fit one WorldBox block")
+
+    maximum_blocks = maximum_cells // (CHUNK_SIZE * CHUNK_SIZE)
+    target_ratio = pixel_height / pixel_width
+    best_width = 1
+    best_height = 1
+    best_score = 0.0
+    best_area = 0
+    best_error = float("inf")
+
+    for map_width in range(1, maximum_blocks + 1):
+        maximum_height = maximum_blocks // map_width
+        ideal_height = map_width * target_ratio
+        candidates = {
+            1,
+            maximum_height,
+            max(1, min(maximum_height, int(ideal_height))),
+            max(1, min(maximum_height, ceil(ideal_height))),
+            max(1, min(maximum_height, int(round(ideal_height)))),
+        }
+        for map_height in candidates:
+            area = map_width * map_height
+            relative_error = abs(map_height / map_width - target_ratio) / target_ratio
+            score = area / (1.0 + 4.0 * relative_error)
+            if (
+                score > best_score
+                or score == best_score
+                and (
+                    area > best_area
+                    or area == best_area
+                    and relative_error < best_error
+                )
+            ):
+                best_width = map_width
+                best_height = map_height
+                best_score = score
+                best_area = area
+                best_error = relative_error
+
+    validate_map_size(best_width, best_height)
+    return best_width, best_height
 
 
 def validate_map_size(width: int, height: int) -> None:

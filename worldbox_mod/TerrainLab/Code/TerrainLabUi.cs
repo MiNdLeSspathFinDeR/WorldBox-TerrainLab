@@ -596,6 +596,23 @@ namespace TerrainLab
             _toolbarCreationSection = ToolbarSection.Project;
             _toolbarCreationRole = ToolbarButtonRole.Functional;
             _toolbarLayoutGroup++;
+            _toolbarCommandButtons["image_workspace_open"] = CreateToolbarButton(
+                row,
+                "image_workspace_open",
+                "layer_add_raster",
+                "I",
+                OpenImageWorkspaceDirectory,
+                "terrain_lab_action_open_image_workspace",
+                "terrain_lab_action_open_image_workspace_description");
+            _toolbarCommandButtons["image_workspace_watch"] = CreateToolbarButton(
+                row,
+                "image_workspace_watch",
+                "ui/Icons/iconPlay",
+                "W",
+                ToggleImageWorkspaceWatcher,
+                "terrain_lab_action_toggle_image_watcher",
+                "terrain_lab_action_toggle_image_watcher_description");
+            CreateToolbarSeparator(row);
             _toolbarCommandButtons["export"] = CreateToolbarButton(
                 row,
                 "export",
@@ -1429,6 +1446,14 @@ namespace TerrainLab
 
             SetToolbarCommandEnabled("menu", true);
             SetToolbarCommandEnabled("save", hasState);
+            bool imageWorkspaceAvailable =
+                runtime?.ImageWorkspace?.IsAvailable == true;
+            SetToolbarCommandEnabled(
+                "image_workspace_open",
+                imageWorkspaceAvailable);
+            SetToolbarCommandEnabled(
+                "image_workspace_watch",
+                imageWorkspaceAvailable);
             SetToolbarCommandEnabled("export", hasState);
             SetToolbarCommandEnabled("validate", hasState);
             SetToolbarCommandEnabled("export_gis", hasState);
@@ -1458,6 +1483,24 @@ namespace TerrainLab
                 hasState && !analysisRunning &&
                 _editor.HasSurfaceSample && _editor.HasPolygonizedSelection,
                 ActivityGreen);
+            TerrainImageWorkspaceService imageWorkspace =
+                runtime?.ImageWorkspace;
+            if (_toolbarCommandButtons.TryGetValue(
+                    "image_workspace_watch",
+                    out SimpleButton imageWatcherButton))
+            {
+                imageWatcherButton.Icon.sprite = GetIcon(
+                    imageWorkspace?.IsWatching == true
+                        ? "ui/Icons/iconPause"
+                        : "ui/Icons/iconPlay");
+            }
+            SetToolbarActivity(
+                _toolbarCommandButtons["image_workspace_watch"],
+                imageWorkspace?.IsWatching == true ||
+                imageWorkspace?.IsConverting == true,
+                imageWorkspace?.IsConverting == true
+                    ? ActivityAmber
+                    : ActivityGreen);
 
             foreach (KeyValuePair<TerrainEditorTool, SimpleButton> pair in
                      _toolbarEditorButtons)
@@ -1920,6 +1963,130 @@ namespace TerrainLab
                     packageExists ? SuccessText : NeutralText);
             }
 
+            CreateSectionHeading(
+                _moduleContent,
+                "terrain_lab_image_workspace_heading");
+            TerrainImageWorkspaceService imageWorkspace =
+                runtime.ImageWorkspace;
+            if (imageWorkspace == null || !imageWorkspace.IsAvailable)
+            {
+                CreateInfo(
+                    "terrain_lab_image_workspace_unavailable",
+                    ErrorText,
+                    34f);
+            }
+            else
+            {
+                Color workspaceStatusColor =
+                    imageWorkspace.Phase == TerrainImageWorkspacePhase.Error
+                        ? ErrorText
+                        : imageWorkspace.Phase ==
+                          TerrainImageWorkspacePhase.Converting
+                            ? WarningText
+                            : imageWorkspace.IsWatching
+                                ? SuccessText
+                                : NeutralText;
+                CreateInfoText(
+                    string.Format(
+                        LM.Get("terrain_lab_image_workspace_status_format"),
+                        LM.Get(GetImageWorkspacePhaseLocalizationKey(
+                            imageWorkspace.Phase))),
+                    workspaceStatusColor,
+                    28f);
+                CreateInfoText(
+                    string.Format(
+                        LM.Get("terrain_lab_image_workspace_counts_format"),
+                        imageWorkspace.PendingCount,
+                        imageWorkspace.ConvertedCount,
+                        imageWorkspace.FailedCount),
+                    imageWorkspace.FailedCount > 0
+                        ? WarningText
+                        : NeutralText,
+                    30f);
+                CreateInfoText(
+                    string.Format(
+                        LM.Get("terrain_lab_image_workspace_path_format"),
+                        imageWorkspace.WorkspaceDirectory),
+                    NeutralText,
+                    46f);
+
+                if (!string.IsNullOrWhiteSpace(imageWorkspace.ActiveImageName))
+                {
+                    CreateInfoText(
+                        string.Format(
+                            LM.Get(
+                                "terrain_lab_image_workspace_active_format"),
+                            imageWorkspace.ActiveImageName),
+                        WarningText,
+                        28f);
+                }
+
+                if (!string.IsNullOrWhiteSpace(imageWorkspace.BackendName))
+                {
+                    CreateInfoText(
+                        string.Format(
+                            LM.Get(
+                                "terrain_lab_image_workspace_backend_format"),
+                            imageWorkspace.BackendName),
+                        NeutralText,
+                        28f);
+                }
+
+                if (!string.IsNullOrWhiteSpace(imageWorkspace.LastError))
+                {
+                    CreateInfoText(
+                        imageWorkspace.LastError,
+                        ErrorText,
+                        48f);
+                }
+                else if (!string.IsNullOrWhiteSpace(
+                             imageWorkspace.LastMessage))
+                {
+                    CreateInfoText(
+                        imageWorkspace.LastMessage,
+                        NeutralText,
+                        36f);
+                }
+
+                CreateActionButton(
+                    _moduleContent,
+                    LM.Get("terrain_lab_action_open_image_workspace"),
+                    OpenImageWorkspaceDirectory,
+                    194f,
+                    28f,
+                    "layer_add_raster",
+                    "terrain_lab_action_open_image_workspace",
+                    "terrain_lab_action_open_image_workspace_description");
+                bool watcherEnabled = imageWorkspace.IsWatching;
+                string watcherActionKey = watcherEnabled
+                    ? "terrain_lab_action_disable_image_watcher"
+                    : "terrain_lab_action_enable_image_watcher";
+                CreateActionButton(
+                    _moduleContent,
+                    LM.Get(watcherActionKey),
+                    ToggleImageWorkspaceWatcher,
+                    194f,
+                    28f,
+                    watcherEnabled
+                        ? "ui/Icons/iconPause"
+                        : "ui/Icons/iconPlay",
+                    watcherActionKey,
+                    watcherActionKey + "_description");
+                if (imageWorkspace.FailedCount > 0)
+                {
+                    CreateActionButton(
+                        _moduleContent,
+                        LM.Get("terrain_lab_action_retry_images"),
+                        RetryImageWorkspaceFiles,
+                        194f,
+                        28f,
+                        "sync_qgis",
+                        "terrain_lab_action_retry_images",
+                        "terrain_lab_action_retry_images_description");
+                }
+            }
+
+            CreateSectionHeading(_moduleContent, "terrain_lab_exchange_heading");
             CreateActionButton(
                 _moduleContent,
                 LM.Get("terrain_lab_action_open_exchange"),
@@ -1930,7 +2097,6 @@ namespace TerrainLab
                 "terrain_lab_action_open_exchange",
                 "terrain_lab_action_open_exchange_description");
 
-            CreateSectionHeading(_moduleContent, "terrain_lab_exchange_heading");
             IReadOnlyList<string> packages = runtime.GetExchangePackages(3);
             if (packages.Count == 0)
             {
@@ -4811,6 +4977,100 @@ namespace TerrainLab
             }
 
             SetError(error ?? LM.Get("terrain_lab_runtime_unavailable"));
+        }
+
+        private static string GetImageWorkspacePhaseLocalizationKey(
+            TerrainImageWorkspacePhase phase)
+        {
+            switch (phase)
+            {
+                case TerrainImageWorkspacePhase.Watching:
+                    return "terrain_lab_image_workspace_watching";
+                case TerrainImageWorkspacePhase.Converting:
+                    return "terrain_lab_image_workspace_converting";
+                case TerrainImageWorkspacePhase.Error:
+                    return "terrain_lab_image_workspace_error";
+                default:
+                    return "terrain_lab_image_workspace_stopped";
+            }
+        }
+
+        private void OpenImageWorkspaceDirectory()
+        {
+            try
+            {
+                TerrainImageWorkspaceService workspace =
+                    TerrainLabRuntime.Instance?.ImageWorkspace;
+                if (workspace == null || !workspace.IsAvailable)
+                {
+                    throw new InvalidOperationException(
+                        LM.Get("terrain_lab_image_workspace_unavailable"));
+                }
+
+                Directory.CreateDirectory(workspace.WorkspaceDirectory);
+                OpenDirectory(workspace.WorkspaceDirectory);
+                SetStatus(
+                    LM.Get("terrain_lab_status_image_workspace_opened"),
+                    false,
+                    true);
+            }
+            catch (Exception exception)
+            {
+                SetError(exception.Message);
+            }
+        }
+
+        private void ToggleImageWorkspaceWatcher()
+        {
+            TerrainImageWorkspaceService workspace =
+                TerrainLabRuntime.Instance?.ImageWorkspace;
+            if (workspace == null || !workspace.IsAvailable)
+            {
+                SetError(LM.Get("terrain_lab_image_workspace_unavailable"));
+                return;
+            }
+
+            bool enable = !workspace.IsWatching;
+            if (!workspace.TrySetWatching(enable, out string error))
+            {
+                SetError(error ?? LM.Get(
+                    "terrain_lab_image_workspace_unavailable"));
+                return;
+            }
+
+            UpdateToolbarState();
+            RebuildModuleContent();
+            SetStatus(
+                LM.Get(enable
+                    ? "terrain_lab_status_image_watcher_enabled"
+                    : "terrain_lab_status_image_watcher_disabled"),
+                false,
+                true);
+        }
+
+        private void RetryImageWorkspaceFiles()
+        {
+            TerrainImageWorkspaceService workspace =
+                TerrainLabRuntime.Instance?.ImageWorkspace;
+            if (workspace == null || !workspace.IsAvailable)
+            {
+                SetError(LM.Get("terrain_lab_image_workspace_unavailable"));
+                return;
+            }
+
+            if (!workspace.TryRetryFailed(out string error))
+            {
+                SetError(error ?? LM.Get(
+                    "terrain_lab_image_workspace_unavailable"));
+                return;
+            }
+
+            UpdateToolbarState();
+            RebuildModuleContent();
+            SetStatus(
+                LM.Get("terrain_lab_status_image_retry_requested"),
+                false,
+                true);
         }
 
         private void OpenExchangeDirectory()

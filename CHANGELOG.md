@@ -2,6 +2,30 @@
 
 ## Unreleased
 
+## 1.6.0 - 2026-07-17
+
+- Added an in-game image workspace under the WorldBox persistent-data folder.
+  The Project toolbar can open it and toggle a persisted watcher that waits for
+  stable raster files, queues them, and runs only one converter process at a
+  time without PowerShell or temporary compiled assemblies.
+- Image imports use the adaptive terrain classifier, gameplay-safe palette,
+  and a new aspect-preserving `--fit-budget` mode that selects the largest map
+  inside TerrainLab's 1,884,160-cell budget. Extremely elongated source
+  projections remain supported.
+- Every successful source image is published as a new vanilla-compatible
+  `saveN` slot. The converter writes a staging directory first and renames the
+  complete `map.wbox`, metadata, previews, and statistics database into place,
+  so WorldBox never observes a partially written slot.
+- Added Project-window queue, converter, active-file, success, and failure
+  diagnostics plus open, enable/disable, and retry controls. The top watcher
+  button uses play/pause state and the native green/amber activity lamp.
+- Persisted processed and failed file fingerprints prevent duplicate imports
+  across game restarts while allowing a changed file or explicit retry to run
+  again. Converter failures return a nonzero status through the internal
+  `--strict` bridge and do not modify the open world.
+- Added Python sizing/save tests and C# workspace quoting, directory, and state
+  persistence checks.
+
 ## 1.5.1 - 2026-07-17
 
 - Fixed a WorldBox pathfinding-region desynchronization after TerrainLab

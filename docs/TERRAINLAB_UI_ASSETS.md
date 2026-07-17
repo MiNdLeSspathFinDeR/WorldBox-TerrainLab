@@ -20,7 +20,7 @@ against screen edges and can be collapsed independently.
 
 ## Implementation status
 
-Version 1.5.1 implements the standalone side button, an adaptive top GIS
+Version 1.6.0 implements the standalone side button, an adaptive top GIS
 toolbar, and a stock WorldBox internal window. The toolbar copies the bottom
 WorldBox panel and button sprites, stretches to the logical canvas width, and
 balances commands across as few rows as the current UI scale permits. Its frame
@@ -60,6 +60,15 @@ explicit apply. All analysis is cancellable and all raster overlays use
 `256 x 256` chunks. The internal window now contains only project/import
 details, algorithm parameters, the runtime layer catalog, and format/exchange
 settings; it does not duplicate routine map commands.
+
+The Project chapter also opens and controls a persisted image-workspace
+watcher. Its top-row commands open the watched folder and repeat-click to
+enable or disable one-at-a-time conversion; play/pause plus green/amber native
+lamps show idle watching versus active work. The internal Project page reports
+the folder, queue, active file, converter backend, completed count, and
+failures, and exposes an explicit retry action. Stable files are converted with
+the adaptive safe palette into complete new WorldBox save slots without
+changing the open world.
 
 The Analysis chapter also exposes `Live DEM water` with WorldBox's native rain
 icon. It is a repeat-click toggle with a green native activity lamp; the lamp
@@ -121,14 +130,14 @@ are delivered; every toolbar control has a localized tooltip.
 
 ## Runtime button and tooltip audit
 
-The current top toolbar contains 62 controls. Every one is connected to a real
+The current top toolbar contains 64 controls. Every one is connected to a real
 handler; there are no visible placeholder or no-op buttons.
 
 | Surface | Count | Implemented behavior |
 |---|---:|---|
 | Side switch | 1 | Cycles off, toolbar, and toolbar plus settings |
 | Critical and chapter row | 7 | Opens settings, saves, and selects one of five chapters |
-| Project chapter | 6 | WBXGEO export/validation, GeoTIFF export, and three sync commands |
+| Project chapter | 8 | Image-folder open/watcher, WBXGEO export/validation, GeoTIFF export, and three sync commands |
 | Terrain chapter | 8 | Six DEM tools, including a two-point ramp, plus undo and redo |
 | Digitizing chapter | 8 | Six surface tools, apply selection, and cancel |
 | Analysis chapter | 5 | Relief, hydrology, live DEM water, erosion preview, and explicit erosion apply |
@@ -178,27 +187,24 @@ but their current `P` and `B` badges are complete and unambiguous.
 
 These are actual runtime boundaries, not merely missing icons:
 
-1. In-game image loading and workspace watching. The Python converter already
-   provides adaptive terrain classification and direct save output, but it is
-   not invoked from the NML interface.
-2. Optional UMAP embedding. The current adaptive image backend uses deterministic
+1. Optional UMAP embedding. The current adaptive image backend uses deterministic
    feature-space clustering; the UMAP stage described in `GIS_PIPELINE.md` is
    still a design target.
-3. Docked layer tree and properties panels, legends, opacity/blend controls,
+2. Docked layer tree and properties panels, legends, opacity/blend controls,
    layer styling, custom cursors, and selection/attribute-table workflows.
-4. Persistent OGC Simple Features, vector import/export, geometry editing,
+3. Persistent OGC Simple Features, vector import/export, geometry editing,
    buffering, clipping, intersection, and raster-to-vector output.
-5. Real-world CRS assignment, reprojection, GCP georeferencing, raster warping,
+4. Real-world CRS assignment, reprojection, GCP georeferencing, raster warping,
    GeoPackage export, and projection-aware scale/measurement tools.
-6. Advanced DEM algebra and transformations such as raster calculator,
+5. Advanced DEM algebra and transformations such as raster calculator,
    resampling, profile graphs, and multi-raster map algebra. Flatten is already
    the Set tool, sampled elevation is part of the eyedropper, ramp and contours
    are implemented, and sea level intentionally remains the fixed zero datum.
-7. Advanced hydrology: sink breaching, editable outlets, calibrated persistent
+6. Advanced hydrology: sink breaching, editable outlets, calibrated persistent
    lake levels, constrained river vectors, and physical water depth/velocity.
-8. Calibrated process modules with rainfall fields, persistent sediment,
+7. Calibrated process modules with rainfall fields, persistent sediment,
    physical erodibility/roughness units, explicit process stepping, and reset.
-9. A QGIS plugin or live transport. Version 1.0 implements the documented file
+8. A QGIS plugin or live transport. Version 1.0 implements the documented file
    protocol only; vector sync and silent conflict policies are not exposed.
 
 The future controls and their art names remain listed in Batches A-D below.

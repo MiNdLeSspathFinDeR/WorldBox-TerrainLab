@@ -18,7 +18,7 @@ the local game assemblies and copies only TerrainLab source, locales, metadata,
 and resources. It uses normal `dotnet` and file-copy operations; it does not
 compile temporary PowerShell interop assemblies.
 
-## TerrainLab 1.5 workspace
+## TerrainLab 1.6 workspace
 
 The top toolbar keeps routine commands over the map. It stretches with the
 logical canvas, evenly distributes buttons, and wraps into the minimum balanced
@@ -45,6 +45,23 @@ contextual row validates and exports the current WBXGEO sidecar, creates a
 portable package, and exports every ready raster to a timestamped GeoTIFF
 directory. The internal project page imports recent packages into the first free
 WorldBox `saveN` slot.
+
+The same chapter opens and toggles
+`<WorldBox persistent data>/TerrainLab/ImageWorkspace`. When enabled, the
+watcher waits for an image to have the same size and modification time across
+two scans, then invokes the installed `imagetomap` command directly without
+PowerShell. Only one conversion runs at once. The adaptive terrain algorithm
+uses the gameplay-safe palette and fits the source aspect ratio to the largest
+grid inside the 1,884,160-cell budget; elongated projections are not forced to
+a square.
+
+The converter writes a non-`saveN` staging directory and publishes the finished
+map with one directory rename. A game slot therefore appears only after
+`map.wbox`, `map.meta`, both previews, and `map_stats.s3db` are complete. The
+current world is never replaced. Processed and failed file fingerprints persist
+in `.terrainlab-workspace.json`; changing a source queues it again, and the
+Project page can explicitly retry unchanged failures. Its status shows the
+queue, active file, selected Python backend, successes, and errors.
 
 `Prepare` creates a stable project sync workspace. `Pull safe` rejects an
 incoming DEM when the in-game DEM changed after the baseline. `Pull + branch`

@@ -16,6 +16,7 @@ namespace TerrainLab
         private static readonly TerrainWaterDynamicsModule WaterDynamicsModule;
         private static readonly TerrainWaterDynamicsService WaterDynamicsService;
         private static readonly TerrainErosionModule ErosionModule;
+        private static readonly TerrainImageWorkspaceService ImageWorkspaceService;
 
         private static string _pendingLoadDirectory;
 
@@ -33,6 +34,7 @@ namespace TerrainLab
             WaterDynamicsModule = new TerrainWaterDynamicsModule();
             WaterDynamicsService = new TerrainWaterDynamicsService();
             ErosionModule = new TerrainErosionModule();
+            ImageWorkspaceService = new TerrainImageWorkspaceService();
             ModuleRegistry.Register(HydrologyModule);
             ModuleRegistry.Register(WaterDynamicsModule);
             ModuleRegistry.Register(ErosionModule);
@@ -47,6 +49,9 @@ namespace TerrainLab
         public TerrainWaterDynamicsService WaterDynamics => WaterDynamicsService;
 
         public TerrainErosionModule Erosion => ErosionModule;
+
+        public TerrainImageWorkspaceService ImageWorkspace =>
+            ImageWorkspaceService;
 
         public bool HasRunningAnalysis =>
             ReliefService.IsRunning || HydrologyModule.IsRunning || ErosionModule.IsRunning;
@@ -142,6 +147,15 @@ namespace TerrainLab
 
             Instance = this;
             AttachWorldLoadedCallback();
+            if (!ImageWorkspaceService.TryInitialize(
+                    Application.persistentDataPath,
+                    out string workspaceError))
+            {
+                Debug.LogError(
+                    "[TerrainLab] Image workspace unavailable: " +
+                    workspaceError);
+            }
+
             _initialized = true;
         }
 
@@ -154,6 +168,7 @@ namespace TerrainLab
                 changed |= HydrologyModule.Poll(State);
                 changed |= ErosionModule.Poll(State);
                 changed |= WaterDynamicsService.Poll(State, HasRunningAnalysis);
+                changed |= ImageWorkspaceService.Poll();
             }
 
             if (changed)
@@ -696,6 +711,7 @@ namespace TerrainLab
             HydrologyModule.Cancel();
             ErosionModule.Cancel();
             WaterDynamicsService.Reset();
+            ImageWorkspaceService.Dispose();
             if (_worldLoadedField != null && _worldLoadedCallback != null)
             {
                 Action current = (Action)_worldLoadedField.GetValue(null);

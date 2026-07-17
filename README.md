@@ -3,7 +3,7 @@ TerrainLab combines an adaptive image-to-map converter with an extensible GIS
 project layer for WorldBox.
 
 > [!IMPORTANT]
-> TerrainLab 1.5 keeps WorldBox compatibility first: WBXGEO and scientific
+> TerrainLab 1.6 keeps WorldBox compatibility first: WBXGEO and scientific
 > layers are additive, while every normal save retains its vanilla `map.wbox`.
 
 ## Table of contents
@@ -41,6 +41,10 @@ project layer for WorldBox.
 8. QGIS-style workspace: routine project, DEM, analysis, and overlay commands
    live in a compact three-row top toolbar; parameters and diagnostics remain in
    the internal window.
+9. In-game image import: a persisted watched folder queues stable rasters,
+   converts one at a time with the safe adaptive classifier, preserves extreme
+   aspect ratios inside the shared cell budget, and atomically creates complete
+   new WorldBox save slots without changing the open world.
 
 The implemented terrain-analysis stages are described in
 [GIS terrain pipeline](docs/GIS_PIPELINE.md). The
@@ -77,11 +81,15 @@ source mod from a repository checkout with:
 worldbox_mod\install.cmd
 ```
 
-The in-game three-row toolbar saves and validates WBXGEO, edits the Int16 DEM,
-runs relief/hydrology/erosion jobs, switches derived map layers, exports GeoTIFF,
-and operates protected file sync. The coordinate/elevation status strip appears
-only with the Inspector tool. The internal window holds imports, numeric
-parameters, layer diagnostics, and settings. Erosion provides a deterministic,
+The in-game three-row toolbar saves and validates WBXGEO, watches an image
+workspace, edits the Int16 DEM, runs relief/hydrology/erosion jobs, switches
+derived map layers, exports GeoTIFF, and operates protected file sync. The
+coordinate/elevation status strip appears only with the Inspector tool. The
+internal Project page opens the watched folder and reports its queue,
+converter, active file, and failures. Drop a supported raster there after
+enabling the watcher; each stable image becomes a new `saveN` slot while the
+open world remains untouched. The other pages hold numeric parameters, layer
+diagnostics, and settings. Erosion provides a deterministic,
 exact-mass-balance preview that can be applied as one undoable DEM edit. See
 [TerrainLab in WorldBox](docs/WORLDBOX_MOD.md) for paths and lifecycle details.
 
@@ -110,6 +118,10 @@ imagetomap image.png --save-to-game -W 20 -H 20 --algorithm terrain --palette sa
 TerrainLab limits maps to 1,884,160 game cells: the cell count of a 20 by 20
 WorldBox-block map plus 15%. Aspect ratio is unrestricted, so a 40 by 10 map is
 valid while a 22 by 22 map is rejected.
+To select the largest allowed dimensions while retaining the source aspect:
+```sh
+imagetomap image.png --fit-budget --save-to-game
+```
 
 On Windows the tool auto-detects the default WorldBox saves folder:
 `%USERPROFILE%\AppData\LocalLow\mkarpenko\WorldBox\saves`.
@@ -312,9 +324,20 @@ imagetomap image.png --map-name "Imported World"
 
 #### `--save-to-game`
 Save converted maps directly into the WorldBox saves folder as new `saveN` slots.
-The tool writes `map.wbox`, `map.meta`, `preview.png`, `preview_small.png`, and `map_stats.s3db`.
+The tool writes `map.wbox`, `map.meta`, `preview.png`, `preview_small.png`, and
+`map_stats.s3db` into a staging folder, then publishes the complete slot with
+one directory rename.
 ```sh
 imagetomap image.png --save-to-game
+```
+
+#### `--fit-budget`
+When width and height are automatic, choose the largest block dimensions that
+preserve the source aspect ratio within TerrainLab's 1,884,160-cell budget.
+Square images become 21 by 21 blocks; extreme projection aspect ratios remain
+valid.
+```sh
+imagetomap image.png --fit-budget
 ```
 
 #### `--game-saves-dir`

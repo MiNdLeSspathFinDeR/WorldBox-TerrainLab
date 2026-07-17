@@ -51,6 +51,7 @@ internal static class Program
         try
         {
             ValidateMapBudget();
+            ValidateImageWorkspaceProtocol(testRoot);
             ValidateGamePatchTargets();
             ValidateDigitizingRaster();
             ValidateEarthElevationModel();
@@ -625,6 +626,55 @@ internal static class Program
         Assert(
             !TerrainMapLimits.TryValidate(22 * block, 22 * block, out _),
             "An over-budget square map was accepted.");
+    }
+
+    private static void ValidateImageWorkspaceProtocol(string testRoot)
+    {
+        Assert(
+            TerrainImageWorkspaceService.QuoteArgument("image.png") ==
+                "image.png",
+            "Image workspace changed a shell-safe argument.");
+        Assert(
+            TerrainImageWorkspaceService.QuoteArgument(
+                @"C:\Map Files\image.png") ==
+                "\"C:\\Map Files\\image.png\"",
+            "Image workspace did not quote a path containing spaces.");
+        Assert(
+            TerrainImageWorkspaceService.QuoteArgument("alpha\"beta") ==
+                "\"alpha\\\"beta\"",
+            "Image workspace did not escape an embedded quote.");
+        Assert(
+            TerrainImageWorkspaceService.QuoteArgument("alpha beta\\") ==
+                "\"alpha beta\\\\\"",
+            "Image workspace did not escape a trailing slash in quotes.");
+
+        string persistentPath = Path.Combine(
+            testRoot,
+            "workspace-persistent");
+        using (TerrainImageWorkspaceService service =
+               new TerrainImageWorkspaceService())
+        {
+            service.Initialize(persistentPath);
+            Assert(
+                Directory.Exists(service.WorkspaceDirectory) &&
+                Directory.Exists(service.SavesDirectory),
+                "Image workspace directories were not created.");
+            Assert(
+                service.TrySetWatching(true, out string startError),
+                "Image workspace watcher could not start: " + startError);
+        }
+
+        using (TerrainImageWorkspaceService restored =
+               new TerrainImageWorkspaceService())
+        {
+            restored.Initialize(persistentPath);
+            Assert(
+                restored.IsWatching,
+                "Image workspace watcher state was not restored.");
+            Assert(
+                restored.TrySetWatching(false, out string stopError),
+                "Image workspace watcher could not stop: " + stopError);
+        }
     }
 
     private static void ValidateMaximumGridStress()

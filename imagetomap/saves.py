@@ -4,8 +4,10 @@ import json
 import os
 from pathlib import Path
 import re
+import shutil
 import sqlite3
 import time
+import uuid
 
 from PIL import Image as Img
 
@@ -221,3 +223,31 @@ def write_map_folder(
             json.dumps(meta, separators=(",", ":")).encode("utf-8")
         )
         create_stats_db(output_path / "map_stats.s3db", stats_template)
+
+
+def write_game_save_atomically(
+    output_path: Path,
+    converted_map: Map,
+    name: str,
+    stats_template: Optional[Path] = None,
+) -> None:
+    """Publish a complete WorldBox save directory in one filesystem rename."""
+    output_path.parent.mkdir(exist_ok=True, parents=True)
+    if output_path.exists():
+        raise FileExistsError(f"save slot already exists: {output_path}")
+
+    temporary_path = output_path.parent / (
+        f"terrainlab-staging-{output_path.name}-{uuid.uuid4().hex}.tmp"
+    )
+    try:
+        write_map_folder(
+            output_path=temporary_path,
+            converted_map=converted_map,
+            name=name,
+            include_game_files=True,
+            stats_template=stats_template,
+        )
+        temporary_path.rename(output_path)
+    finally:
+        if temporary_path.exists():
+            shutil.rmtree(temporary_path)

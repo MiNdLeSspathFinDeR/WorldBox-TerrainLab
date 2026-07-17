@@ -1,8 +1,8 @@
 {
   "name": "TerrainLab",
   "author": "Vlad",
-  "version": "1.5.1",
-  "description": "GIS relief, river valleys, hydrology, erosion, GeoTIFF exchange, and vanilla fallback.",
+  "version": "1.6.0",
+  "description": "Image import, GIS relief, river valleys, hydrology, erosion, GeoTIFF exchange, and vanilla fallback.",
   "iconPath": "icon.png",
   "GUID": "Vlad.TerrainLab",
   "Dependencies": [],

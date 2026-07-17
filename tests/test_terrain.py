@@ -1,5 +1,6 @@
 import json
 import re
+import tempfile
 import unittest
 import zlib
 from pathlib import Path
@@ -7,7 +8,7 @@ from pathlib import Path
 import numpy as np
 from PIL import Image, ImageDraw
 
-from imagetomap import convert, validate_map_size
+from imagetomap import convert, fit_map_size_to_budget, validate_map_size
 from imagetomap.consts import (
     ELEVATION_MAXIMUM,
     ELEVATION_MINIMUM,
@@ -15,6 +16,7 @@ from imagetomap.consts import (
     SAFE_TILES_TUPLE,
     UNPLAYABLE_TILES,
 )
+from imagetomap.saves import write_game_save_atomically
 from imagetomap.terrain import fill_small_land_regions
 from imagetomap.utils import json_loads
 
@@ -151,6 +153,12 @@ class TerrainConversionTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "TerrainLab limit"):
             validate_map_size(22, 22)
 
+    def test_budget_fit_preserves_common_and_extreme_aspects(self) -> None:
+        self.assertEqual(fit_map_size_to_budget(1000, 1000), (21, 21))
+        self.assertEqual(fit_map_size_to_budget(1600, 900), (28, 16))
+        self.assertEqual(fit_map_size_to_budget(4000, 100), (120, 3))
+        self.assertEqual(fit_map_size_to_budget(100, 4000), (3, 120))
+
     def test_safe_palette_excludes_gameplay_hazards(self) -> None:
         self.assertFalse(set(SAFE_TILES_TUPLE) & set(UNPLAYABLE_TILES))
 
@@ -160,6 +168,42 @@ class TerrainConversionTests(unittest.TestCase):
 
         self.assertEqual((converted.width, converted.height), (2, 2))
         self.assertEqual(converted.preview.size, (128, 128))
+
+    def test_game_save_is_published_as_a_complete_directory(self) -> None:
+        source = Image.new("RGB", (64, 64), (70, 130, 80))
+        converted = convert(source, width=1, height=1)
+        try:
+            test_temp_root = ROOT / "tests" / "_tmp"
+            test_temp_root.mkdir(exist_ok=True)
+            with tempfile.TemporaryDirectory(
+                dir=test_temp_root,
+            ) as temporary_directory:
+                destination = Path(temporary_directory) / "save1"
+                write_game_save_atomically(
+                    output_path=destination,
+                    converted_map=converted,
+                    name="Atomic map",
+                )
+
+                self.assertEqual(
+                    {path.name for path in destination.iterdir()},
+                    {
+                        "map.meta",
+                        "map.wbox",
+                        "map_stats.s3db",
+                        "preview.png",
+                        "preview_small.png",
+                    },
+                )
+                self.assertFalse(
+                    any(
+                        path.name.startswith("terrainlab-staging-save1-")
+                        for path in destination.parent.iterdir()
+                    ),
+                )
+        finally:
+            converted.preview.close()
+            source.close()
 
     def test_small_land_regions_are_removed(self) -> None:
         water = np.ones((12, 12), dtype=bool)
