@@ -3,7 +3,7 @@ TerrainLab combines an adaptive image-to-map converter with an extensible GIS
 project layer for WorldBox.
 
 > [!IMPORTANT]
-> TerrainLab 1.4 keeps WorldBox compatibility first: WBXGEO and scientific
+> TerrainLab 1.5 keeps WorldBox compatibility first: WBXGEO and scientific
 > layers are additive, while every normal save retains its vanilla `map.wbox`.
 
 ## Table of contents

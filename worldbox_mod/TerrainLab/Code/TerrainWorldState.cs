@@ -1117,6 +1117,7 @@ namespace TerrainLab
             TileType mainType,
             TopTileType topType)
         {
+            TileTypeBase previousType = tile.Type;
             tile.data.frozen = stamp.Frozen;
             if (tile.hasBuilding())
             {
@@ -1137,6 +1138,7 @@ namespace TerrainLab
                 tile.removeBurn();
             }
 
+            MapAction.checkTileState(tile, previousType);
             World.world.setTileDirty(tile);
             return cityPlacementChanged;
         }

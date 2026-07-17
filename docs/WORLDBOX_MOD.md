@@ -18,7 +18,7 @@ the local game assemblies and copies only TerrainLab source, locales, metadata,
 and resources. It uses normal `dotnet` and file-copy operations; it does not
 compile temporary PowerShell interop assemblies.
 
-## TerrainLab 1.4 workspace
+## TerrainLab 1.5 workspace
 
 The top toolbar keeps routine commands over the map. It stretches with the
 logical canvas, evenly distributes buttons, and wraps into the minimum balanced

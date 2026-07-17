@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+## 1.5.1 - 2026-07-17
+
+- Fixed a WorldBox pathfinding-region desynchronization after TerrainLab
+  changed a surface between ground and water. Every direct surface edit now
+  passes its previous tile layer to the native `MapAction.checkTileState`
+  invalidation path, which rebuilds affected chunk regions, island links, and
+  path caches instead of leaving actors on a stale `MapRegion` graph.
+
 ## 1.5.0 - 2026-07-17
 
 - Added runtime-only UInt16 source ownership for managed water. When two

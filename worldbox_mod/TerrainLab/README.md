@@ -1,6 +1,6 @@
 # TerrainLab WorldBox mod
 
-TerrainLab 1.4 is an NML source mod that adds an in-game GIS workspace without
+TerrainLab 1.5 is an NML source mod that adds an in-game GIS workspace without
 replacing WorldBox's normal save format. Its standalone transparent side icon
 opens an adaptive map toolbar styled from WorldBox's bottom panel and a stock
 internal window. Routine map commands stay in the toolbar, while project/import

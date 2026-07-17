@@ -121,6 +121,24 @@ class TerrainConversionTests(unittest.TestCase):
         self.assertIn("_geyserBuildings[geyserIndex] = geyser;", service_source)
         self.assertIn("GeyserRemovalGraceSeconds", service_source)
 
+    def test_surface_edits_invalidate_worldbox_path_regions(self) -> None:
+        world_state_source = (
+            ROOT
+            / "worldbox_mod"
+            / "TerrainLab"
+            / "Code"
+            / "TerrainWorldState.cs"
+        ).read_text(encoding="utf-8")
+
+        self.assertIn(
+            "TileTypeBase previousType = tile.Type;",
+            world_state_source,
+        )
+        self.assertIn(
+            "MapAction.checkTileState(tile, previousType);",
+            world_state_source,
+        )
+
     def test_elevation_nodata_is_reserved(self) -> None:
         self.assertEqual(ELEVATION_NODATA, 9999)
         self.assertEqual((ELEVATION_MINIMUM, ELEVATION_MAXIMUM), (-20000, 9000))
