@@ -86,9 +86,12 @@ workspace, edits the Int16 DEM, runs relief/hydrology/erosion jobs, switches
 derived map layers, exports GeoTIFF, and operates protected file sync. The
 coordinate/elevation status strip appears only with the Inspector tool. The
 internal Project page opens the watched folder and reports its queue,
-converter, active file, and failures. Drop a supported raster there after
-enabling the watcher; each stable image becomes a new `saveN` slot while the
-open world remains untouched. The other pages hold numeric parameters, layer
+converter, active file, and failures. The in-game watcher accepts `PNG`,
+`JPG/JPEG/JFIF`, `TIFF/TIF`, `WebP`, `BMP`, `GIF`, `TGA`, `DDS`, and `JP2`;
+it does not accept SVG, PDF, PSD, or archives. Drop one of those rasters there
+after enabling the watcher; each stable image becomes a new `saveN` slot while
+the open world remains untouched. Save opens a name form before writing the
+ordinary map and WBXGEO sidecar. The other pages hold numeric parameters, layer
 diagnostics, and settings. Erosion provides a deterministic,
 exact-mass-balance preview that can be applied as one undoable DEM edit. See
 [TerrainLab in WorldBox](docs/WORLDBOX_MOD.md) for paths and lifecycle details.

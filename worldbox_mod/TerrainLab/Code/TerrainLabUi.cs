@@ -139,6 +139,7 @@ namespace TerrainLab
         private Text _reliefProgressText;
         private Text _hydrologyProgressText;
         private Text _erosionProgressText;
+        private TextInput _saveNameInput;
         private GameObject _topToolbar;
         private RectTransform _toolbarContent;
         private Image _toolbarBackground;
@@ -152,6 +153,7 @@ namespace TerrainLab
         private GameObject _mapStatusBar;
         private Text _mapStatusText;
         private string _lastMapStatus = string.Empty;
+        private string _saveNameDraft;
         private string _selectedModule = "project";
         private string _selectedLayer = "elevation";
         private int _hydrologyThreshold;
@@ -181,6 +183,7 @@ namespace TerrainLab
         private bool _usesGameIndicatorSprites;
         private bool _advanceWorkspaceAfterWindowClose;
         private bool _suppressWindowHideAdvance;
+        private bool _savePromptVisible;
         private PendingOverlayKind _pendingOverlayKind;
         private TerrainReliefOverlayMode _pendingReliefOverlay;
         private TerrainHydrologyOverlayMode _pendingHydrologyOverlay;
@@ -1493,14 +1496,31 @@ namespace TerrainLab
                     imageWorkspace?.IsWatching == true
                         ? "ui/Icons/iconPause"
                         : "ui/Icons/iconPlay");
+                if (imageWorkspaceAvailable)
+                {
+                    imageWatcherButton.Background.color =
+                        imageWorkspace?.Phase ==
+                        TerrainImageWorkspacePhase.Error
+                            ? ErrorText
+                            : imageWorkspace?.IsConverting == true
+                                ? WarningText
+                                : imageWorkspace?.IsWatching == true
+                                    ? SuccessText
+                                    : Color.white;
+                }
             }
             SetToolbarActivity(
                 _toolbarCommandButtons["image_workspace_watch"],
                 imageWorkspace?.IsWatching == true ||
-                imageWorkspace?.IsConverting == true,
-                imageWorkspace?.IsConverting == true
-                    ? ActivityAmber
-                    : ActivityGreen);
+                imageWorkspace?.IsConverting == true ||
+                imageWorkspace?.Phase ==
+                TerrainImageWorkspacePhase.Error,
+                imageWorkspace?.Phase ==
+                TerrainImageWorkspacePhase.Error
+                    ? ErrorText
+                    : imageWorkspace?.IsConverting == true
+                        ? ActivityAmber
+                        : ActivityGreen);
 
             foreach (KeyValuePair<TerrainEditorTool, SimpleButton> pair in
                      _toolbarEditorButtons)
@@ -1818,6 +1838,8 @@ namespace TerrainLab
 
         private void SelectModule(string moduleId)
         {
+            _savePromptVisible = false;
+            _saveNameDraft = null;
             _selectedModule = moduleId;
             UpdateModuleSelection();
             RebuildModuleContent();
@@ -1846,6 +1868,7 @@ namespace TerrainLab
             _reliefProgressText = null;
             _hydrologyProgressText = null;
             _erosionProgressText = null;
+            _saveNameInput = null;
             _lastReliefProgress = -1;
             _lastHydrologyProgress = -1;
             _lastErosionProgress = -1;
@@ -1903,7 +1926,6 @@ namespace TerrainLab
 
         private void BuildProjectView()
         {
-            CreateSectionHeading(_moduleContent, "terrain_lab_project_heading");
             TerrainLabRuntime runtime = TerrainLabRuntime.Instance;
             if (runtime == null)
             {
@@ -1911,6 +1933,13 @@ namespace TerrainLab
                 return;
             }
 
+            if (_savePromptVisible)
+            {
+                BuildSaveProjectView(runtime);
+                return;
+            }
+
+            CreateSectionHeading(_moduleContent, "terrain_lab_project_heading");
             TerrainWorldState state = runtime.State;
             int width = state?.Width ?? MapBox.width;
             int height = state?.Height ?? MapBox.height;
@@ -2009,6 +2038,13 @@ namespace TerrainLab
                         imageWorkspace.WorkspaceDirectory),
                     NeutralText,
                     46f);
+                CreateInfoText(
+                    string.Format(
+                        LM.Get(
+                            "terrain_lab_image_workspace_formats_format"),
+                        TerrainImageWorkspaceService.SupportedFormatsDisplay),
+                    NeutralText,
+                    42f);
 
                 if (!string.IsNullOrWhiteSpace(imageWorkspace.ActiveImageName))
                 {
@@ -2119,6 +2155,95 @@ namespace TerrainLab
                     "terrain_lab_action_import",
                     "terrain_lab_action_import_description");
             }
+        }
+
+        private void BuildSaveProjectView(TerrainLabRuntime runtime)
+        {
+            CreateSectionHeading(
+                _moduleContent,
+                "terrain_lab_save_dialog_heading");
+            CreateInfo(
+                runtime.CurrentWorldDirectory == null
+                    ? "terrain_lab_save_dialog_new_slot"
+                    : "terrain_lab_save_dialog_existing_slot",
+                NeutralText,
+                42f);
+            CreateLocalizedLabel(
+                _moduleContent,
+                "terrain_lab_save_name_label",
+                11f,
+                FontStyle.Normal,
+                24f,
+                TextAnchor.MiddleLeft,
+                NeutralText);
+
+            _saveNameInput = TextInput.Instantiate(
+                _moduleContent,
+                false);
+            string initialName = string.IsNullOrWhiteSpace(_saveNameDraft)
+                ? runtime.CurrentWorldName
+                : _saveNameDraft;
+            _saveNameInput.Setup(initialName, delegate(string value)
+            {
+                _saveNameDraft = value;
+            });
+            _saveNameInput.input.onValueChanged.RemoveAllListeners();
+            _saveNameInput.input.onValueChanged.AddListener(
+                delegate(string value)
+                {
+                    _saveNameDraft = value;
+                });
+            _saveNameInput.SetSize(new Vector2(194f, 28f));
+            _saveNameInput.input.contentType =
+                InputField.ContentType.Standard;
+            _saveNameInput.input.characterLimit =
+                TerrainLabRuntime.MaximumWorldNameLength;
+            _saveNameInput.text.resizeTextMinSize = 7;
+            _saveNameInput.text.resizeTextMaxSize = 11;
+            ConfigureParameterTooltip(
+                _saveNameInput.gameObject,
+                "terrain_lab_save_name");
+            if (!ReferenceEquals(
+                    _saveNameInput.input.gameObject,
+                    _saveNameInput.gameObject))
+            {
+                ConfigureParameterTooltip(
+                    _saveNameInput.input.gameObject,
+                    "terrain_lab_save_name");
+            }
+
+            LayoutElement inputElement =
+                _saveNameInput.GetComponent<LayoutElement>();
+            if (inputElement == null)
+            {
+                inputElement =
+                    _saveNameInput.gameObject.AddComponent<LayoutElement>();
+            }
+
+            inputElement.preferredWidth = 194f;
+            inputElement.preferredHeight = 28f;
+
+            Transform actions = CreateActionRow(
+                _moduleContent,
+                "TerrainLabSaveProjectActions");
+            CreateActionButton(
+                actions,
+                LM.Get("terrain_lab_save_dialog_confirm"),
+                ConfirmSaveProject,
+                94f,
+                28f,
+                "project_save",
+                "terrain_lab_save_dialog_confirm",
+                "terrain_lab_save_dialog_confirm_description");
+            CreateActionButton(
+                actions,
+                LM.Get("terrain_lab_save_dialog_cancel"),
+                CancelSaveProject,
+                94f,
+                28f,
+                "visibility_off",
+                "terrain_lab_save_dialog_cancel",
+                "terrain_lab_save_dialog_cancel_description");
         }
 
         private void BuildParametersView()
@@ -4816,10 +4941,76 @@ namespace TerrainLab
         private void SaveProject()
         {
             TerrainLabRuntime runtime = TerrainLabRuntime.Instance;
-            string error = null;
-            if (runtime != null &&
-                runtime.TrySaveCurrentProject(out string packagePath, out error))
+            if (runtime == null)
             {
+                SetError(LM.Get("terrain_lab_runtime_unavailable"));
+                return;
+            }
+
+            if (runtime.State == null)
+            {
+                SetError(LM.Get("terrain_lab_no_project_state"));
+                return;
+            }
+
+            _savePromptVisible = true;
+            _saveNameDraft = runtime.CurrentWorldName;
+            _selectedModule = "project";
+            UpdateModuleSelection();
+            SetWorkspaceVisible(true);
+            RebuildModuleContent();
+            if (_window != null && !_window.gameObject.activeInHierarchy)
+            {
+                _window.clickShow();
+            }
+
+            SetStatus(
+                LM.Get("terrain_lab_status_save_dialog_opened"),
+                false);
+        }
+
+        private void ConfirmSaveProject()
+        {
+            TerrainLabRuntime runtime = TerrainLabRuntime.Instance;
+            if (runtime == null || _saveNameInput == null)
+            {
+                SetError(LM.Get("terrain_lab_runtime_unavailable"));
+                return;
+            }
+
+            string worldName = _saveNameInput.input.text;
+            _saveNameDraft = worldName;
+            string error = null;
+            if (runtime.CurrentWorldDirectory == null)
+            {
+                if (!runtime.TrySetCurrentWorldName(
+                        worldName,
+                        out _,
+                        out error))
+                {
+                    SetError(error);
+                    return;
+                }
+
+                _savePromptVisible = false;
+                _saveNameDraft = null;
+                RebuildModuleContent();
+                SetStatus(
+                    LM.Get("terrain_lab_status_choose_save_slot"),
+                    false,
+                    true);
+                _suppressWindowHideAdvance = true;
+                ScrollWindow.showWindow("save_world_confirm");
+                return;
+            }
+
+            if (runtime.TrySaveCurrentProject(
+                    worldName,
+                    out string packagePath,
+                    out error))
+            {
+                _savePromptVisible = false;
+                _saveNameDraft = null;
                 RebuildModuleContent();
                 SetStatus(
                     string.Format(
@@ -4831,6 +5022,14 @@ namespace TerrainLab
             }
 
             SetError(error ?? LM.Get("terrain_lab_runtime_unavailable"));
+        }
+
+        private void CancelSaveProject()
+        {
+            _savePromptVisible = false;
+            _saveNameDraft = null;
+            RebuildModuleContent();
+            SetStatus(LM.Get("terrain_lab_status_ready"), false);
         }
 
         private void ExportProject()
@@ -5400,6 +5599,11 @@ namespace TerrainLab
             }
 
             SetToolbarStatus(message, color);
+            if ((isError || isSuccess) &&
+                !string.IsNullOrWhiteSpace(message))
+            {
+                WorldTip.showNow(message, false, "top");
+            }
         }
 
         private void SetToolbarStatus(string message, Color color)

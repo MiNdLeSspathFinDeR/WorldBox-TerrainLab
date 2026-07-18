@@ -10,6 +10,8 @@ namespace TerrainLab
 {
     public sealed class TerrainLabRuntime : MonoBehaviour
     {
+        public const int MaximumWorldNameLength = 80;
+
         private static readonly TerrainModuleRegistry ModuleRegistry;
         private static readonly TerrainReliefService ReliefService;
         private static readonly TerrainHydrologyModule HydrologyModule;
@@ -17,6 +19,8 @@ namespace TerrainLab
         private static readonly TerrainWaterDynamicsService WaterDynamicsService;
         private static readonly TerrainErosionModule ErosionModule;
         private static readonly TerrainImageWorkspaceService ImageWorkspaceService;
+        private static readonly FieldInfo MapStatsField =
+            AccessTools.Field(typeof(MapBox), "map_stats");
 
         private static string _pendingLoadDirectory;
 
@@ -86,6 +90,15 @@ namespace TerrainLab
             {
                 string directory = CurrentWorldDirectory;
                 return directory == null ? null : WbxGeoPackage.GetSidecarPath(directory);
+            }
+        }
+
+        public string CurrentWorldName
+        {
+            get
+            {
+                string name = GetCurrentMapStats()?.name;
+                return string.IsNullOrWhiteSpace(name) ? "WorldBox" : name;
             }
         }
 
@@ -269,8 +282,18 @@ namespace TerrainLab
 
         public bool TrySaveCurrentProject(out string packagePath, out string error)
         {
+            return TrySaveCurrentProject(null, out packagePath, out error);
+        }
+
+        public bool TrySaveCurrentProject(
+            string worldName,
+            out string packagePath,
+            out string error)
+        {
             packagePath = null;
             error = null;
+            string previousWorldName = null;
+            bool restoreWorldNameOnFailure = false;
 
             try
             {
@@ -286,12 +309,27 @@ namespace TerrainLab
                     throw new InvalidOperationException(limitError);
                 }
 
+                if (worldName != null)
+                {
+                    previousWorldName = CurrentWorldName;
+                    if (!TrySetCurrentWorldName(
+                            worldName,
+                            out _,
+                            out string nameError))
+                    {
+                        throw new InvalidOperationException(nameError);
+                    }
+
+                    restoreWorldNameOnFailure = true;
+                }
+
                 SavedMap savedMap = SaveManager.saveWorldToDirectory(directory);
                 if (savedMap == null)
                 {
                     throw new InvalidOperationException("WorldBox did not return saved map data.");
                 }
 
+                restoreWorldNameOnFailure = false;
                 packagePath = WbxGeoPackage.GetSidecarPath(directory);
                 if (!File.Exists(packagePath))
                 {
@@ -302,10 +340,83 @@ namespace TerrainLab
             }
             catch (Exception exception)
             {
+                MapStats mapStats = GetCurrentMapStats();
+                if (restoreWorldNameOnFailure && mapStats != null)
+                {
+                    mapStats.name = previousWorldName;
+                }
+
                 packagePath = null;
                 error = exception.Message;
                 return false;
             }
+        }
+
+        public bool TrySetCurrentWorldName(
+            string worldName,
+            out string normalizedName,
+            out string error)
+        {
+            if (!TryNormalizeWorldName(
+                    worldName,
+                    out normalizedName,
+                    out error))
+            {
+                return false;
+            }
+
+            MapStats mapStats = GetCurrentMapStats();
+            if (mapStats == null)
+            {
+                error = "The current WorldBox world is unavailable.";
+                return false;
+            }
+
+            mapStats.name = normalizedName;
+            return true;
+        }
+
+        private static MapStats GetCurrentMapStats()
+        {
+            return World.world == null || MapStatsField == null
+                ? null
+                : MapStatsField.GetValue(World.world) as MapStats;
+        }
+
+        public static bool TryNormalizeWorldName(
+            string worldName,
+            out string normalizedName,
+            out string error)
+        {
+            normalizedName = worldName?.Trim();
+            error = null;
+            if (string.IsNullOrWhiteSpace(normalizedName))
+            {
+                error = "World name cannot be empty.";
+                return false;
+            }
+
+            if (normalizedName.Length > MaximumWorldNameLength)
+            {
+                error = "World name cannot exceed " +
+                        MaximumWorldNameLength + " characters.";
+                return false;
+            }
+
+            for (int index = 0; index < normalizedName.Length; index++)
+            {
+                char character = normalizedName[index];
+                if (char.IsControl(character) ||
+                    character == '<' ||
+                    character == '>')
+                {
+                    error =
+                        "World name contains an unsupported character.";
+                    return false;
+                }
+            }
+
+            return true;
         }
 
         public bool TryExportCurrentProject(out string exportPath, out string error)

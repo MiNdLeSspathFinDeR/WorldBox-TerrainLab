@@ -631,6 +631,30 @@ internal static class Program
     private static void ValidateImageWorkspaceProtocol(string testRoot)
     {
         Assert(
+            TerrainImageWorkspaceService.IsSupportedImageExtension(".tif") &&
+            TerrainImageWorkspaceService.IsSupportedImageExtension("TIFF") &&
+            TerrainImageWorkspaceService.IsSupportedImageExtension(".png") &&
+            !TerrainImageWorkspaceService.IsSupportedImageExtension(".svg") &&
+            !TerrainImageWorkspaceService.IsSupportedImageExtension(".exe"),
+            "Image workspace accepted-format contract is invalid.");
+        Assert(
+            TerrainImageWorkspaceService.SupportedFormatsDisplay.Contains(
+                "TIFF/TIF"),
+            "Image workspace format display omits TIFF.");
+        Assert(
+            TerrainLabRuntime.TryNormalizeWorldName(
+                "  Terrain Test  ",
+                out string normalizedWorldName,
+                out _) &&
+            normalizedWorldName == "Terrain Test",
+            "World-name normalization failed.");
+        Assert(
+            !TerrainLabRuntime.TryNormalizeWorldName(
+                "Invalid<Name",
+                out _,
+                out _),
+            "World-name validation accepted an unsupported character.");
+        Assert(
             TerrainImageWorkspaceService.QuoteArgument("image.png") ==
                 "image.png",
             "Image workspace changed a shell-safe argument.");

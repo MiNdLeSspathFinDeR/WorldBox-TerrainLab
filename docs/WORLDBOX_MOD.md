@@ -53,7 +53,9 @@ two scans, then invokes the installed `imagetomap` command directly without
 PowerShell. Only one conversion runs at once. The adaptive terrain algorithm
 uses the gameplay-safe palette and fits the source aspect ratio to the largest
 grid inside the 1,884,160-cell budget; elongated projections are not forced to
-a square.
+a square. The watched-folder contract is exactly `PNG`, `JPG/JPEG/JFIF`,
+`TIFF/TIF`, `WebP`, `BMP`, `GIF`, `TGA`, `DDS`, and `JP2`. SVG, PDF, PSD,
+archives, and every unlisted extension are ignored.
 
 The converter writes a non-`saveN` staging directory and publishes the finished
 map with one directory rename. A game slot therefore appears only after
@@ -62,6 +64,11 @@ current world is never replaced. Processed and failed file fingerprints persist
 in `.terrainlab-workspace.json`; changing a source queues it again, and the
 Project page can explicitly retry unchanged failures. Its status shows the
 queue, active file, selected Python backend, successes, and errors.
+
+Save opens a TerrainLab name form instead of writing silently. Existing worlds
+are renamed and saved to their current slot after confirmation. For a new world,
+TerrainLab applies the name and then opens WorldBox's native slot picker; the
+save patch writes the WBXGEO sidecar alongside the normal map.
 
 `Prepare` creates a stable project sync workspace. `Pull safe` rejects an
 incoming DEM when the in-game DEM changed after the baseline. `Pull + branch`

@@ -59,7 +59,12 @@ under `Code` when the game starts.
 - a persisted in-game image workspace watcher that calls the Python converter
   directly without PowerShell, processes one stable raster at a time with the
   safe adaptive palette, fits its aspect ratio inside the shared map budget,
-  and atomically publishes a complete new vanilla `saveN` slot;
+  and atomically publishes a complete new vanilla `saveN` slot. Its explicit
+  input contract is `PNG`, `JPG/JPEG/JFIF`, `TIFF/TIF`, `WebP`, `BMP`, `GIF`,
+  `TGA`, `DDS`, and `JP2`;
+- an in-game save form that edits the WorldBox map name before saving the
+  ordinary map and WBXGEO sidecar, or hands a new world to the native slot
+  picker;
 - a total map budget of 1,884,160 cells with unrestricted aspect ratio;
 - one background scientific job at a time and `256 x 256` overlay chunks;
 - derivative buttons that automatically calculate missing relief, hydrology,

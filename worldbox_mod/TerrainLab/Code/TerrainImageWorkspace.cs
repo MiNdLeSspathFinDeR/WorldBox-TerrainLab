@@ -71,6 +71,9 @@ namespace TerrainLab
                 },
                 StringComparer.OrdinalIgnoreCase);
 
+        public const string SupportedFormatsDisplay =
+            "PNG, JPG/JPEG/JFIF, TIFF/TIF, WebP, BMP, GIF, TGA, DDS, JP2";
+
         private readonly Dictionary<string, TerrainImageFingerprint> _processed =
             new Dictionary<string, TerrainImageFingerprint>(
                 StringComparer.OrdinalIgnoreCase);
@@ -145,6 +148,19 @@ namespace TerrainLab
                     ? TerrainImageWorkspacePhase.Watching
                     : TerrainImageWorkspacePhase.Stopped;
             }
+        }
+
+        public static bool IsSupportedImageExtension(string extension)
+        {
+            if (string.IsNullOrWhiteSpace(extension))
+            {
+                return false;
+            }
+
+            string normalized = extension[0] == '.'
+                ? extension
+                : "." + extension;
+            return ImageExtensions.Contains(normalized);
         }
 
         public void Initialize(string persistentDataPath)
@@ -864,7 +880,7 @@ namespace TerrainLab
 
         private static bool IsSupportedImage(string path)
         {
-            return ImageExtensions.Contains(Path.GetExtension(path)) &&
+            return IsSupportedImageExtension(Path.GetExtension(path)) &&
                    !string.Equals(
                        Path.GetFileName(path),
                        "preview.png",

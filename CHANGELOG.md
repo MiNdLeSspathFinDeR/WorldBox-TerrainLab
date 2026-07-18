@@ -2,6 +2,17 @@
 
 ## Unreleased
 
+## 1.6.1 - 2026-07-18
+
+- Added an explicit in-game watched-folder format contract: PNG,
+  JPG/JPEG/JFIF, TIFF/TIF, WebP, BMP, GIF, TGA, DDS, and JP2.
+- Save now opens a world-name form before writing the current WorldBox map and
+  WBXGEO sidecar. New worlds continue through WorldBox's native slot picker.
+- Added native success/error notifications and a full-button watcher state
+  color so toolbar commands no longer appear to do nothing.
+- Added a Russian and English fallback for NML's `mod_configure_title`
+  localization key.
+
 ## 1.6.0 - 2026-07-17
 
 - Added an in-game image workspace under the WorldBox persistent-data folder.
