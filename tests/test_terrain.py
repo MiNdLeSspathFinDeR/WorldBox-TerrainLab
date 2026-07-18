@@ -134,6 +134,14 @@ class TerrainConversionTests(unittest.TestCase):
         )
         self.assertIn("SetEditorControlsEnabled(false);", overlay_source)
         self.assertNotIn("CycleImage(", overlay_source)
+        self.assertIn(
+            "private static void StyleDropdownPopup(",
+            overlay_source,
+        )
+        self.assertIn(
+            "new UnityColor(0.01f, 0.01f, 0.01f, 1f)",
+            overlay_source,
+        )
 
         confirm_start = overlay_source.index(
             "private void ConfirmImageSelection()"

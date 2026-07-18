@@ -2056,11 +2056,77 @@ namespace TerrainLab
                 "ui/special/darkInputFieldEmpty");
             image.type = Image.Type.Sliced;
             image.color = new UnityColor(0.08f, 0.08f, 0.07f, 1f);
+            StyleDropdownPopup(dropdownObject);
             LayoutElement element =
                 dropdownObject.AddComponent<LayoutElement>();
             element.preferredHeight = 28f;
             ConfigureTooltip(dropdownObject, tooltipKey);
             return dropdown;
+        }
+
+        private static void StyleDropdownPopup(GameObject dropdownObject)
+        {
+            Transform template = dropdownObject.transform.Find("Template");
+            if (template == null)
+            {
+                return;
+            }
+
+            Image templateBackground = template.GetComponent<Image>();
+            if (templateBackground != null)
+            {
+                Sprite darkSprite = SpriteTextureLoader.getSprite(
+                    "ui/special/darkInputFieldEmpty");
+                if (darkSprite != null)
+                {
+                    templateBackground.sprite = darkSprite;
+                    templateBackground.type = Image.Type.Sliced;
+                }
+                templateBackground.color =
+                    new UnityColor(0.01f, 0.01f, 0.01f, 1f);
+            }
+
+            Toggle item = template.GetComponentInChildren<Toggle>(true);
+            if (item != null)
+            {
+                ColorBlock colors = item.colors;
+                colors.normalColor =
+                    new UnityColor(0.015f, 0.015f, 0.015f, 1f);
+                colors.highlightedColor =
+                    new UnityColor(0.16f, 0.17f, 0.14f, 1f);
+                colors.selectedColor =
+                    new UnityColor(0.16f, 0.17f, 0.14f, 1f);
+                colors.pressedColor =
+                    new UnityColor(0.27f, 0.20f, 0.10f, 1f);
+                colors.disabledColor =
+                    new UnityColor(0.01f, 0.01f, 0.01f, 0.72f);
+                colors.colorMultiplier = 1f;
+                colors.fadeDuration = 0.04f;
+                item.colors = colors;
+                if (item.targetGraphic != null)
+                {
+                    item.targetGraphic.color = colors.normalColor;
+                }
+            }
+
+            Scrollbar scrollbar =
+                template.GetComponentInChildren<Scrollbar>(true);
+            if (scrollbar == null)
+            {
+                return;
+            }
+
+            Image scrollbarBackground = scrollbar.GetComponent<Image>();
+            if (scrollbarBackground != null)
+            {
+                scrollbarBackground.color =
+                    new UnityColor(0.035f, 0.035f, 0.03f, 1f);
+            }
+            if (scrollbar.targetGraphic != null)
+            {
+                scrollbar.targetGraphic.color =
+                    new UnityColor(0.30f, 0.31f, 0.27f, 1f);
+            }
         }
 
         private InputField CreateInputField(

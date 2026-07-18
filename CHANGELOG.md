@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+## 1.8.2 - 2026-07-18
+
+- Replaced Unity's white dropdown popup defaults with an opaque black template,
+  near-black item rows, dark selection states, and a restrained scrollbar for
+  the image, surface-morphotype, and biotope selectors.
+
 ## 1.8.1 - 2026-07-18
 
 - Replaced implicit newest-image loading with an in-game workspace file
