@@ -759,6 +759,17 @@ internal static class Program
             "upland",
             "savanna",
             900);
+        profile.AddLine(
+            new[]
+            {
+                new TerrainImageClassificationVertex(30, 150),
+                new TerrainImageClassificationVertex(150, 90),
+                new TerrainImageClassificationVertex(290, 40)
+            },
+            "river_lake",
+            "none",
+            240,
+            3);
         profile.SetMapBoundary(
             new[]
             {
@@ -767,6 +778,10 @@ internal static class Program
                 new TerrainImageClassificationVertex(300, 165),
                 new TerrainImageClassificationVertex(20, 165)
             });
+        profile.SetOutsideMapArea(
+            "sand",
+            "none",
+            4);
         profile.Save(imagePath);
 
         TerrainImageClassificationProfile restored =
@@ -783,10 +798,15 @@ internal static class Program
             restored.Regions[0].Vertices.Count == 4 &&
             restored.Regions[0].Surface == "upland" &&
             restored.Regions[0].Elevation == 900 &&
+            restored.Lines.Count == 1 &&
+            restored.Lines[0].Vertices.Count == 3 &&
+            restored.Lines[0].Surface == "river_lake" &&
+            restored.Lines[0].WidthCells == 3 &&
             restored.MapBoundary != null &&
             restored.MapBoundary.Vertices.Count == 4 &&
-            restored.MapBoundary.OutsideSurface == "deep_ocean" &&
-            restored.MapBoundary.OutsideElevation == -4000 &&
+            restored.MapBoundary.OutsideSurface == "sand" &&
+            restored.MapBoundary.OutsideBiotope == "none" &&
+            restored.MapBoundary.OutsideElevation == 4 &&
             restored.IsInsideMapBoundary(80, 80) &&
             !restored.IsInsideMapBoundary(5, 5) &&
             restored.HasUsableTraining &&

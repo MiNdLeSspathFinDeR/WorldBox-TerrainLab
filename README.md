@@ -94,19 +94,25 @@ the open world remains untouched. The Project chapter's image-folder command
 only opens `ImageWorkspace` in the operating-system file browser; selecting a
 file there does not select it in WorldBox. The separate classification command
 opens a compact previous/next file selector. Choose the source raster and press
-**Open selected** before editing controls unlock. Point mode then labels
-individual pixels; Polygon mode digitizes QGIS-style training areas with a
-live outline and right-click or double-click completion. Every annotation
-receives an independent surface morphotype, biotope, and `-20000..9000 m`
-elevation.
+**Open selected** before editing controls unlock. Choose Point, Line, or
+Polygon and digitize its geometry first. A point completes on click; a line or
+polygon completes by right-click, double-click, or **Finish geometry**.
+Morphotype, biotope, elevation, and line width remain disabled until geometry
+is complete. **Publish object** is the only operation that writes the feature:
+the saved object stays visible while all choices reset for the next one.
+Completed polygon drafts update their pixel-art morphotype fill immediately,
+and every point or vector vertex uses the Turbo DEM colour for its selected
+`-20000..9000 m` elevation.
 Boundary mode digitizes one independent area-of-interest polygon. Pixels
-outside it are removed from adaptive clustering and manual learning, then
-written as `deep_ocean` at `-4000 m`; this keeps scan margins, legends, labels,
-and other surrounding noise out of the playable map. Points, polygons, and the
-optional boundary persist beside the source in
+outside it are removed from adaptive clustering and manual learning. A
+separate outside-extent block chooses their safe morphotype, biotope, and
+elevation; `deep_ocean` at `-4000 m` remains the default. This keeps scan
+margins, legends, labels, and other surrounding noise out of the playable map.
+Points, lines, polygons, and the optional boundary persist beside the source in
 `<image>.terrainlab-classification.json`; Build map reruns the adaptive
 colour/texture/spatial classifier. Polygon interiors are authoritative and
 provide bounded distributed training pixels without bloating the profile.
+Lines are authoritative at their selected `1..32`-cell output width.
 Each raster has its own sidecar, and the current profile is saved before the
 file selector switches to another raster. Delete one removes the training
 polygon clicked on the canvas; Delete all immediately removes every training

@@ -1,5 +1,6 @@
 from .core import convert, fit_map_size_to_budget, quantize, validate_map_size
 from .calibration import (
+    ClassificationLine,
     ClassificationProfile,
     ClassificationRegion,
     ClassificationSample,
@@ -8,6 +9,7 @@ from .calibration import (
 
 __all__ = (
     "ClassificationProfile",
+    "ClassificationLine",
     "ClassificationRegion",
     "ClassificationSample",
     "convert",
@@ -16,4 +18,4 @@ __all__ = (
     "quantize",
     "validate_map_size",
 )
-__version__ = "13.11.0"
+__version__ = "13.12.0"

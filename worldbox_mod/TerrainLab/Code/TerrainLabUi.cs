@@ -527,6 +527,7 @@ namespace TerrainLab
             railRect.pivot = new Vector2(anchorX, 0.5f);
             railRect.anchoredPosition = Vector2.zero;
             railRect.sizeDelta = new Vector2(574f, 0f);
+            railRect.localScale = new Vector3(1f, -1f, 1f);
 
             Image rail = railObject.GetComponent<Image>();
             rail.sprite = _toolbarBackground.sprite;

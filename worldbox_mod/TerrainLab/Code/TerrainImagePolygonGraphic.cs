@@ -15,18 +15,29 @@ namespace TerrainLab
         private bool _closed;
         private bool _showVertices;
         private float _inverseZoom = 1f;
+        private float _lineThickness = 2.2f;
         private Color _fillColor = new Color(1f, 1f, 1f, 0.18f);
         private Color _lineColor = Color.white;
+        private Color _vertexColor = Color.white;
+        private Texture2D _surfacePattern;
+
+        public override Texture mainTexture =>
+            _surfacePattern == null
+                ? Texture2D.whiteTexture
+                : _surfacePattern;
 
         public void Configure(
             IEnumerable<TerrainImageClassificationVertex> vertices,
             int sourceWidth,
             int sourceHeight,
+            string surface,
             Color surfaceColor,
+            Color vertexColor,
             bool closed,
             bool showVertices,
             float inverseZoom,
-            float closedFillAlpha = 0.22f)
+            float closedFillAlpha = 0.22f,
+            float lineThickness = 2.2f)
         {
             _vertices.Clear();
             if (vertices != null)
@@ -45,18 +56,27 @@ namespace TerrainLab
             _closed = closed;
             _showVertices = showVertices;
             _inverseZoom = Mathf.Max(0.01f, inverseZoom);
+            _lineThickness = Mathf.Max(1f, lineThickness);
+            _surfacePattern =
+                TerrainImageMorphotypePatterns.Get(surface, surfaceColor);
             _fillColor = new Color(
-                surfaceColor.r,
-                surfaceColor.g,
-                surfaceColor.b,
+                _surfacePattern == null ? surfaceColor.r : 1f,
+                _surfacePattern == null ? surfaceColor.g : 1f,
+                _surfacePattern == null ? surfaceColor.b : 1f,
                 closed ? Mathf.Clamp01(closedFillAlpha) : 0.08f);
             _lineColor = new Color(
                 surfaceColor.r,
                 surfaceColor.g,
                 surfaceColor.b,
                 0.98f);
+            _vertexColor = new Color(
+                vertexColor.r,
+                vertexColor.g,
+                vertexColor.b,
+                1f);
             raycastTarget = false;
             SetVerticesDirty();
+            SetMaterialDirty();
         }
 
         public void SetInverseZoom(float inverseZoom)
@@ -92,13 +112,13 @@ namespace TerrainLab
 
             if (_closed && points.Count >= 3)
             {
-                AddFill(helper, points);
+                AddFill(helper, points, rect);
             }
 
             int segmentCount = _closed
                 ? points.Count
                 : Math.Max(0, points.Count - 1);
-            float thickness = 2.2f * _inverseZoom;
+            float thickness = _lineThickness * _inverseZoom;
             for (int index = 0; index < segmentCount; index++)
             {
                 AddLine(
@@ -114,22 +134,26 @@ namespace TerrainLab
                 float radius = 3.6f * _inverseZoom;
                 foreach (Vector2 point in points)
                 {
-                    AddDiamond(helper, point, radius, _lineColor);
+                    AddDiamond(helper, point, radius, _vertexColor);
                 }
             }
         }
 
-        private void AddFill(VertexHelper helper, IReadOnlyList<Vector2> points)
+        private void AddFill(
+            VertexHelper helper,
+            IReadOnlyList<Vector2> points,
+            Rect rect)
         {
             List<int> triangles = Triangulate(points);
             for (int index = 0; index + 2 < triangles.Count; index += 3)
             {
-                AddTriangle(
+                AddTexturedTriangle(
                     helper,
                     points[triangles[index]],
                     points[triangles[index + 1]],
                     points[triangles[index + 2]],
-                    _fillColor);
+                    _fillColor,
+                    rect);
             }
         }
 
@@ -243,18 +267,27 @@ namespace TerrainLab
                    (second.y - first.y) * (third.x - first.x);
         }
 
-        private static void AddTriangle(
+        private static void AddTexturedTriangle(
             VertexHelper helper,
             Vector2 first,
             Vector2 second,
             Vector2 third,
-            Color color)
+            Color color,
+            Rect rect)
         {
             int offset = helper.currentVertCount;
-            helper.AddVert(first, color, Vector2.zero);
-            helper.AddVert(second, color, Vector2.zero);
-            helper.AddVert(third, color, Vector2.zero);
+            helper.AddVert(first, color, PatternUv(first, rect));
+            helper.AddVert(second, color, PatternUv(second, rect));
+            helper.AddVert(third, color, PatternUv(third, rect));
             helper.AddTriangle(offset, offset + 1, offset + 2);
+        }
+
+        private static Vector2 PatternUv(Vector2 point, Rect rect)
+        {
+            const float patternSize = 18f;
+            return new Vector2(
+                (point.x - rect.xMin) / patternSize,
+                (point.y - rect.yMin) / patternSize);
         }
 
         private static void AddLine(
@@ -310,6 +343,120 @@ namespace TerrainLab
             helper.AddVert(fourth, color, Vector2.zero);
             helper.AddTriangle(offset, offset + 1, offset + 2);
             helper.AddTriangle(offset, offset + 2, offset + 3);
+        }
+    }
+
+    internal static class TerrainImageMorphotypePatterns
+    {
+        private const int PatternSize = 16;
+        private static readonly Dictionary<string, Texture2D> Patterns =
+            new Dictionary<string, Texture2D>(StringComparer.Ordinal);
+
+        public static Texture2D Get(string surface, Color baseColor)
+        {
+            if (string.IsNullOrWhiteSpace(surface) ||
+                surface == "map_boundary" ||
+                surface == "draft")
+            {
+                return null;
+            }
+            if (Patterns.TryGetValue(surface, out Texture2D pattern) &&
+                pattern != null)
+            {
+                return pattern;
+            }
+
+            pattern = Create(surface, baseColor);
+            Patterns[surface] = pattern;
+            return pattern;
+        }
+
+        private static Texture2D Create(string surface, Color baseColor)
+        {
+            Texture2D texture = new Texture2D(
+                PatternSize,
+                PatternSize,
+                TextureFormat.RGBA32,
+                false)
+            {
+                name = "TerrainLabMorphotypePattern_" + surface,
+                filterMode = FilterMode.Point,
+                wrapMode = TextureWrapMode.Repeat,
+                hideFlags = HideFlags.HideAndDontSave
+            };
+            Color32 normal = Shade(baseColor, 0.92f);
+            Color32 light = Shade(baseColor, 1.22f);
+            Color32 dark = Shade(baseColor, 0.58f);
+            Color32[] pixels = new Color32[PatternSize * PatternSize];
+            for (int y = 0; y < PatternSize; y++)
+            {
+                for (int x = 0; x < PatternSize; x++)
+                {
+                    bool first;
+                    bool second;
+                    switch (surface)
+                    {
+                        case "deep_ocean":
+                        case "shelf":
+                        case "shallow_water":
+                        case "river_lake":
+                            first = y % 5 == 1 && (x + y) % 4 != 0;
+                            second = y % 5 == 2 && (x + y) % 4 == 0;
+                            break;
+                        case "sand":
+                            first = (x * 7 + y * 11) % 19 == 0;
+                            second = (x * 5 + y * 3) % 23 == 0;
+                            break;
+                        case "plain":
+                        case "lowland":
+                            first = y % 7 == 5 && x % 6 == 2;
+                            second = y % 7 == 4 && x % 6 == 2;
+                            break;
+                        case "upland":
+                        case "hills":
+                            first = (x + y) % 8 == 0;
+                            second = (x - y + 32) % 11 == 0;
+                            break;
+                        case "rocks":
+                        case "summit":
+                            first = (x / 3 + y / 3) % 3 == 0;
+                            second = (x + y * 2) % 7 == 0;
+                            break;
+                        case "depression":
+                            int dx = x - 8;
+                            int dy = y - 8;
+                            int radius = dx * dx + dy * dy;
+                            first = radius >= 24 && radius <= 38;
+                            second = radius <= 5;
+                            break;
+                        default:
+                            first = (x + y) % 6 == 0;
+                            second = false;
+                            break;
+                    }
+                    pixels[y * PatternSize + x] =
+                        second ? dark : first ? light : normal;
+                }
+            }
+
+            // Solid UI geometry samples UV 0,0. Keep that texel white so
+            // contours and DEM vertices are not multiplied by the pattern.
+            pixels[0] = new Color32(255, 255, 255, 255);
+            texture.SetPixels32(pixels);
+            texture.Apply(false, true);
+            return texture;
+        }
+
+        private static Color32 Shade(Color color, float multiplier)
+        {
+            return new Color32(
+                (byte)Mathf.RoundToInt(
+                    Mathf.Clamp01(color.r * multiplier) * 255f),
+                (byte)Mathf.RoundToInt(
+                    Mathf.Clamp01(color.g * multiplier) * 255f),
+                (byte)Mathf.RoundToInt(
+                    Mathf.Clamp01(color.b * multiplier) * 255f),
+                255);
         }
     }
 }

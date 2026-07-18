@@ -2,6 +2,25 @@
 
 ## Unreleased
 
+## 1.11.0 - 2026-07-18
+
+- Rebuilt manual classification around an explicit draft/publish workflow.
+  Point, line, and polygon geometry is digitized first; attributes are enabled
+  only after geometry completion. Publishing keeps the saved object visible
+  while resetting geometry, morphotype, biotope, elevation, and line width.
+- Added first-class line training geometry with a 1..32 output-cell width.
+  Lines contribute colour and texture samples and authoritatively assign
+  surface, biotope, and signed Int16 DEM values along their rasterized path.
+- Added a separate outside-extent class. Pixels beyond the map boundary remain
+  excluded from training but can now become any safe morphotype/biotope at a
+  user-selected elevation instead of being hard-coded to deep ocean.
+- Added live pixel-art morphotype fills for polygon drafts and saved polygons.
+  Point samples and every line/polygon vertex use the shared turbo DEM palette,
+  so elevation and surface class remain legible at the same time.
+- Reorganized the classifier panel into compact geometry, attribute, extent,
+  and annotation blocks. The toolbar side rails are now vertically mirrored
+  so their decorative border faces away from the canvas.
+
 ## 1.10.0 - 2026-07-18
 
 - Added an explicit Delete one mode for manual classification. A left-click

@@ -28,8 +28,10 @@ GENERATED_PROFILE_FILE_NAME = "terrainlab-classification.json"
 MAXIMUM_PROFILE_BYTES = 4 * 1024 * 1024
 MAXIMUM_SAMPLES = 512
 MAXIMUM_REGIONS = 128
+MAXIMUM_LINES = 128
 MAXIMUM_REGION_VERTICES = 256
 MAXIMUM_TOTAL_REGION_VERTICES = 8192
+MAXIMUM_LINE_WIDTH_CELLS = 32
 MAXIMUM_EFFECTIVE_SAMPLES = 512
 MAXIMUM_REGION_TRAINING_SAMPLES = 32
 
@@ -102,6 +104,15 @@ class ClassificationRegion:
 
 
 @dataclass(frozen=True)
+class ClassificationLine:
+    vertices: Tuple[Tuple[int, int], ...]
+    surface: str
+    biotope: str
+    elevation: int
+    width_cells: int = 1
+
+
+@dataclass(frozen=True)
 class ClassificationProfile:
     source_file_name: str
     source_width: int
@@ -116,8 +127,10 @@ class ClassificationProfile:
     elevation_smoothing: int = 1
     interpolate_elevation_globally: bool = True
     regions: Tuple[ClassificationRegion, ...] = ()
+    lines: Tuple[ClassificationLine, ...] = ()
     map_boundary: Tuple[Tuple[int, int], ...] = ()
     outside_surface: str = "deep_ocean"
+    outside_biotope: str = "none"
     outside_elevation: int = -4000
 
     def to_json_dict(self) -> Dict[str, Any]:
@@ -162,6 +175,19 @@ class ClassificationProfile:
                 }
                 for region in self.regions
             ],
+            "lines": [
+                {
+                    "vertices": [
+                        {"x": vertex[0], "y": vertex[1]}
+                        for vertex in line.vertices
+                    ],
+                    "surface": line.surface,
+                    "biotope": line.biotope,
+                    "elevation": line.elevation,
+                    "width_cells": line.width_cells,
+                }
+                for line in self.lines
+            ],
         }
         if self.map_boundary:
             payload["map_boundary"] = {
@@ -170,6 +196,7 @@ class ClassificationProfile:
                     for vertex in self.map_boundary
                 ],
                 "outside_surface": self.outside_surface,
+                "outside_biotope": self.outside_biotope,
                 "outside_elevation": self.outside_elevation,
             }
         return payload
@@ -341,8 +368,100 @@ def load_classification_profile(
             )
         )
 
+    raw_lines = payload.get("lines", [])
+    if not isinstance(raw_lines, list):
+        raise ValueError("classification profile lines must be a JSON array")
+    if len(raw_lines) > MAXIMUM_LINES:
+        raise ValueError(
+            f"classification profile has more than {MAXIMUM_LINES} lines"
+        )
+
+    lines = []
+    for index, raw_line in enumerate(raw_lines):
+        line_data = _mapping(raw_line, f"lines[{index}]")
+        raw_vertices = line_data.get("vertices")
+        if not isinstance(raw_vertices, list):
+            raise ValueError(f"lines[{index}].vertices must be a JSON array")
+        if len(raw_vertices) > MAXIMUM_REGION_VERTICES:
+            raise ValueError(
+                f"lines[{index}] has more than "
+                f"{MAXIMUM_REGION_VERTICES} vertices"
+            )
+
+        vertices = []
+        for vertex_index, raw_vertex in enumerate(raw_vertices):
+            vertex_data = _mapping(
+                raw_vertex,
+                f"lines[{index}].vertices[{vertex_index}]",
+            )
+            vertices.append(
+                (
+                    _integer(
+                        vertex_data.get("x"),
+                        f"lines[{index}].vertices[{vertex_index}].x",
+                        0,
+                        source_width - 1,
+                    ),
+                    _integer(
+                        vertex_data.get("y"),
+                        f"lines[{index}].vertices[{vertex_index}].y",
+                        0,
+                        source_height - 1,
+                    ),
+                )
+            )
+        _validate_line(vertices, f"lines[{index}]")
+        total_vertices += len(vertices)
+        if total_vertices > MAXIMUM_TOTAL_REGION_VERTICES:
+            raise ValueError(
+                "classification profile has more than "
+                f"{MAXIMUM_TOTAL_REGION_VERTICES} vector vertices"
+            )
+
+        surface = str(line_data.get("surface") or "").strip().lower()
+        biotope = str(line_data.get("biotope") or "auto").strip().lower()
+        elevation = _integer(
+            line_data.get("elevation"),
+            f"lines[{index}].elevation",
+            ELEVATION_MINIMUM,
+            ELEVATION_NODATA,
+        )
+        if elevation == ELEVATION_NODATA:
+            raise ValueError("9999 is reserved for DEM NODATA")
+        if elevation > ELEVATION_MAXIMUM:
+            raise ValueError(
+                f"lines[{index}].elevation must be between "
+                f"{ELEVATION_MINIMUM} and {ELEVATION_MAXIMUM}"
+            )
+        if surface not in SURFACE_IDS:
+            raise ValueError(
+                f"lines[{index}].surface must be one of "
+                f"{', '.join(SURFACE_IDS)}"
+            )
+        if biotope not in BIOTOPE_IDS:
+            raise ValueError(
+                f"lines[{index}].biotope must be one of "
+                f"{', '.join(BIOTOPE_IDS)}"
+            )
+        width_cells = _integer(
+            line_data.get("width_cells", 1),
+            f"lines[{index}].width_cells",
+            1,
+            MAXIMUM_LINE_WIDTH_CELLS,
+        )
+        lines.append(
+            ClassificationLine(
+                vertices=tuple(vertices),
+                surface=surface,
+                biotope=biotope,
+                elevation=elevation,
+                width_cells=width_cells,
+            )
+        )
+
     map_boundary = ()
     outside_surface = "deep_ocean"
+    outside_biotope = "none"
     outside_elevation = -4000
     raw_boundary = payload.get("map_boundary")
     if raw_boundary is not None:
@@ -391,20 +510,36 @@ def load_classification_profile(
         outside_surface = str(
             boundary_data.get("outside_surface") or "deep_ocean"
         ).strip().lower()
-        if outside_surface != "deep_ocean":
+        if outside_surface not in SURFACE_IDS:
             raise ValueError(
-                "map_boundary.outside_surface must be deep_ocean"
+                "map_boundary.outside_surface must be one of "
+                f"{', '.join(SURFACE_IDS)}"
+            )
+        outside_biotope = str(
+            boundary_data.get("outside_biotope") or "none"
+        ).strip().lower()
+        if outside_biotope not in BIOTOPE_IDS:
+            raise ValueError(
+                "map_boundary.outside_biotope must be one of "
+                f"{', '.join(BIOTOPE_IDS)}"
             )
         outside_elevation = _integer(
             boundary_data.get("outside_elevation", -4000),
             "map_boundary.outside_elevation",
             ELEVATION_MINIMUM,
-            -151,
+            ELEVATION_NODATA,
         )
+        if outside_elevation == ELEVATION_NODATA:
+            raise ValueError("9999 is reserved for DEM NODATA")
+        if outside_elevation > ELEVATION_MAXIMUM:
+            raise ValueError(
+                "map_boundary.outside_elevation must be between "
+                f"{ELEVATION_MINIMUM} and {ELEVATION_MAXIMUM}"
+            )
 
-    if not samples and not regions:
+    if not samples and not regions and not lines:
         raise ValueError(
-            "classification profile must contain at least one sample or region"
+            "classification profile must contain a sample, line, or region"
         )
 
     settings = payload.get("settings")
@@ -435,6 +570,7 @@ def load_classification_profile(
         source_height=source_height,
         samples=tuple(samples),
         regions=tuple(regions),
+        lines=tuple(lines),
         color_weight=weights[0],
         texture_weight=weights[1],
         spatial_weight=weights[2],
@@ -467,6 +603,7 @@ def load_classification_profile(
         ),
         map_boundary=map_boundary,
         outside_surface=outside_surface,
+        outside_biotope=outside_biotope,
         outside_elevation=outside_elevation,
     )
 
@@ -478,7 +615,7 @@ def apply_manual_classification(
     profile: ClassificationProfile,
     boundary_mask: Optional[np.ndarray] = None,
 ) -> Tuple[Image, np.ndarray]:
-    """Apply ROI-bounded point and polygon labels with adaptive propagation."""
+    """Apply ROI-bounded point, line, and polygon labels."""
     if image.size != automatic_tiles.size:
         raise ValueError("manual classifier inputs must have matching dimensions")
     if (profile.source_width, profile.source_height) == (0, 0):
@@ -497,11 +634,6 @@ def apply_manual_classification(
             )
         if not np.any(active_mask):
             raise ValueError("classification map boundary is empty")
-    if profile.map_boundary and profile.outside_surface not in tile_names:
-        raise ValueError(
-            "classification map boundary requires deep_ocean in the tile palette"
-        )
-
     rgb = np.asarray(image.convert("RGB"), dtype=np.float32) / 255.0
     if profile.map_boundary:
         interior = rgb[active_mask]
@@ -520,6 +652,8 @@ def apply_manual_classification(
 
     region_labels = _rasterize_regions(profile, width, height)
     region_labels[~active_mask] = -1
+    line_labels = _rasterize_lines(profile, width, height)
+    line_labels[~active_mask] = -1
     _sample_positions, sample_indices = _sample_target_positions(
         profile,
         width,
@@ -536,6 +670,7 @@ def apply_manual_classification(
     effective_samples = _make_effective_samples(
         profile,
         region_labels,
+        line_labels,
         width,
         height,
         active_samples,
@@ -639,6 +774,25 @@ def apply_manual_classification(
         flat_result[region_mask] = tile_lookup[flat_automatic[region_mask]]
         assigned_surface[region_mask] = SURFACE_IDS.index(region.surface)
 
+    for line_index, line in enumerate(profile.lines):
+        line_mask = line_labels.reshape(-1) == line_index
+        if not np.any(line_mask):
+            continue
+        tile_lookup = np.asarray(
+            [
+                _resolve_tile_index(
+                    line.surface,
+                    line.biotope,
+                    automatic_index,
+                    tile_names,
+                )
+                for automatic_index in range(len(tile_names))
+            ],
+            dtype=np.uint8,
+        )
+        flat_result[line_mask] = tile_lookup[flat_automatic[line_mask]]
+        assigned_surface[line_mask] = SURFACE_IDS.index(line.surface)
+
     # The exact sampled cell and its immediate neighbors are authoritative.
     point_positions, point_indices = _sample_target_positions(
         profile,
@@ -668,7 +822,19 @@ def apply_manual_classification(
 
     if profile.map_boundary:
         outside = ~flat_active
-        flat_result[outside] = tile_names.index(profile.outside_surface)
+        outside_lookup = np.asarray(
+            [
+                _resolve_tile_index(
+                    profile.outside_surface,
+                    profile.outside_biotope,
+                    automatic_index,
+                    tile_names,
+                )
+                for automatic_index in range(len(tile_names))
+            ],
+            dtype=np.uint8,
+        )
+        flat_result[outside] = outside_lookup[flat_automatic[outside]]
         assigned_surface[outside] = SURFACE_IDS.index(
             profile.outside_surface
         )
@@ -681,6 +847,7 @@ def apply_manual_classification(
         effective_samples,
         assigned_surface.reshape((height, width)),
         region_labels,
+        line_labels,
         active_samples,
         active_mask,
     )
@@ -927,9 +1094,49 @@ def _rasterize_regions(
         labels_image.close()
 
 
+def _rasterize_lines(
+    profile: ClassificationProfile,
+    width: int,
+    height: int,
+) -> np.ndarray:
+    labels_image = Img.new("I", (width, height), -1)
+    try:
+        drawing = ImageDraw.Draw(labels_image)
+        for line_index, line in enumerate(profile.lines):
+            vertices = []
+            for source_x, source_y in line.vertices:
+                target_x = int(
+                    round(
+                        ((source_x + 0.5) / profile.source_width) * width
+                        - 0.5
+                    )
+                )
+                target_y = int(
+                    round(
+                        ((source_y + 0.5) / profile.source_height) * height
+                        - 0.5
+                    )
+                )
+                vertices.append(
+                    (
+                        min(width - 1, max(0, target_x)),
+                        min(height - 1, max(0, target_y)),
+                    )
+                )
+            drawing.line(
+                vertices,
+                fill=line_index,
+                width=max(1, line.width_cells),
+            )
+        return np.asarray(labels_image, dtype=np.int32).copy()
+    finally:
+        labels_image.close()
+
+
 def _make_effective_samples(
     profile: ClassificationProfile,
     region_labels: np.ndarray,
+    line_labels: np.ndarray,
     width: int,
     height: int,
     point_samples: Optional[Sequence[ClassificationSample]] = None,
@@ -938,7 +1145,9 @@ def _make_effective_samples(
         profile.samples if point_samples is None else point_samples
     )
     remaining = max(0, MAXIMUM_EFFECTIVE_SAMPLES - len(samples))
-    if remaining == 0 or not profile.regions:
+    if remaining == 0 or (
+        not profile.regions and not profile.lines
+    ):
         return tuple(samples)
 
     occupied = {(sample.x, sample.y) for sample in samples}
@@ -995,6 +1204,63 @@ def _make_effective_samples(
                     surface=region.surface,
                     biotope=region.biotope,
                     elevation=region.elevation,
+                )
+            )
+        candidate_groups.append(candidates)
+
+    for line_index, line in enumerate(profile.lines):
+        line_indices = np.flatnonzero(
+            line_labels.reshape(-1) == line_index
+        )
+        if line_indices.size == 0:
+            candidate_groups.append([])
+            continue
+
+        desired = min(
+            MAXIMUM_REGION_TRAINING_SAMPLES,
+            int(line_indices.size),
+            max(2, int(math.ceil(math.sqrt(line_indices.size) / 8.0))),
+        )
+        offsets = np.linspace(
+            0,
+            line_indices.size - 1,
+            num=desired,
+            dtype=np.int64,
+        )
+        candidates = []
+        for target_index in line_indices[offsets]:
+            target_y, target_x = divmod(int(target_index), width)
+            source_x = min(
+                profile.source_width - 1,
+                max(
+                    0,
+                    int(
+                        ((target_x + 0.5) / width)
+                        * profile.source_width
+                    ),
+                ),
+            )
+            source_y = min(
+                profile.source_height - 1,
+                max(
+                    0,
+                    int(
+                        ((target_y + 0.5) / height)
+                        * profile.source_height
+                    ),
+                ),
+            )
+            coordinate = (source_x, source_y)
+            if coordinate in occupied:
+                continue
+            occupied.add(coordinate)
+            candidates.append(
+                ClassificationSample(
+                    x=source_x,
+                    y=source_y,
+                    surface=line.surface,
+                    biotope=line.biotope,
+                    elevation=line.elevation,
                 )
             )
         candidate_groups.append(candidates)
@@ -1068,6 +1334,7 @@ def _interpolate_elevation(
     effective_samples: Sequence[ClassificationSample],
     assigned_surface: np.ndarray,
     region_labels: np.ndarray,
+    line_labels: np.ndarray,
     active_samples: Sequence[ClassificationSample],
     active_mask: np.ndarray,
 ) -> np.ndarray:
@@ -1153,6 +1420,11 @@ def _interpolate_elevation(
         if np.any(mask):
             full[mask] = region.elevation
 
+    for line_index, line in enumerate(profile.lines):
+        mask = line_labels == line_index
+        if np.any(mask):
+            full[mask] = line.elevation
+
     sample_positions_full, sample_indices = _sample_target_positions(
         profile,
         width,
@@ -1219,6 +1491,23 @@ def _validate_polygon(
                 raise ValueError(f"{name} is self-intersecting")
     if _polygon_area_twice(vertices) == 0:
         raise ValueError(f"{name} has zero area")
+
+
+def _validate_line(
+    vertices: Sequence[Tuple[int, int]],
+    name: str,
+) -> None:
+    if len(vertices) < 2:
+        raise ValueError(f"{name} must contain at least two vertices")
+    if len(vertices) > MAXIMUM_REGION_VERTICES:
+        raise ValueError(
+            f"{name} has more than {MAXIMUM_REGION_VERTICES} vertices"
+        )
+    for first, second in zip(vertices, vertices[1:]):
+        if first == second:
+            raise ValueError(
+                f"{name} contains consecutive duplicate vertices"
+            )
 
 
 def _polygon_area_twice(vertices: Sequence[Tuple[int, int]]) -> int:

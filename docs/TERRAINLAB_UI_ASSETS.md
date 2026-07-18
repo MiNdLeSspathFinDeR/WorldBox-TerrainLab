@@ -20,13 +20,14 @@ against screen edges and can be collapsed independently.
 
 ## Implementation status
 
-Version 1.10.0 implements the standalone side button, an adaptive top GIS
+Version 1.11.0 implements the standalone side button, an adaptive top GIS
 toolbar, and a stock WorldBox internal window. The toolbar copies the bottom
 WorldBox panel and button sprites, stretches to the logical canvas width, and
 balances commands across as few rows as the current UI scale permits. Its frame
 is vertically flipped for top docking, reaches both canvas edges, and follows
-the actual row count without a redundant status caption. Unflipped, clipped
-copies of the stock frame restore the side ornament up to the top canvas edge.
+the actual row count without a redundant status caption. Vertically mirrored,
+clipped copies of the stock frame restore the side ornament up to the top canvas
+edge while keeping the decorative border facing away from the map canvas.
 The permanent control row uses red buttons for critical menu/save actions and
 gray chapter buttons for Project, Terrain, Digitizing, Analysis, and Layers.
 Selecting a chapter replaces the functional row below it. Functional groups
@@ -70,22 +71,37 @@ failures, and exposes an explicit retry action. Stable files are converted with
 the adaptive safe palette into complete new WorldBox save slots without
 changing the open world.
 
-The Project chapter's raster classifier uses a text segmented
-`Point | Polygon | Boundary` control, so it needs no additional icon asset.
-Polygon mode shows a surface-coloured translucent fill, fixed-width outline,
-vertex handles, and a live edge to the cursor. Boundary mode stores one
-independent area-of-interest polygon with a cyan outline. Its exterior is
-excluded from adaptive clustering and manual training, then forced to deep
-ocean at `-4000 m` in the result. Right-click or double-click completes either
-ring; the side panel also exposes explicit Finish, Cancel, and Remove commands
-and scrolls on short screens. Opening the classifier first shows one compact
+The Project chapter's raster classifier uses a compact text-segmented
+`Point | Line | Polygon` geometry control plus independent extent and deletion
+controls, so it needs no additional icon asset. Geometry is always an
+unpublished draft first. A point completes on its first click; right-click,
+double-click, or **Finish geometry** completes a line or polygon. Only then are
+the object morphotype, biotope, elevation, and optional `1..32`-cell line width
+enabled. **Publish object** commits the visible draft, leaves the committed
+object on the raster, and resets geometry and every object attribute to an
+explicit unselected state.
+
+Completed polygon drafts and saved polygons use a repeated pixel-art texture
+for the selected morphotype and update immediately when the morphotype changes.
+Point samples and all line/polygon vertices use the same split Turbo DEM palette
+as the world overlay, while class-coloured outlines keep the surface identity
+readable. Lines are first-class JSON geometry and are rasterized at their
+selected WorldBox-cell width for authoritative surface and DEM assignment.
+
+Boundary mode stores one independent area-of-interest polygon with a cyan
+outline. Its exterior is excluded from adaptive clustering and manual training.
+A separate **Outside map extent** block selects any safe morphotype, compatible
+biotope, and signed elevation for those external cells; the backwards-compatible
+default remains deep ocean at `-4000 m`. The side panel is organized into
+compact geometry, attribute, extent, and annotation groups and scrolls on short
+screens. Opening the classifier first shows one compact
 `previous | filename | next` selector and a distinct **Open selected** command.
 The filename is not repeated in a popup or pending-status caption. Arrow
 changes only select a candidate; all classification controls remain disabled
 until that file has loaded. The watched-folder command remains a plain file
 browser shortcut and cannot return the Explorer selection to WorldBox.
 Classification profiles are stored per raster in a neighbouring JSON sidecar
-and are saved before switching files. A persistent Delete one mode removes the
+and are saved before switching files. Delete one mode removes the
 topmost training polygon under a left-click. Delete all removes every training
 polygon immediately, but deliberately preserves point samples and the map
 boundary.

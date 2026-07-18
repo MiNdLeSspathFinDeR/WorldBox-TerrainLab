@@ -62,11 +62,15 @@ under `Code` when the game starts.
   and atomically publishes a complete new vanilla `saveN` slot. Its explicit
   input contract is `PNG`, `JPG/JPEG/JFIF`, `TIFF/TIF`, `WebP`, `BMP`, `GIF`,
   `TGA`, `DDS`, and `JP2`;
-- a manual source-raster canvas with zoom, pan, persistent point markers, and
-  QGIS-style filled polygon training areas. Points and polygons carry
-  independent surface, biotope, and Int16-height labels; the validated compact
-  JSON profile guides an adaptive colour/texture/spatial classifier, while IDW
-  interpolation is transferred into the generated save as a signed Int16
+- a manual source-raster canvas with zoom, pan, and explicit publish semantics
+  for point, line, and QGIS-style polygon training geometry. Morphotype,
+  biotope, Int16 height, and line width are selected only after geometry
+  completion and reset after publication. Polygon fills use live morphotype
+  patterns; points and vector vertices use Turbo DEM colours. A separate map
+  boundary excludes exterior noise from learning while assigning those cells a
+  configurable safe surface, biotope, and elevation. The compact per-image JSON
+  profile guides adaptive colour/texture/spatial classification, while IDW
+  interpolation is transferred into the save as signed Int16
   `terrainlab-elevation.tif` and adopted on first world load;
 - an in-game save form that edits the WorldBox map name before saving the
   ordinary map and WBXGEO sidecar, or hands a new world to the native slot

@@ -10,6 +10,7 @@ from PIL import Image, ImageDraw
 
 from imagetomap import convert, fit_map_size_to_budget, validate_map_size
 from imagetomap.calibration import (
+    ClassificationLine,
     ClassificationProfile,
     ClassificationRegion,
     ClassificationSample,
@@ -59,6 +60,7 @@ PARAMETER_TOOLTIP_KEYS = (
     "terrain_lab_manual_elevation",
     "terrain_lab_manual_global_dem",
     "terrain_lab_manual_mode_point",
+    "terrain_lab_manual_mode_line",
     "terrain_lab_manual_mode_polygon",
     "terrain_lab_manual_mode_boundary",
     "terrain_lab_manual_mode_delete_polygon",
@@ -68,6 +70,13 @@ PARAMETER_TOOLTIP_KEYS = (
     "terrain_lab_manual_finish_boundary",
     "terrain_lab_manual_cancel_boundary",
     "terrain_lab_manual_remove_boundary",
+    "terrain_lab_manual_finish_geometry",
+    "terrain_lab_manual_cancel_draft",
+    "terrain_lab_manual_publish_feature",
+    "terrain_lab_manual_line_width",
+    "terrain_lab_manual_outside_surface",
+    "terrain_lab_manual_outside_biotope",
+    "terrain_lab_manual_outside_elevation",
 )
 
 
@@ -176,6 +185,29 @@ class TerrainConversionTests(unittest.TestCase):
             "TerrainImageClassificationDrawMode.DeletePolygon",
             overlay_source,
         )
+        self.assertIn(
+            "TerrainImageClassificationDrawMode.Line",
+            overlay_source,
+        )
+        self.assertIn("private void PublishFeature()", overlay_source)
+        self.assertIn("_profile.AddLine(", overlay_source)
+        self.assertIn(
+            "_drawMode = TerrainImageClassificationDrawMode.None;",
+            overlay_source,
+        )
+        self.assertIn("ResetClassificationSelection();", overlay_source)
+        self.assertIn(
+            "GetElevationVertexColor(sample.Elevation)",
+            overlay_source,
+        )
+        self.assertIn(
+            "private void ResetFeatureDraft()",
+            overlay_source,
+        )
+        self.assertIn(
+            "_surfaceDropdown?.SetValueWithoutNotify(0);",
+            overlay_source,
+        )
         self.assertIn("int removed = _profile.ClearRegions();", overlay_source)
         self.assertIn(
             "_profile.RemoveRegionAt(sourceX, sourceY)",
@@ -203,6 +235,32 @@ class TerrainConversionTests(unittest.TestCase):
         self.assertLess(
             select_source.index("SaveProfile();"),
             select_source.index("ResetLoadedImage();"),
+        )
+
+        graphic_source = (
+            ROOT
+            / "worldbox_mod"
+            / "TerrainLab"
+            / "Code"
+            / "TerrainImagePolygonGraphic.cs"
+        ).read_text(encoding="utf-8")
+        self.assertIn(
+            "internal static class TerrainImageMorphotypePatterns",
+            graphic_source,
+        )
+        self.assertIn("public override Texture mainTexture", graphic_source)
+        self.assertIn("_vertexColor", graphic_source)
+
+        toolbar_source = (
+            ROOT
+            / "worldbox_mod"
+            / "TerrainLab"
+            / "Code"
+            / "TerrainLabUi.cs"
+        ).read_text(encoding="utf-8")
+        self.assertIn(
+            "railRect.localScale = new Vector3(1f, -1f, 1f);",
+            toolbar_source,
         )
 
     def test_geyser_patch_forwards_the_building_lifecycle(self) -> None:
@@ -361,6 +419,40 @@ class TerrainConversionTests(unittest.TestCase):
             converted.preview.close()
             source.close()
 
+    def test_manual_line_is_authoritative_and_trains_conversion(self) -> None:
+        source = Image.new("RGB", (128, 64), (112, 126, 104))
+        profile = ClassificationProfile(
+            source_file_name="line.png",
+            source_width=128,
+            source_height=64,
+            samples=(),
+            lines=(
+                ClassificationLine(
+                    ((8, 32), (64, 20), (119, 32)),
+                    "rocks",
+                    "none",
+                    2800,
+                    5,
+                ),
+            ),
+        )
+        converted = convert(
+            source,
+            width=2,
+            height=1,
+            classification_profile=profile,
+        )
+        try:
+            self.assertEqual(
+                SAFE_TILES_TUPLE[converted.preview.getpixel((64, 20))],
+                "mountains",
+            )
+            self.assertEqual(int(converted.elevation[20, 64]), 2800)
+            self.assertEqual(int(converted.elevation[22, 64]), 2800)
+        finally:
+            converted.preview.close()
+            source.close()
+
     def test_map_boundary_excludes_noise_and_forces_deep_ocean(self) -> None:
         first_pixels = np.full((128, 128, 3), (255, 0, 255), dtype=np.uint8)
         second_pixels = np.zeros((128, 128, 3), dtype=np.uint8)
@@ -431,6 +523,37 @@ class TerrainConversionTests(unittest.TestCase):
             first.close()
             second.close()
 
+    def test_map_boundary_supports_custom_safe_outside_class(self) -> None:
+        source = Image.new("RGB", (128, 128), (112, 126, 104))
+        profile = ClassificationProfile(
+            source_file_name="custom-outside.png",
+            source_width=128,
+            source_height=128,
+            samples=(
+                ClassificationSample(40, 64, "plain", "grass", 120),
+                ClassificationSample(88, 64, "rocks", "none", 2400),
+            ),
+            map_boundary=((20, 20), (108, 20), (108, 108), (20, 108)),
+            outside_surface="sand",
+            outside_biotope="none",
+            outside_elevation=7,
+        )
+        converted = convert(
+            source,
+            width=2,
+            height=2,
+            classification_profile=profile,
+        )
+        try:
+            mask = rasterize_map_boundary(profile, 128, 128)
+            tiles = np.asarray(converted.preview)
+            sand = SAFE_TILES_TUPLE.index("sand")
+            self.assertTrue(np.all(tiles[~mask] == sand))
+            self.assertTrue(np.all(converted.elevation[~mask] == 7))
+        finally:
+            converted.preview.close()
+            source.close()
+
     def test_manual_polygon_profile_round_trips_and_rejects_bow_tie(self) -> None:
         with tempfile.TemporaryDirectory() as temporary_directory:
             profile_path = Path(temporary_directory) / "polygon.json"
@@ -447,7 +570,19 @@ class TerrainConversionTests(unittest.TestCase):
                         900,
                     ),
                 ),
+                lines=(
+                    ClassificationLine(
+                        ((8, 54), (32, 40), (55, 54)),
+                        "river_lake",
+                        "none",
+                        300,
+                        2,
+                    ),
+                ),
                 map_boundary=((2, 2), (61, 2), (61, 61), (2, 61)),
+                outside_surface="sand",
+                outside_biotope="none",
+                outside_elevation=4,
             )
             profile_path.write_text(
                 json.dumps(profile.to_json_dict()),
@@ -459,7 +594,10 @@ class TerrainConversionTests(unittest.TestCase):
             )
             self.assertEqual(restored.samples, ())
             self.assertEqual(restored.regions, profile.regions)
+            self.assertEqual(restored.lines, profile.lines)
             self.assertEqual(restored.map_boundary, profile.map_boundary)
+            self.assertEqual(restored.outside_surface, "sand")
+            self.assertEqual(restored.outside_elevation, 4)
 
             payload = profile.to_json_dict()
             payload["regions"][0]["vertices"] = [

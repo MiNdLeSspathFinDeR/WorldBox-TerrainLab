@@ -231,6 +231,25 @@ namespace TerrainLab
         public short Elevation { get; set; }
     }
 
+    public sealed class TerrainImageClassificationLine
+    {
+        [JsonProperty("vertices")]
+        public List<TerrainImageClassificationVertex> Vertices { get; set; } =
+            new List<TerrainImageClassificationVertex>();
+
+        [JsonProperty("surface")]
+        public string Surface { get; set; }
+
+        [JsonProperty("biotope")]
+        public string Biotope { get; set; }
+
+        [JsonProperty("elevation")]
+        public short Elevation { get; set; }
+
+        [JsonProperty("width_cells")]
+        public int WidthCells { get; set; } = 1;
+    }
+
     public sealed class TerrainImageMapBoundary
     {
         [JsonProperty("vertices")]
@@ -239,6 +258,9 @@ namespace TerrainLab
 
         [JsonProperty("outside_surface")]
         public string OutsideSurface { get; set; } = "deep_ocean";
+
+        [JsonProperty("outside_biotope")]
+        public string OutsideBiotope { get; set; } = "none";
 
         [JsonProperty("outside_elevation")]
         public short OutsideElevation { get; set; } = -4000;
@@ -249,8 +271,10 @@ namespace TerrainLab
         public const int CurrentSchemaVersion = 1;
         public const int MaximumSamples = 512;
         public const int MaximumRegions = 128;
+        public const int MaximumLines = 128;
         public const int MaximumRegionVertices = 256;
         public const int MaximumTotalRegionVertices = 8192;
+        public const int MaximumLineWidthCells = 32;
         public const int MaximumProfileBytes = 4 * 1024 * 1024;
         public const string SidecarSuffix =
             ".terrainlab-classification.json";
@@ -273,6 +297,10 @@ namespace TerrainLab
         public List<TerrainImageClassificationRegion> Regions { get; set; } =
             new List<TerrainImageClassificationRegion>();
 
+        [JsonProperty("lines")]
+        public List<TerrainImageClassificationLine> Lines { get; set; } =
+            new List<TerrainImageClassificationLine>();
+
         [JsonProperty(
             "map_boundary",
             NullValueHandling = NullValueHandling.Ignore)]
@@ -284,7 +312,8 @@ namespace TerrainLab
         [JsonIgnore]
         public bool HasUsableTraining =>
             (Samples?.Count ?? 0) >= 2 ||
-            (Regions?.Count ?? 0) >= 1;
+            (Regions?.Count ?? 0) >= 1 ||
+            (Lines?.Count ?? 0) >= 1;
 
         public static string GetSidecarPath(string imagePath)
         {
@@ -455,8 +484,9 @@ namespace TerrainLab
                 copied,
                 Source.Width,
                 Source.Height);
-            int totalVertices = Regions.Sum(region =>
-                region?.Vertices?.Count ?? 0);
+            int totalVertices =
+                Regions.Sum(region => region?.Vertices?.Count ?? 0) +
+                (Lines?.Sum(line => line?.Vertices?.Count ?? 0) ?? 0);
             if (totalVertices + copied.Count > MaximumTotalRegionVertices)
             {
                 throw new InvalidOperationException(
@@ -470,6 +500,65 @@ namespace TerrainLab
                     Surface = surface,
                     Biotope = biotope,
                     Elevation = elevation
+                });
+            Validate(Source.Width, Source.Height);
+        }
+
+        public void AddLine(
+            IEnumerable<TerrainImageClassificationVertex> vertices,
+            string surface,
+            string biotope,
+            short elevation,
+            int widthCells)
+        {
+            if (Source == null)
+            {
+                throw new InvalidOperationException(
+                    "Classification profile has no source image.");
+            }
+            if (TerrainImageClassificationCatalog.FindSurface(surface) == null ||
+                TerrainImageClassificationCatalog.FindBiotope(biotope) == null ||
+                !TerrainElevationEncoding.IsDataValue(elevation) ||
+                elevation == TerrainElevationEncoding.NoData ||
+                widthCells < 1 ||
+                widthCells > MaximumLineWidthCells)
+            {
+                throw new InvalidDataException(
+                    "Manual classification line has invalid class values.");
+            }
+            if (Lines == null)
+            {
+                Lines = new List<TerrainImageClassificationLine>();
+            }
+            if (Lines.Count >= MaximumLines)
+            {
+                throw new InvalidOperationException(
+                    "Manual classification is limited to 128 lines.");
+            }
+
+            List<TerrainImageClassificationVertex> copied =
+                CopyVertices(vertices);
+            ValidateLineVertices(
+                copied,
+                Source.Width,
+                Source.Height);
+            int totalVertices =
+                Regions.Sum(region => region?.Vertices?.Count ?? 0) +
+                Lines.Sum(line => line?.Vertices?.Count ?? 0);
+            if (totalVertices + copied.Count > MaximumTotalRegionVertices)
+            {
+                throw new InvalidOperationException(
+                    "Manual classification is limited to 8192 vector vertices.");
+            }
+
+            Lines.Add(
+                new TerrainImageClassificationLine
+                {
+                    Vertices = copied,
+                    Surface = surface,
+                    Biotope = biotope,
+                    Elevation = elevation,
+                    WidthCells = widthCells
                 });
             Validate(Source.Width, Source.Height);
         }
@@ -503,12 +592,44 @@ namespace TerrainLab
                 copied,
                 Source.Width,
                 Source.Height);
+            string outsideSurface =
+                MapBoundary?.OutsideSurface ?? "deep_ocean";
+            string outsideBiotope =
+                MapBoundary?.OutsideBiotope ?? "none";
+            short outsideElevation =
+                MapBoundary?.OutsideElevation ?? (short)-4000;
             MapBoundary = new TerrainImageMapBoundary
             {
                 Vertices = copied,
-                OutsideSurface = "deep_ocean",
-                OutsideElevation = -4000
+                OutsideSurface = outsideSurface,
+                OutsideBiotope = outsideBiotope,
+                OutsideElevation = outsideElevation
             };
+            Validate(Source.Width, Source.Height);
+        }
+
+        public void SetOutsideMapArea(
+            string surface,
+            string biotope,
+            short elevation)
+        {
+            if (MapBoundary == null)
+            {
+                throw new InvalidOperationException(
+                    "Draw and publish the map boundary first.");
+            }
+            if (TerrainImageClassificationCatalog.FindSurface(surface) == null ||
+                TerrainImageClassificationCatalog.FindBiotope(biotope) == null ||
+                !TerrainElevationEncoding.IsDataValue(elevation) ||
+                elevation == TerrainElevationEncoding.NoData)
+            {
+                throw new InvalidDataException(
+                    "Map boundary outside class is invalid.");
+            }
+
+            MapBoundary.OutsideSurface = surface;
+            MapBoundary.OutsideBiotope = biotope;
+            MapBoundary.OutsideElevation = elevation;
             Validate(Source.Width, Source.Height);
         }
 
@@ -531,6 +652,11 @@ namespace TerrainLab
 
         public bool RemoveLastAnnotation()
         {
+            if (Lines != null && Lines.Count > 0)
+            {
+                Lines.RemoveAt(Lines.Count - 1);
+                return true;
+            }
             if (Regions != null && Regions.Count > 0)
             {
                 Regions.RemoveAt(Regions.Count - 1);
@@ -737,6 +863,43 @@ namespace TerrainLab
                 }
             }
 
+            if (Lines == null)
+            {
+                Lines = new List<TerrainImageClassificationLine>();
+            }
+            if (Lines.Count > MaximumLines)
+            {
+                throw new InvalidDataException(
+                    "Manual classification exceeds 128 lines.");
+            }
+            foreach (TerrainImageClassificationLine line in Lines)
+            {
+                if (line == null ||
+                    TerrainImageClassificationCatalog.FindSurface(
+                        line.Surface) == null ||
+                    TerrainImageClassificationCatalog.FindBiotope(
+                        line.Biotope) == null ||
+                    !TerrainElevationEncoding.IsDataValue(line.Elevation) ||
+                    line.Elevation == TerrainElevationEncoding.NoData ||
+                    line.WidthCells < 1 ||
+                    line.WidthCells > MaximumLineWidthCells)
+                {
+                    throw new InvalidDataException(
+                        "Manual classification contains an invalid line.");
+                }
+
+                ValidateLineVertices(
+                    line.Vertices,
+                    Source.Width,
+                    Source.Height);
+                totalRegionVertices += line.Vertices.Count;
+                if (totalRegionVertices > MaximumTotalRegionVertices)
+                {
+                    throw new InvalidDataException(
+                        "Manual classification exceeds 8192 vector vertices.");
+                }
+            }
+
             if (MapBoundary != null)
             {
                 if (MapBoundary.Vertices?.Count >= 4)
@@ -759,17 +922,68 @@ namespace TerrainLab
                     MapBoundary.Vertices,
                     Source.Width,
                     Source.Height);
-                if (!string.Equals(
-                        MapBoundary.OutsideSurface,
-                        "deep_ocean",
-                        StringComparison.Ordinal) ||
+                if (TerrainImageClassificationCatalog.FindSurface(
+                        MapBoundary.OutsideSurface) == null ||
+                    TerrainImageClassificationCatalog.FindBiotope(
+                        MapBoundary.OutsideBiotope ?? "none") == null ||
                     !TerrainElevationEncoding.IsDataValue(
                         MapBoundary.OutsideElevation) ||
-                    MapBoundary.OutsideElevation > -151)
+                    MapBoundary.OutsideElevation ==
+                    TerrainElevationEncoding.NoData)
                 {
                     throw new InvalidDataException(
-                        "Map boundary outside area must be deep ocean at -20000..-151 m.");
+                        "Map boundary outside class is invalid.");
                 }
+                MapBoundary.OutsideBiotope =
+                    MapBoundary.OutsideBiotope ?? "none";
+            }
+        }
+
+        private static List<TerrainImageClassificationVertex> CopyVertices(
+            IEnumerable<TerrainImageClassificationVertex> vertices)
+        {
+            return vertices?
+                .Select(vertex =>
+                    vertex == null
+                        ? null
+                        : new TerrainImageClassificationVertex(
+                            vertex.X,
+                            vertex.Y))
+                .ToList() ??
+                new List<TerrainImageClassificationVertex>();
+        }
+
+        private static void ValidateLineVertices(
+            IReadOnlyList<TerrainImageClassificationVertex> vertices,
+            int width,
+            int height)
+        {
+            if (vertices == null ||
+                vertices.Count < 2 ||
+                vertices.Count > MaximumRegionVertices)
+            {
+                throw new InvalidDataException(
+                    "A classification line needs 2..256 vertices.");
+            }
+
+            TerrainImageClassificationVertex previous = null;
+            foreach (TerrainImageClassificationVertex vertex in vertices)
+            {
+                if (vertex == null ||
+                    vertex.X < 0 || vertex.X >= width ||
+                    vertex.Y < 0 || vertex.Y >= height)
+                {
+                    throw new InvalidDataException(
+                        "A classification line vertex is outside the image.");
+                }
+                if (previous != null &&
+                    previous.X == vertex.X &&
+                    previous.Y == vertex.Y)
+                {
+                    throw new InvalidDataException(
+                        "A classification line contains consecutive duplicate vertices.");
+                }
+                previous = vertex;
             }
         }
 

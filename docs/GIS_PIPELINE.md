@@ -27,12 +27,14 @@ inspected, replaced, or controlled independently.
 
 ## Implemented manual calibration
 
-TerrainLab can display a workspace raster over the live map and store point or
-polygon annotations in `<image>.terrainlab-classification.json`. Point mode
-labels individual source pixels. Polygon mode follows desktop GIS digitizing:
-left-click adds vertices, a live rubber band shows the open edge, and
-right-click or double-click closes the ring. Every annotation contains three
-independent observations:
+TerrainLab can display a workspace raster over the live map and store point,
+line, or polygon annotations in
+`<image>.terrainlab-classification.json`. Geometry is drafted first and does
+not alter the profile. A point completes on its first click; a line or polygon
+uses desktop-GIS digitizing with a live rubber band and explicit completion.
+Only **Publish object** commits the feature. It remains visible after commit,
+while geometry and all object attributes reset to an unselected state. Every
+annotation contains three independent observations:
 
 - a surface morphotype such as shelf, river/lake, plain, hill, rock, summit, or
   local depression;
@@ -40,27 +42,37 @@ independent observations:
 - a signed Int16 elevation in `-20000..9000 m`, excluding reserved
   `NODATA=9999`.
 
+Lines additionally store an authoritative `1..32`-cell output width. Completed
+polygon drafts and saved polygons use a repeated morphotype pattern; points and
+all line/polygon vertices use the shared Turbo DEM palette. Both update live as
+the draft attributes change.
+
 The guided classifier normalizes the source's own colour range and combines
 colour, local gradient/roughness, and normalized image position. Spatial
 distance breaks ties between equal-colour samples, so a repeated cartographic
 colour can describe different regional morphotypes or biotopes. Every target
-cell inside a polygon is authoritative. Up to 32 spatially distributed interior
-pixels per polygon feed propagation outside it; the combined effective
-training set remains capped at 512. Profiles accept at most 128 simple
-non-self-intersecting polygons, 256 vertices per polygon, and 8192 polygon
-vertices in total, so broad areas do not become millions of JSON samples.
-Later overlapping polygons own their overlap, while precise point controls are
+cell inside a polygon and every rasterized line cell is authoritative. Up to 32
+spatially distributed cells per vector object feed propagation outside it; the
+combined effective training set remains capped at 512. Profiles accept at most
+128 simple non-self-intersecting polygons, 128 lines, 256 vertices per object,
+and 8192 vector vertices in total, so broad areas do not become millions of
+JSON samples. Later vectors own overlap, while precise point controls are
 applied last. Calculations run in bounded chunks.
 
-Point and distributed polygon heights form an inverse-distance-weighted DEM on
-a coarse bounded grid, are bicubically expanded, smoothed, and restored exactly
-at point controls and throughout completed polygon interiors.
+Point and distributed vector heights form an inverse-distance-weighted DEM on a
+coarse bounded grid, are bicubically expanded, smoothed, and restored exactly
+at point controls, throughout polygon interiors, and along rasterized lines.
 Deep ocean, shelf, and marine shallows retain their defined depth intervals;
 the river/lake class is intentionally independent of absolute elevation so
 high-altitude water remains possible. The generated save contains the
 uncompressed signed Int16 `terrainlab-elevation.tif`. On first load TerrainLab
 combines that DEM with the vanilla-safe surface map; a subsequent normal save
 promotes the state into WBXGEO.
+
+An optional map boundary excludes scan margins, legends, and other exterior
+noise from clustering and training. Its exterior has an independent safe
+morphotype, biotope, and elevation. Existing profiles remain compatible and
+default to `deep_ocean`, `none`, and `-4000 m`.
 
 ## Implemented Earth-like initial DEM
 
