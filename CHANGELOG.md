@@ -2,6 +2,21 @@
 
 ## Unreleased
 
+## 1.9.0 - 2026-07-18
+
+- Added a QGIS-style Boundary mode to the manual raster classifier. A single
+  validated polygon stores the map area of interest independently from point
+  and polygon training annotations.
+- Pixels outside the boundary are excluded from adaptive colour statistics,
+  terrain clustering, manual colour/texture propagation, and DEM
+  interpolation. The resulting WorldBox cells are always `deep_ocean` at
+  `-4000 m`, so legends, margins, labels, and scan noise cannot train the
+  classifier or leak into the playable map.
+- Added a persistent cyan boundary overlay, replacement/removal controls,
+  outside-point rejection, profile round-trip validation, and complete
+  Russian/English guidance. Existing schema-1 profiles without a boundary
+  remain compatible.
+
 ## 1.8.2 - 2026-07-18
 
 - Replaced Unity's white dropdown popup defaults with an opaque black template,

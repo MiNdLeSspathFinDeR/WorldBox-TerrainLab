@@ -25,7 +25,8 @@ namespace TerrainLab
             Color surfaceColor,
             bool closed,
             bool showVertices,
-            float inverseZoom)
+            float inverseZoom,
+            float closedFillAlpha = 0.22f)
         {
             _vertices.Clear();
             if (vertices != null)
@@ -48,7 +49,7 @@ namespace TerrainLab
                 surfaceColor.r,
                 surfaceColor.g,
                 surfaceColor.b,
-                closed ? 0.22f : 0.08f);
+                closed ? Mathf.Clamp01(closedFillAlpha) : 0.08f);
             _lineColor = new Color(
                 surfaceColor.r,
                 surfaceColor.g,

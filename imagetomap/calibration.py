@@ -116,9 +116,12 @@ class ClassificationProfile:
     elevation_smoothing: int = 1
     interpolate_elevation_globally: bool = True
     regions: Tuple[ClassificationRegion, ...] = ()
+    map_boundary: Tuple[Tuple[int, int], ...] = ()
+    outside_surface: str = "deep_ocean"
+    outside_elevation: int = -4000
 
     def to_json_dict(self) -> Dict[str, Any]:
-        return {
+        payload = {
             "schema_version": 1,
             "source": {
                 "file_name": self.source_file_name,
@@ -160,6 +163,16 @@ class ClassificationProfile:
                 for region in self.regions
             ],
         }
+        if self.map_boundary:
+            payload["map_boundary"] = {
+                "vertices": [
+                    {"x": vertex[0], "y": vertex[1]}
+                    for vertex in self.map_boundary
+                ],
+                "outside_surface": self.outside_surface,
+                "outside_elevation": self.outside_elevation,
+            }
+        return payload
 
 
 def classification_profile_path(image_path: Path) -> Path:
@@ -328,6 +341,67 @@ def load_classification_profile(
             )
         )
 
+    map_boundary = ()
+    outside_surface = "deep_ocean"
+    outside_elevation = -4000
+    raw_boundary = payload.get("map_boundary")
+    if raw_boundary is not None:
+        boundary_data = _mapping(raw_boundary, "map_boundary")
+        raw_vertices = boundary_data.get("vertices")
+        if not isinstance(raw_vertices, list):
+            raise ValueError(
+                "map_boundary.vertices must be a JSON array"
+            )
+        if len(raw_vertices) > MAXIMUM_REGION_VERTICES + 1:
+            raise ValueError(
+                "map_boundary has more than "
+                f"{MAXIMUM_REGION_VERTICES} vertices"
+            )
+
+        boundary_vertices = []
+        for vertex_index, raw_vertex in enumerate(raw_vertices):
+            vertex_data = _mapping(
+                raw_vertex,
+                f"map_boundary.vertices[{vertex_index}]",
+            )
+            boundary_vertices.append(
+                (
+                    _integer(
+                        vertex_data.get("x"),
+                        f"map_boundary.vertices[{vertex_index}].x",
+                        0,
+                        source_width - 1,
+                    ),
+                    _integer(
+                        vertex_data.get("y"),
+                        f"map_boundary.vertices[{vertex_index}].y",
+                        0,
+                        source_height - 1,
+                    ),
+                )
+            )
+        if (
+            len(boundary_vertices) >= 4
+            and boundary_vertices[0] == boundary_vertices[-1]
+        ):
+            boundary_vertices.pop()
+        _validate_polygon(boundary_vertices, "map_boundary")
+        map_boundary = tuple(boundary_vertices)
+
+        outside_surface = str(
+            boundary_data.get("outside_surface") or "deep_ocean"
+        ).strip().lower()
+        if outside_surface != "deep_ocean":
+            raise ValueError(
+                "map_boundary.outside_surface must be deep_ocean"
+            )
+        outside_elevation = _integer(
+            boundary_data.get("outside_elevation", -4000),
+            "map_boundary.outside_elevation",
+            ELEVATION_MINIMUM,
+            -151,
+        )
+
     if not samples and not regions:
         raise ValueError(
             "classification profile must contain at least one sample or region"
@@ -391,6 +465,9 @@ def load_classification_profile(
         interpolate_elevation_globally=bool(
             settings.get("interpolate_elevation_globally", True)
         ),
+        map_boundary=map_boundary,
+        outside_surface=outside_surface,
+        outside_elevation=outside_elevation,
     )
 
 
@@ -399,27 +476,69 @@ def apply_manual_classification(
     automatic_tiles: Image,
     tile_names: Sequence[str],
     profile: ClassificationProfile,
+    boundary_mask: Optional[np.ndarray] = None,
 ) -> Tuple[Image, np.ndarray]:
-    """Apply point and polygon labels with bounded adaptive propagation."""
+    """Apply ROI-bounded point and polygon labels with adaptive propagation."""
     if image.size != automatic_tiles.size:
         raise ValueError("manual classifier inputs must have matching dimensions")
     if (profile.source_width, profile.source_height) == (0, 0):
         raise ValueError("classification profile has invalid source dimensions")
 
     width, height = image.size
+    if boundary_mask is None:
+        boundary_mask = rasterize_map_boundary(profile, width, height)
+    if boundary_mask is None:
+        active_mask = np.ones((height, width), dtype=bool)
+    else:
+        active_mask = np.asarray(boundary_mask, dtype=bool)
+        if active_mask.shape != (height, width):
+            raise ValueError(
+                "classification map boundary has invalid dimensions"
+            )
+        if not np.any(active_mask):
+            raise ValueError("classification map boundary is empty")
+    if profile.map_boundary and profile.outside_surface not in tile_names:
+        raise ValueError(
+            "classification map boundary requires deep_ocean in the tile palette"
+        )
+
     rgb = np.asarray(image.convert("RGB"), dtype=np.float32) / 255.0
-    color_features, texture_features = _make_calibration_features(rgb)
+    if profile.map_boundary:
+        interior = rgb[active_mask]
+        stride = max(1, interior.shape[0] // 60_000)
+        fill = np.median(interior[::stride], axis=0)
+        rgb = rgb.copy()
+        rgb[~active_mask] = fill
+    color_features, texture_features = _make_calibration_features(
+        rgb,
+        active_mask,
+    )
     flat_color = color_features.reshape((-1, color_features.shape[2]))
     flat_texture = texture_features.reshape((-1, texture_features.shape[2]))
     flat_automatic = np.asarray(automatic_tiles, dtype=np.uint8).reshape(-1)
     flat_result = flat_automatic.copy()
 
     region_labels = _rasterize_regions(profile, width, height)
+    region_labels[~active_mask] = -1
+    _sample_positions, sample_indices = _sample_target_positions(
+        profile,
+        width,
+        height,
+        profile.samples,
+    )
+    del _sample_positions
+    flat_active = active_mask.reshape(-1)
+    active_samples = tuple(
+        sample
+        for sample, target_index in zip(profile.samples, sample_indices)
+        if flat_active[int(target_index)]
+    )
     effective_samples = _make_effective_samples(
         profile,
         region_labels,
         width,
         height,
+        active_samples,
     )
     if not effective_samples:
         raise ValueError(
@@ -494,6 +613,7 @@ def apply_manual_classification(
             apply_mask = (
                 nearest_appearance <= profile.appearance_tolerance
             ) | (nearest_spatial <= local_squared)
+        apply_mask &= flat_active[start:end]
         target = flat_result[start:end]
         target[apply_mask] = sample_tiles[nearest[apply_mask]]
         assigned = assigned_surface[start:end]
@@ -524,11 +644,11 @@ def apply_manual_classification(
         profile,
         width,
         height,
-        profile.samples,
+        active_samples,
     )
     del point_positions
     for sample_offset, target_index in enumerate(point_indices):
-        sample = profile.samples[sample_offset]
+        sample = active_samples[sample_offset]
         sample_tile = _resolve_tile_index(
             sample.surface,
             sample.biotope,
@@ -541,8 +661,17 @@ def apply_manual_classification(
             row_start = y * width
             for x in range(max(0, target_x - 1), min(width, target_x + 2)):
                 index = row_start + x
+                if not flat_active[index]:
+                    continue
                 flat_result[index] = sample_tile
                 assigned_surface[index] = surface_index
+
+    if profile.map_boundary:
+        outside = ~flat_active
+        flat_result[outside] = tile_names.index(profile.outside_surface)
+        assigned_surface[outside] = SURFACE_IDS.index(
+            profile.outside_surface
+        )
 
     result = make_index_image(flat_result.reshape((height, width)), tile_names)
     elevation = _interpolate_elevation(
@@ -552,6 +681,8 @@ def apply_manual_classification(
         effective_samples,
         assigned_surface.reshape((height, width)),
         region_labels,
+        active_samples,
+        active_mask,
     )
     return result, elevation
 
@@ -646,18 +777,36 @@ def write_int16_geotiff(path: Path, values: np.ndarray) -> None:
 
 def _make_calibration_features(
     rgb: np.ndarray,
+    valid_mask: Optional[np.ndarray] = None,
 ) -> Tuple[np.ndarray, np.ndarray]:
+    if valid_mask is None:
+        analysis_mask = np.ones(rgb.shape[:2], dtype=bool)
+    else:
+        analysis_mask = np.asarray(valid_mask, dtype=bool)
+        if analysis_mask.shape != rgb.shape[:2]:
+            raise ValueError(
+                "manual classification mask must match the image"
+            )
+        if not np.any(analysis_mask):
+            raise ValueError("manual classification mask is empty")
+
     red = rgb[:, :, 0]
     green = rgb[:, :, 1]
     blue = rgb[:, :, 2]
     hue, saturation, _value = rgb_to_hsv(rgb)
     luma = (0.2126 * red) + (0.7152 * green) + (0.0722 * blue)
-    low, high = percentiles(luma, (2.0, 98.0))
+    low, high = percentiles(luma[analysis_mask], (2.0, 98.0))
     luma_norm = normalize(luma, low, high)
     slope = gradient_magnitude(luma_norm)
     roughness = local_roughness(luma_norm)
-    slope_low, slope_high = percentiles(slope, (5.0, 95.0))
-    rough_low, rough_high = percentiles(roughness, (5.0, 95.0))
+    slope_low, slope_high = percentiles(
+        slope[analysis_mask],
+        (5.0, 95.0),
+    )
+    rough_low, rough_high = percentiles(
+        roughness[analysis_mask],
+        (5.0, 95.0),
+    )
     hue_angle = hue * (2.0 * np.pi)
     colors = np.stack(
         (
@@ -703,6 +852,46 @@ def _sample_target_positions(
     )
 
 
+def rasterize_map_boundary(
+    profile: ClassificationProfile,
+    width: int,
+    height: int,
+) -> Optional[np.ndarray]:
+    """Rasterize the optional source-space ROI at output-cell resolution."""
+    if not profile.map_boundary:
+        return None
+    if width <= 0 or height <= 0:
+        raise ValueError("map boundary target dimensions must be positive")
+
+    mask_image = Img.new("L", (width, height), 0)
+    try:
+        drawing = ImageDraw.Draw(mask_image)
+        vertices = []
+        for source_x, source_y in profile.map_boundary:
+            target_x = int(
+                round(
+                    ((source_x + 0.5) / profile.source_width) * width
+                    - 0.5
+                )
+            )
+            target_y = int(
+                round(
+                    ((source_y + 0.5) / profile.source_height) * height
+                    - 0.5
+                )
+            )
+            vertices.append(
+                (
+                    min(width - 1, max(0, target_x)),
+                    min(height - 1, max(0, target_y)),
+                )
+            )
+        drawing.polygon(vertices, fill=255)
+        return np.asarray(mask_image, dtype=np.uint8).copy() > 0
+    finally:
+        mask_image.close()
+
+
 def _rasterize_regions(
     profile: ClassificationProfile,
     width: int,
@@ -743,8 +932,11 @@ def _make_effective_samples(
     region_labels: np.ndarray,
     width: int,
     height: int,
+    point_samples: Optional[Sequence[ClassificationSample]] = None,
 ) -> Tuple[ClassificationSample, ...]:
-    samples = list(profile.samples)
+    samples = list(
+        profile.samples if point_samples is None else point_samples
+    )
     remaining = max(0, MAXIMUM_EFFECTIVE_SAMPLES - len(samples))
     if remaining == 0 or not profile.regions:
         return tuple(samples)
@@ -876,6 +1068,8 @@ def _interpolate_elevation(
     effective_samples: Sequence[ClassificationSample],
     assigned_surface: np.ndarray,
     region_labels: np.ndarray,
+    active_samples: Sequence[ClassificationSample],
+    active_mask: np.ndarray,
 ) -> np.ndarray:
     maximum_dimension = 512
     scale = min(1.0, maximum_dimension / max(width, height))
@@ -963,10 +1157,10 @@ def _interpolate_elevation(
         profile,
         width,
         height,
-        profile.samples,
+        active_samples,
     )
     del sample_positions_full
-    for sample, target_index in zip(profile.samples, sample_indices):
+    for sample, target_index in zip(active_samples, sample_indices):
         y, x = divmod(int(target_index), width)
         full[y, x] = sample.elevation
 
@@ -980,6 +1174,10 @@ def _interpolate_elevation(
             full[mask] = np.clip(full[mask], -150.0, -6.0)
         elif surface == "shallow_water":
             full[mask] = np.clip(full[mask], -5.0, -1.0)
+
+    if profile.map_boundary:
+        full[~active_mask] = profile.outside_elevation
+        nodata_mask[~active_mask] = False
 
     full = np.clip(full, ELEVATION_MINIMUM, ELEVATION_MAXIMUM)
     result = np.rint(full).astype(np.int16)

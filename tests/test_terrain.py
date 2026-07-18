@@ -16,6 +16,7 @@ from imagetomap.calibration import (
     GENERATED_ELEVATION_FILE_NAME,
     GENERATED_PROFILE_FILE_NAME,
     load_classification_profile,
+    rasterize_map_boundary,
 )
 from imagetomap.consts import (
     ELEVATION_MAXIMUM,
@@ -59,8 +60,12 @@ PARAMETER_TOOLTIP_KEYS = (
     "terrain_lab_manual_global_dem",
     "terrain_lab_manual_mode_point",
     "terrain_lab_manual_mode_polygon",
+    "terrain_lab_manual_mode_boundary",
     "terrain_lab_manual_finish_polygon",
     "terrain_lab_manual_cancel_polygon",
+    "terrain_lab_manual_finish_boundary",
+    "terrain_lab_manual_cancel_boundary",
+    "terrain_lab_manual_remove_boundary",
 )
 
 
@@ -140,6 +145,15 @@ class TerrainConversionTests(unittest.TestCase):
         )
         self.assertIn(
             "new UnityColor(0.01f, 0.01f, 0.01f, 1f)",
+            overlay_source,
+        )
+        self.assertIn(
+            "TerrainImageClassificationDrawMode.MapBoundary",
+            overlay_source,
+        )
+        self.assertIn("_profile.SetMapBoundary(_draftVertices);", overlay_source)
+        self.assertIn(
+            "_profile.IsInsideMapBoundary(sourceX, sourceY)",
             overlay_source,
         )
 
@@ -309,6 +323,76 @@ class TerrainConversionTests(unittest.TestCase):
             converted.preview.close()
             source.close()
 
+    def test_map_boundary_excludes_noise_and_forces_deep_ocean(self) -> None:
+        first_pixels = np.full((128, 128, 3), (255, 0, 255), dtype=np.uint8)
+        second_pixels = np.zeros((128, 128, 3), dtype=np.uint8)
+        second_pixels[:, :, 0] = (
+            np.indices((128, 128)).sum(axis=0) % 2
+        ) * 255
+        second_pixels[:, :, 2] = 255 - second_pixels[:, :, 0]
+        first_pixels[20:109, 20:109] = (112, 126, 104)
+        second_pixels[20:109, 20:109] = (112, 126, 104)
+        first = Image.fromarray(first_pixels, mode="RGB")
+        second = Image.fromarray(second_pixels, mode="RGB")
+        boundary = ((20, 20), (108, 20), (108, 108), (20, 108))
+        interior_samples = (
+            ClassificationSample(36, 64, "plain", "grass", 120),
+            ClassificationSample(92, 64, "rocks", "none", 3200),
+        )
+        noisy_profile = ClassificationProfile(
+            source_file_name="noisy-boundary.png",
+            source_width=128,
+            source_height=128,
+            samples=interior_samples
+            + (ClassificationSample(3, 3, "summit", "none", 9000),),
+            map_boundary=boundary,
+        )
+        clean_profile = ClassificationProfile(
+            source_file_name="clean-boundary.png",
+            source_width=128,
+            source_height=128,
+            samples=interior_samples,
+            map_boundary=boundary,
+        )
+
+        noisy = convert(
+            first,
+            width=2,
+            height=2,
+            classification_profile=noisy_profile,
+        )
+        clean = convert(
+            second,
+            width=2,
+            height=2,
+            classification_profile=clean_profile,
+        )
+        try:
+            noisy_tiles = np.asarray(noisy.preview)
+            clean_tiles = np.asarray(clean.preview)
+            mask = rasterize_map_boundary(noisy_profile, 128, 128)
+            self.assertIsNotNone(mask)
+            self.assertTrue(np.array_equal(noisy_tiles, clean_tiles))
+            self.assertTrue(
+                np.array_equal(noisy.elevation, clean.elevation)
+            )
+            deep_ocean = SAFE_TILES_TUPLE.index("deep_ocean")
+            self.assertTrue(np.all(noisy_tiles[~mask] == deep_ocean))
+            self.assertTrue(np.all(noisy.elevation[~mask] == -4000))
+            self.assertEqual(
+                SAFE_TILES_TUPLE[noisy.preview.getpixel((36, 64))],
+                "soil_low:grass_low",
+            )
+            self.assertEqual(
+                SAFE_TILES_TUPLE[noisy.preview.getpixel((92, 64))],
+                "mountains",
+            )
+        finally:
+            noisy.preview.close()
+            clean.preview.close()
+            first.close()
+            second.close()
+
     def test_manual_polygon_profile_round_trips_and_rejects_bow_tie(self) -> None:
         with tempfile.TemporaryDirectory() as temporary_directory:
             profile_path = Path(temporary_directory) / "polygon.json"
@@ -325,6 +409,7 @@ class TerrainConversionTests(unittest.TestCase):
                         900,
                     ),
                 ),
+                map_boundary=((2, 2), (61, 2), (61, 61), (2, 61)),
             )
             profile_path.write_text(
                 json.dumps(profile.to_json_dict()),
@@ -336,6 +421,7 @@ class TerrainConversionTests(unittest.TestCase):
             )
             self.assertEqual(restored.samples, ())
             self.assertEqual(restored.regions, profile.regions)
+            self.assertEqual(restored.map_boundary, profile.map_boundary)
 
             payload = profile.to_json_dict()
             payload["regions"][0]["vertices"] = [
@@ -343,6 +429,20 @@ class TerrainConversionTests(unittest.TestCase):
                 {"x": 50, "y": 50},
                 {"x": 4, "y": 50},
                 {"x": 50, "y": 4},
+            ]
+            profile_path.write_text(
+                json.dumps(payload),
+                encoding="utf-8",
+            )
+            with self.assertRaisesRegex(ValueError, "self-intersecting"):
+                load_classification_profile(profile_path, (64, 64))
+
+            payload = profile.to_json_dict()
+            payload["map_boundary"]["vertices"] = [
+                {"x": 2, "y": 2},
+                {"x": 61, "y": 61},
+                {"x": 2, "y": 61},
+                {"x": 61, "y": 2},
             ]
             profile_path.write_text(
                 json.dumps(payload),

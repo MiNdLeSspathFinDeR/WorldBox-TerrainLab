@@ -231,6 +231,19 @@ namespace TerrainLab
         public short Elevation { get; set; }
     }
 
+    public sealed class TerrainImageMapBoundary
+    {
+        [JsonProperty("vertices")]
+        public List<TerrainImageClassificationVertex> Vertices { get; set; } =
+            new List<TerrainImageClassificationVertex>();
+
+        [JsonProperty("outside_surface")]
+        public string OutsideSurface { get; set; } = "deep_ocean";
+
+        [JsonProperty("outside_elevation")]
+        public short OutsideElevation { get; set; } = -4000;
+    }
+
     public sealed class TerrainImageClassificationProfile
     {
         public const int CurrentSchemaVersion = 1;
@@ -259,6 +272,11 @@ namespace TerrainLab
         [JsonProperty("regions")]
         public List<TerrainImageClassificationRegion> Regions { get; set; } =
             new List<TerrainImageClassificationRegion>();
+
+        [JsonProperty(
+            "map_boundary",
+            NullValueHandling = NullValueHandling.Ignore)]
+        public TerrainImageMapBoundary MapBoundary { get; set; }
 
         [JsonProperty("updated_utc")]
         public string UpdatedUtc { get; set; }
@@ -454,6 +472,61 @@ namespace TerrainLab
                     Elevation = elevation
                 });
             Validate(Source.Width, Source.Height);
+        }
+
+        public void SetMapBoundary(
+            IEnumerable<TerrainImageClassificationVertex> vertices)
+        {
+            if (Source == null)
+            {
+                throw new InvalidOperationException(
+                    "Classification profile has no source image.");
+            }
+
+            List<TerrainImageClassificationVertex> copied =
+                vertices?
+                    .Select(vertex =>
+                        vertex == null
+                            ? null
+                            : new TerrainImageClassificationVertex(
+                                vertex.X,
+                                vertex.Y))
+                    .ToList() ??
+                new List<TerrainImageClassificationVertex>();
+            if (copied.Count >= 4 &&
+                copied[0].X == copied[copied.Count - 1].X &&
+                copied[0].Y == copied[copied.Count - 1].Y)
+            {
+                copied.RemoveAt(copied.Count - 1);
+            }
+            ValidateRegionVertices(
+                copied,
+                Source.Width,
+                Source.Height);
+            MapBoundary = new TerrainImageMapBoundary
+            {
+                Vertices = copied,
+                OutsideSurface = "deep_ocean",
+                OutsideElevation = -4000
+            };
+            Validate(Source.Width, Source.Height);
+        }
+
+        public bool ClearMapBoundary()
+        {
+            if (MapBoundary == null)
+            {
+                return false;
+            }
+
+            MapBoundary = null;
+            return true;
+        }
+
+        public bool IsInsideMapBoundary(int x, int y)
+        {
+            return MapBoundary == null ||
+                   ContainsPoint(MapBoundary.Vertices, x, y);
         }
 
         public bool RemoveLastAnnotation()
@@ -654,6 +727,41 @@ namespace TerrainLab
                 {
                     throw new InvalidDataException(
                         "Manual classification exceeds 8192 polygon vertices.");
+                }
+            }
+
+            if (MapBoundary != null)
+            {
+                if (MapBoundary.Vertices?.Count >= 4)
+                {
+                    TerrainImageClassificationVertex first =
+                        MapBoundary.Vertices[0];
+                    TerrainImageClassificationVertex last =
+                        MapBoundary.Vertices[
+                            MapBoundary.Vertices.Count - 1];
+                    if (first != null &&
+                        last != null &&
+                        first.X == last.X &&
+                        first.Y == last.Y)
+                    {
+                        MapBoundary.Vertices.RemoveAt(
+                            MapBoundary.Vertices.Count - 1);
+                    }
+                }
+                ValidateRegionVertices(
+                    MapBoundary.Vertices,
+                    Source.Width,
+                    Source.Height);
+                if (!string.Equals(
+                        MapBoundary.OutsideSurface,
+                        "deep_ocean",
+                        StringComparison.Ordinal) ||
+                    !TerrainElevationEncoding.IsDataValue(
+                        MapBoundary.OutsideElevation) ||
+                    MapBoundary.OutsideElevation > -151)
+                {
+                    throw new InvalidDataException(
+                        "Map boundary outside area must be deep ocean at -20000..-151 m.");
                 }
             }
         }

@@ -16,4 +16,4 @@ __all__ = (
     "quantize",
     "validate_map_size",
 )
-__version__ = "13.10.0"
+__version__ = "13.11.0"

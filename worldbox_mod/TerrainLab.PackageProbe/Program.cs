@@ -759,6 +759,14 @@ internal static class Program
             "upland",
             "savanna",
             900);
+        profile.SetMapBoundary(
+            new[]
+            {
+                new TerrainImageClassificationVertex(20, 15),
+                new TerrainImageClassificationVertex(300, 15),
+                new TerrainImageClassificationVertex(300, 165),
+                new TerrainImageClassificationVertex(20, 165)
+            });
         profile.Save(imagePath);
 
         TerrainImageClassificationProfile restored =
@@ -775,6 +783,12 @@ internal static class Program
             restored.Regions[0].Vertices.Count == 4 &&
             restored.Regions[0].Surface == "upland" &&
             restored.Regions[0].Elevation == 900 &&
+            restored.MapBoundary != null &&
+            restored.MapBoundary.Vertices.Count == 4 &&
+            restored.MapBoundary.OutsideSurface == "deep_ocean" &&
+            restored.MapBoundary.OutsideElevation == -4000 &&
+            restored.IsInsideMapBoundary(80, 80) &&
+            !restored.IsInsideMapBoundary(5, 5) &&
             restored.HasUsableTraining &&
             restored.Settings.InterpolateElevationGlobally,
             "Manual classification profile did not round-trip.");
@@ -824,6 +838,26 @@ internal static class Program
         Assert(
             rejectedSelfIntersection,
             "Manual classification accepted a self-intersecting polygon.");
+
+        bool rejectedBoundaryIntersection = false;
+        try
+        {
+            restored.SetMapBoundary(
+                new[]
+                {
+                    new TerrainImageClassificationVertex(20, 20),
+                    new TerrainImageClassificationVertex(300, 160),
+                    new TerrainImageClassificationVertex(20, 160),
+                    new TerrainImageClassificationVertex(300, 20)
+                });
+        }
+        catch (InvalidDataException)
+        {
+            rejectedBoundaryIntersection = true;
+        }
+        Assert(
+            rejectedBoundaryIntersection,
+            "Manual classification accepted a self-intersecting map boundary.");
         Assert(
             restored.RemoveRegionAt(80, 80) &&
             restored.Regions.Count == 0,

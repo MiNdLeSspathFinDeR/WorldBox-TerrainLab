@@ -1,6 +1,6 @@
 from collections import deque
 from dataclasses import dataclass
-from typing import Dict, Iterable, Sequence, Tuple
+from typing import Dict, Iterable, Optional, Sequence, Tuple
 
 import numpy as np
 from PIL import Image as Img
@@ -27,6 +27,7 @@ def classify_adaptive_terrain(
     clusters: int = 14,
     smooth_passes: int = 1,
     min_land_region: int = 32,
+    valid_mask: Optional[np.ndarray] = None,
 ) -> Image:
     """Classify a map image into playable WorldBox terrain tiles.
 
@@ -39,16 +40,36 @@ def classify_adaptive_terrain(
         raise ValueError("No valid WorldBox tiles supplied")
 
     rgb = np.asarray(image.convert("RGB"), dtype=np.float32) / 255.0
+    if valid_mask is None:
+        analysis_mask = np.ones(rgb.shape[:2], dtype=bool)
+    else:
+        analysis_mask = np.asarray(valid_mask, dtype=bool)
+        if analysis_mask.shape != rgb.shape[:2]:
+            raise ValueError(
+                "terrain classification mask must match the image"
+            )
+        if not np.any(analysis_mask):
+            raise ValueError("terrain classification mask is empty")
+        if "deep_ocean" not in tile_names:
+            raise ValueError(
+                "terrain classification mask requires deep_ocean"
+            )
+        interior = rgb[analysis_mask]
+        stride = max(1, interior.shape[0] // 60_000)
+        fill = np.median(interior[::stride], axis=0)
+        rgb = rgb.copy()
+        rgb[~analysis_mask] = fill
+
     red = rgb[:, :, 0]
     green = rgb[:, :, 1]
     blue = rgb[:, :, 2]
 
     hue, saturation, value = rgb_to_hsv(rgb)
     luma = (0.2126 * red) + (0.7152 * green) + (0.0722 * blue)
-    dark_percentile = float(np.percentile(luma, 0.5))
+    dark_percentile = float(np.percentile(luma[analysis_mask], 0.5))
     void_threshold = min(max(dark_percentile * 1.25, 0.018), 0.06)
-    void_mask = luma <= void_threshold
-    non_void = ~void_mask
+    void_mask = (luma <= void_threshold) & analysis_mask
+    non_void = (~void_mask) & analysis_mask
 
     luma_low, luma_mid, luma_high = percentiles(luma[non_void], (4.0, 50.0, 96.0))
     sat_mid, sat_high = percentiles(saturation[non_void], (50.0, 82.0))
@@ -80,11 +101,12 @@ def classify_adaptive_terrain(
             void_mask=void_mask,
         )
     water_mask |= void_mask
+    water_mask |= ~analysis_mask
     if min_land_region > 1:
         water_mask = fill_small_land_regions(water_mask, min_land_region)
 
     assign_water(indices, water_mask, void_mask, tile_names)
-    land_mask = ~water_mask
+    land_mask = analysis_mask & ~water_mask
     assign_land_clusters(
         indices=indices,
         tile_names=tile_names,
@@ -102,6 +124,8 @@ def classify_adaptive_terrain(
 
     if smooth_passes > 0:
         indices = smooth_tiles(indices, water_mask, tile_names, passes=smooth_passes)
+    if valid_mask is not None:
+        indices[~analysis_mask] = tile_index(tile_names, "deep_ocean")
 
     return make_index_image(indices, tile_names)
 

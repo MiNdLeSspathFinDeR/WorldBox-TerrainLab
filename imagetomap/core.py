@@ -13,6 +13,7 @@ from PIL.Image import Image
 from .calibration import (
     ClassificationProfile,
     apply_manual_classification,
+    rasterize_map_boundary,
 )
 from .consts import CHUNK_SIZE, MAP_TEMPLATE, MAX_MAP_CELLS, SAFE_TILES_TUPLE, TILES
 from .models import Map
@@ -286,12 +287,22 @@ def convert(
             height=height,
             resample=Img.Resampling.LANCZOS,
         )
+        boundary_mask = (
+            rasterize_map_boundary(
+                classification_profile,
+                resized_image.width,
+                resized_image.height,
+            )
+            if classification_profile is not None
+            else None
+        )
         tile_image = classify_adaptive_terrain(
             image=resized_image,
             tiles=tiles,
             clusters=terrain_clusters,
             smooth_passes=terrain_smooth,
             min_land_region=terrain_min_region,
+            valid_mask=boundary_mask,
         )
         elevation = None
         if classification_profile is not None:
@@ -300,6 +311,7 @@ def convert(
                 automatic_tiles=tile_image,
                 tile_names=tiles,
                 profile=classification_profile,
+                boundary_mask=boundary_mask,
             )
             tile_image.close()
             tile_image = manual_tile_image

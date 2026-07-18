@@ -98,7 +98,11 @@ selected** before editing controls unlock. Point mode then labels individual
 pixels; Polygon mode digitizes QGIS-style training areas with a live outline
 and right-click or double-click completion. Every annotation receives an
 independent surface morphotype, biotope, and `-20000..9000 m` elevation.
-Points and polygons persist beside the source in
+Boundary mode digitizes one independent area-of-interest polygon. Pixels
+outside it are removed from adaptive clustering and manual learning, then
+written as `deep_ocean` at `-4000 m`; this keeps scan margins, legends, labels,
+and other surrounding noise out of the playable map. Points, polygons, and the
+optional boundary persist beside the source in
 `<image>.terrainlab-classification.json`; Build map reruns the adaptive
 colour/texture/spatial classifier. Polygon interiors are authoritative and
 provide bounded distributed training pixels without bloating the profile.

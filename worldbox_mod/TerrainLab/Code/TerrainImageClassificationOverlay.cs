@@ -24,7 +24,8 @@ namespace TerrainLab
     internal enum TerrainImageClassificationDrawMode
     {
         Point,
-        Polygon
+        Polygon,
+        MapBoundary
     }
 
     internal sealed class TerrainImageCanvasInput : MonoBehaviour,
@@ -151,6 +152,7 @@ namespace TerrainLab
         private Button _openSelectedButton;
         private Button _pointModeButton;
         private Button _polygonModeButton;
+        private Button _boundaryModeButton;
         private Button _finishPolygonButton;
         private Button _cancelPolygonButton;
         private TerrainImagePolygonGraphic _draftGraphic;
@@ -309,8 +311,8 @@ namespace TerrainLab
                 sourceY);
             try
             {
-                if (_drawMode ==
-                    TerrainImageClassificationDrawMode.Polygon)
+                if (_drawMode !=
+                    TerrainImageClassificationDrawMode.Point)
                 {
                     if (secondary)
                     {
@@ -334,6 +336,13 @@ namespace TerrainLab
                             false);
                         return;
                     }
+                }
+                else if (!_profile.IsInsideMapBoundary(sourceX, sourceY))
+                {
+                    SetPanelStatus(
+                        LM.Get("terrain_lab_manual_outside_boundary"),
+                        true);
+                    return;
                 }
                 else if (!TryReadSelection(
                              out TerrainImageClassOption surface,
@@ -388,7 +397,7 @@ namespace TerrainLab
                 "X {0}  Y {1}",
                 sourceX,
                 sourceY);
-            if (_drawMode != TerrainImageClassificationDrawMode.Polygon ||
+            if (_drawMode == TerrainImageClassificationDrawMode.Point ||
                 _draftVertices.Count == 0)
             {
                 return;
@@ -920,7 +929,7 @@ namespace TerrainLab
                         SetDrawMode(
                             TerrainImageClassificationDrawMode.Point);
                     },
-                    118f,
+                    78f,
                     "terrain_lab_manual_mode_point"));
             _polygonModeButton = TrackEditorControl(
                 CreateButton(
@@ -931,8 +940,19 @@ namespace TerrainLab
                         SetDrawMode(
                             TerrainImageClassificationDrawMode.Polygon);
                     },
-                    118f,
+                    78f,
                     "terrain_lab_manual_mode_polygon"));
+            _boundaryModeButton = TrackEditorControl(
+                CreateButton(
+                    drawModes,
+                    LM.Get("terrain_lab_manual_mode_boundary"),
+                    delegate
+                    {
+                        SetDrawMode(
+                            TerrainImageClassificationDrawMode.MapBoundary);
+                    },
+                    78f,
+                    "terrain_lab_manual_mode_boundary"));
 
             CreateLabel(
                 content,
@@ -1000,7 +1020,7 @@ namespace TerrainLab
                 string.Empty,
                 11,
                 FontStyle.Normal,
-                24f,
+                36f,
                 UnityColor.white);
             _coordinateLabel = CreateLabel(
                 content,
@@ -1029,7 +1049,7 @@ namespace TerrainLab
                 CreateButton(
                     polygonActions,
                     LM.Get("terrain_lab_manual_cancel_polygon"),
-                    delegate { CancelPolygon(true); },
+                    CancelPolygonOrBoundary,
                     118f,
                     "terrain_lab_manual_cancel_polygon"));
 
@@ -1115,11 +1135,24 @@ namespace TerrainLab
             HandlePointerExit();
             _drawMode = mode;
             UpdateModeButtons();
+            string statusKey;
+            switch (mode)
+            {
+                case TerrainImageClassificationDrawMode.Polygon:
+                    statusKey =
+                        "terrain_lab_manual_mode_polygon_active";
+                    break;
+                case TerrainImageClassificationDrawMode.MapBoundary:
+                    statusKey =
+                        "terrain_lab_manual_mode_boundary_active";
+                    break;
+                default:
+                    statusKey =
+                        "terrain_lab_manual_mode_point_active";
+                    break;
+            }
             SetPanelStatus(
-                LM.Get(
-                    mode == TerrainImageClassificationDrawMode.Point
-                        ? "terrain_lab_manual_mode_point_active"
-                        : "terrain_lab_manual_mode_polygon_active"),
+                LM.Get(statusKey),
                 false);
         }
 
@@ -1133,6 +1166,11 @@ namespace TerrainLab
                 _polygonModeButton,
                 _editorEnabled &&
                 _drawMode == TerrainImageClassificationDrawMode.Polygon);
+            SetModeButtonState(
+                _boundaryModeButton,
+                _editorEnabled &&
+                _drawMode ==
+                TerrainImageClassificationDrawMode.MapBoundary);
             if (_pointModeButton != null)
             {
                 _pointModeButton.interactable = _editorEnabled;
@@ -1141,18 +1179,72 @@ namespace TerrainLab
             {
                 _polygonModeButton.interactable = _editorEnabled;
             }
+            if (_boundaryModeButton != null)
+            {
+                _boundaryModeButton.interactable = _editorEnabled;
+            }
+
+            bool boundaryMode =
+                _drawMode ==
+                TerrainImageClassificationDrawMode.MapBoundary;
+            bool classificationControls =
+                _editorEnabled && !boundaryMode;
+            if (_surfaceDropdown != null)
+            {
+                _surfaceDropdown.interactable = classificationControls;
+            }
+            if (_biotopeDropdown != null)
+            {
+                _biotopeDropdown.interactable = classificationControls;
+            }
+            if (_elevationInput != null)
+            {
+                _elevationInput.interactable = classificationControls;
+            }
+
             bool polygonMode =
                 _editorEnabled &&
-                _drawMode == TerrainImageClassificationDrawMode.Polygon;
+                _drawMode != TerrainImageClassificationDrawMode.Point;
             if (_finishPolygonButton != null)
             {
                 _finishPolygonButton.interactable =
                     polygonMode && _draftVertices.Count >= 3;
+                string finishKey = boundaryMode
+                    ? "terrain_lab_manual_finish_boundary"
+                    : "terrain_lab_manual_finish_polygon";
+                SetButtonText(
+                    _finishPolygonButton,
+                    LM.Get(finishKey));
+                ConfigureTooltip(
+                    _finishPolygonButton.gameObject,
+                    finishKey);
             }
             if (_cancelPolygonButton != null)
             {
                 _cancelPolygonButton.interactable =
-                    polygonMode && _draftVertices.Count > 0;
+                    polygonMode &&
+                    (_draftVertices.Count > 0 ||
+                     boundaryMode && _profile?.MapBoundary != null);
+                string cancelKey = boundaryMode
+                    ? (_draftVertices.Count > 0
+                        ? "terrain_lab_manual_cancel_boundary"
+                        : "terrain_lab_manual_remove_boundary")
+                    : "terrain_lab_manual_cancel_polygon";
+                SetButtonText(
+                    _cancelPolygonButton,
+                    LM.Get(cancelKey));
+                ConfigureTooltip(
+                    _cancelPolygonButton.gameObject,
+                    cancelKey);
+            }
+        }
+
+        private static void SetButtonText(Button button, string value)
+        {
+            Text label = button?.GetComponentInChildren<Text>();
+            if (label != null)
+            {
+                label.text = value;
             }
         }
 
@@ -1177,7 +1269,11 @@ namespace TerrainLab
                 TerrainImageClassificationProfile.MaximumRegionVertices)
             {
                 SetPanelStatus(
-                    LM.Get("terrain_lab_manual_polygon_vertex_limit"),
+                    LM.Get(
+                        _drawMode ==
+                        TerrainImageClassificationDrawMode.MapBoundary
+                            ? "terrain_lab_manual_boundary_vertex_limit"
+                            : "terrain_lab_manual_polygon_vertex_limit"),
                     true);
                 return;
             }
@@ -1198,39 +1294,57 @@ namespace TerrainLab
             UpdateModeButtons();
             SetPanelStatus(
                 string.Format(
-                    LM.Get("terrain_lab_manual_polygon_vertex_format"),
+                    LM.Get(
+                        _drawMode ==
+                        TerrainImageClassificationDrawMode.MapBoundary
+                            ? "terrain_lab_manual_boundary_vertex_format"
+                            : "terrain_lab_manual_polygon_vertex_format"),
                     _draftVertices.Count),
                 false);
         }
 
         private void FinishPolygon()
         {
-            if (_drawMode != TerrainImageClassificationDrawMode.Polygon)
+            if (_drawMode == TerrainImageClassificationDrawMode.Point)
             {
                 return;
             }
             if (_draftVertices.Count < 3)
             {
                 SetPanelStatus(
-                    LM.Get("terrain_lab_manual_polygon_need_vertices"),
+                    LM.Get(
+                        _drawMode ==
+                        TerrainImageClassificationDrawMode.MapBoundary
+                            ? "terrain_lab_manual_boundary_need_vertices"
+                            : "terrain_lab_manual_polygon_need_vertices"),
                     true);
                 return;
             }
 
             try
             {
-                if (!TryReadSelection(
-                        out TerrainImageClassOption surface,
-                        out TerrainImageBiotopeOption biotope,
-                        out short elevation))
+                bool boundaryMode =
+                    _drawMode ==
+                    TerrainImageClassificationDrawMode.MapBoundary;
+                if (boundaryMode)
                 {
-                    return;
+                    _profile.SetMapBoundary(_draftVertices);
                 }
-                _profile.AddRegion(
-                    _draftVertices,
-                    surface.Id,
-                    biotope.Id,
-                    elevation);
+                else
+                {
+                    if (!TryReadSelection(
+                            out TerrainImageClassOption surface,
+                            out TerrainImageBiotopeOption biotope,
+                            out short elevation))
+                    {
+                        return;
+                    }
+                    _profile.AddRegion(
+                        _draftVertices,
+                        surface.Id,
+                        biotope.Id,
+                        elevation);
+                }
                 _draftVertices.Clear();
                 _hoverVertex = null;
                 _hasHoverVertex = false;
@@ -1239,7 +1353,10 @@ namespace TerrainLab
                 UpdateLabels();
                 UpdateModeButtons();
                 SetPanelStatus(
-                    LM.Get("terrain_lab_manual_polygon_saved"),
+                    LM.Get(
+                        boundaryMode
+                            ? "terrain_lab_manual_boundary_saved"
+                            : "terrain_lab_manual_polygon_saved"),
                     false);
             }
             catch (Exception exception)
@@ -1264,8 +1381,39 @@ namespace TerrainLab
             if (notify)
             {
                 SetPanelStatus(
-                    LM.Get("terrain_lab_manual_polygon_cancelled"),
+                    LM.Get(
+                        _drawMode ==
+                        TerrainImageClassificationDrawMode.MapBoundary
+                            ? "terrain_lab_manual_boundary_cancelled"
+                            : "terrain_lab_manual_polygon_cancelled"),
                     false);
+            }
+        }
+
+        private void CancelPolygonOrBoundary()
+        {
+            if (_drawMode !=
+                    TerrainImageClassificationDrawMode.MapBoundary ||
+                _draftVertices.Count > 0 ||
+                _profile?.MapBoundary == null)
+            {
+                CancelPolygon(true);
+                return;
+            }
+
+            try
+            {
+                _profile.ClearMapBoundary();
+                SaveProfile();
+                RebuildAnnotations();
+                UpdateLabels();
+                SetPanelStatus(
+                    LM.Get("terrain_lab_manual_boundary_removed"),
+                    false);
+            }
+            catch (Exception exception)
+            {
+                SetPanelStatus(exception.Message, true);
             }
         }
 
@@ -1377,6 +1525,7 @@ namespace TerrainLab
             if (_profile == null ||
                 ((_profile.Samples?.Count ?? 0) == 0 &&
                  (_profile.Regions?.Count ?? 0) == 0 &&
+                 _profile.MapBoundary == null &&
                  _draftVertices.Count == 0))
             {
                 SetPanelStatus(
@@ -1398,6 +1547,7 @@ namespace TerrainLab
             {
                 _profile.Samples.Clear();
                 _profile.Regions.Clear();
+                _profile.ClearMapBoundary();
                 _draftVertices.Clear();
                 SaveProfile();
                 RebuildAnnotations();
@@ -1626,6 +1776,19 @@ namespace TerrainLab
                 return;
             }
 
+            if (_profile.MapBoundary?.Vertices?.Count >= 3)
+            {
+                TerrainImagePolygonGraphic boundary =
+                    CreatePolygonGraphic(
+                        _profile.MapBoundary.Vertices,
+                        "map_boundary",
+                        true,
+                        false,
+                        "TerrainLabClassificationMapBoundary",
+                        0.035f);
+                _regionGraphics.Add(boundary);
+            }
+
             foreach (TerrainImageClassificationRegion region in
                      _profile.Regions ??
                      Enumerable.Empty<TerrainImageClassificationRegion>())
@@ -1674,7 +1837,8 @@ namespace TerrainLab
             string surface,
             bool closed,
             bool showVertices,
-            string objectName)
+            string objectName,
+            float closedFillAlpha = 0.22f)
         {
             GameObject polygonObject = new GameObject(
                 objectName,
@@ -1696,7 +1860,8 @@ namespace TerrainLab
                 GetSurfaceColor(surface),
                 closed,
                 showVertices,
-                1f / Mathf.Max(_zoom, 0.01f));
+                1f / Mathf.Max(_zoom, 0.01f),
+                closedFillAlpha);
             return graphic;
         }
 
@@ -1706,11 +1871,15 @@ namespace TerrainLab
             {
                 return;
             }
+            bool boundaryMode =
+                _drawMode ==
+                TerrainImageClassificationDrawMode.MapBoundary;
             if (_draftVertices.Count == 0 ||
-                _surfaceDropdown == null ||
-                _surfaceDropdown.value < 0 ||
-                _surfaceDropdown.value >=
-                TerrainImageClassificationCatalog.Surfaces.Count)
+                !boundaryMode &&
+                (_surfaceDropdown == null ||
+                 _surfaceDropdown.value < 0 ||
+                 _surfaceDropdown.value >=
+                 TerrainImageClassificationCatalog.Surfaces.Count))
             {
                 if (_draftGraphic != null)
                 {
@@ -1720,8 +1889,9 @@ namespace TerrainLab
                 return;
             }
 
-            string surface =
-                TerrainImageClassificationCatalog.Surfaces[
+            string surface = boundaryMode
+                ? "map_boundary"
+                : TerrainImageClassificationCatalog.Surfaces[
                     _surfaceDropdown.value].Id;
             List<TerrainImageClassificationVertex> displayVertices =
                 new List<TerrainImageClassificationVertex>(_draftVertices);
@@ -1811,7 +1981,8 @@ namespace TerrainLab
                 TerrainImageClassificationProfile.MaximumSamples,
                 _profile.Regions.Count,
                 TerrainImageClassificationProfile.MaximumRegions,
-                _draftVertices.Count);
+                _draftVertices.Count,
+                _profile.MapBoundary?.Vertices?.Count ?? 0);
             UpdateModeButtons();
         }
 
@@ -1898,6 +2069,8 @@ namespace TerrainLab
         {
             switch (surface)
             {
+                case "map_boundary":
+                    return new UnityColor(0.12f, 0.95f, 1f, 1f);
                 case "deep_ocean":
                     return new UnityColor(0.15f, 0.35f, 0.95f, 1f);
                 case "shelf":
