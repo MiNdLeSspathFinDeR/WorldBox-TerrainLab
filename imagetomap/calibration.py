@@ -7,6 +7,7 @@ from typing import Any, Dict, Mapping, Optional, Sequence, Tuple
 
 import numpy as np
 from PIL import Image as Img
+from PIL import ImageDraw
 from PIL.Image import Image
 
 from .consts import ELEVATION_MAXIMUM, ELEVATION_MINIMUM, ELEVATION_NODATA
@@ -26,6 +27,11 @@ GENERATED_ELEVATION_FILE_NAME = "terrainlab-elevation.tif"
 GENERATED_PROFILE_FILE_NAME = "terrainlab-classification.json"
 MAXIMUM_PROFILE_BYTES = 4 * 1024 * 1024
 MAXIMUM_SAMPLES = 512
+MAXIMUM_REGIONS = 128
+MAXIMUM_REGION_VERTICES = 256
+MAXIMUM_TOTAL_REGION_VERTICES = 8192
+MAXIMUM_EFFECTIVE_SAMPLES = 512
+MAXIMUM_REGION_TRAINING_SAMPLES = 32
 
 SURFACE_IDS = (
     "deep_ocean",
@@ -88,6 +94,14 @@ class ClassificationSample:
 
 
 @dataclass(frozen=True)
+class ClassificationRegion:
+    vertices: Tuple[Tuple[int, int], ...]
+    surface: str
+    biotope: str
+    elevation: int
+
+
+@dataclass(frozen=True)
 class ClassificationProfile:
     source_file_name: str
     source_width: int
@@ -101,6 +115,7 @@ class ClassificationProfile:
     elevation_power: float = 2.0
     elevation_smoothing: int = 1
     interpolate_elevation_globally: bool = True
+    regions: Tuple[ClassificationRegion, ...] = ()
 
     def to_json_dict(self) -> Dict[str, Any]:
         return {
@@ -132,6 +147,18 @@ class ClassificationProfile:
                 }
                 for sample in self.samples
             ],
+            "regions": [
+                {
+                    "vertices": [
+                        {"x": vertex[0], "y": vertex[1]}
+                        for vertex in region.vertices
+                    ],
+                    "surface": region.surface,
+                    "biotope": region.biotope,
+                    "elevation": region.elevation,
+                }
+                for region in self.regions
+            ],
         }
 
 
@@ -149,7 +176,7 @@ def load_classification_profile(
     if path.stat().st_size > MAXIMUM_PROFILE_BYTES:
         raise ValueError("classification profile exceeds 4 MiB")
 
-    payload = json.loads(path.read_text(encoding="utf-8"))
+    payload = json.loads(path.read_text(encoding="utf-8-sig"))
     if not isinstance(payload, dict) or payload.get("schema_version") != 1:
         raise ValueError("classification profile schema_version must be 1")
 
@@ -166,9 +193,9 @@ def load_classification_profile(
             f"{source_size[0]}x{source_size[1]}"
         )
 
-    raw_samples = payload.get("samples")
-    if not isinstance(raw_samples, list) or not raw_samples:
-        raise ValueError("classification profile must contain at least one sample")
+    raw_samples = payload.get("samples", [])
+    if not isinstance(raw_samples, list):
+        raise ValueError("classification profile samples must be a JSON array")
     if len(raw_samples) > MAXIMUM_SAMPLES:
         raise ValueError(
             f"classification profile has more than {MAXIMUM_SAMPLES} samples"
@@ -214,6 +241,98 @@ def load_classification_profile(
         seen.add(coordinate)
         samples.append(ClassificationSample(x, y, surface, biotope, elevation))
 
+    raw_regions = payload.get("regions", [])
+    if not isinstance(raw_regions, list):
+        raise ValueError("classification profile regions must be a JSON array")
+    if len(raw_regions) > MAXIMUM_REGIONS:
+        raise ValueError(
+            f"classification profile has more than {MAXIMUM_REGIONS} regions"
+        )
+
+    regions = []
+    total_vertices = 0
+    for index, raw_region in enumerate(raw_regions):
+        region_data = _mapping(raw_region, f"regions[{index}]")
+        raw_vertices = region_data.get("vertices")
+        if not isinstance(raw_vertices, list):
+            raise ValueError(f"regions[{index}].vertices must be a JSON array")
+        if len(raw_vertices) > MAXIMUM_REGION_VERTICES + 1:
+            raise ValueError(
+                f"regions[{index}] has more than "
+                f"{MAXIMUM_REGION_VERTICES} vertices"
+            )
+
+        vertices = []
+        for vertex_index, raw_vertex in enumerate(raw_vertices):
+            vertex_data = _mapping(
+                raw_vertex,
+                f"regions[{index}].vertices[{vertex_index}]",
+            )
+            vertices.append(
+                (
+                    _integer(
+                        vertex_data.get("x"),
+                        f"regions[{index}].vertices[{vertex_index}].x",
+                        0,
+                        source_width - 1,
+                    ),
+                    _integer(
+                        vertex_data.get("y"),
+                        f"regions[{index}].vertices[{vertex_index}].y",
+                        0,
+                        source_height - 1,
+                    ),
+                )
+            )
+        if len(vertices) >= 4 and vertices[0] == vertices[-1]:
+            vertices.pop()
+        _validate_polygon(vertices, f"regions[{index}]")
+        total_vertices += len(vertices)
+        if total_vertices > MAXIMUM_TOTAL_REGION_VERTICES:
+            raise ValueError(
+                "classification profile has more than "
+                f"{MAXIMUM_TOTAL_REGION_VERTICES} region vertices"
+            )
+
+        surface = str(region_data.get("surface") or "").strip().lower()
+        biotope = str(region_data.get("biotope") or "auto").strip().lower()
+        elevation = _integer(
+            region_data.get("elevation"),
+            f"regions[{index}].elevation",
+            ELEVATION_MINIMUM,
+            ELEVATION_NODATA,
+        )
+        if elevation == ELEVATION_NODATA:
+            raise ValueError("9999 is reserved for DEM NODATA")
+        if elevation > ELEVATION_MAXIMUM:
+            raise ValueError(
+                f"regions[{index}].elevation must be between "
+                f"{ELEVATION_MINIMUM} and {ELEVATION_MAXIMUM}"
+            )
+        if surface not in SURFACE_IDS:
+            raise ValueError(
+                f"regions[{index}].surface must be one of "
+                f"{', '.join(SURFACE_IDS)}"
+            )
+        if biotope not in BIOTOPE_IDS:
+            raise ValueError(
+                f"regions[{index}].biotope must be one of "
+                f"{', '.join(BIOTOPE_IDS)}"
+            )
+        regions.append(
+            ClassificationRegion(
+                vertices=tuple(vertices),
+                surface=surface,
+                biotope=biotope,
+                elevation=elevation,
+            )
+        )
+
+    if not samples and not regions:
+        raise ValueError(
+            "classification profile must contain at least one sample or region"
+        )
+
     settings = payload.get("settings")
     if settings is None:
         settings = {}
@@ -241,6 +360,7 @@ def load_classification_profile(
         source_width=source_width,
         source_height=source_height,
         samples=tuple(samples),
+        regions=tuple(regions),
         color_weight=weights[0],
         texture_weight=weights[1],
         spatial_weight=weights[2],
@@ -280,7 +400,7 @@ def apply_manual_classification(
     tile_names: Sequence[str],
     profile: ClassificationProfile,
 ) -> Tuple[Image, np.ndarray]:
-    """Apply point labels using adaptive colour, texture, and spatial distance."""
+    """Apply point and polygon labels with bounded adaptive propagation."""
     if image.size != automatic_tiles.size:
         raise ValueError("manual classifier inputs must have matching dimensions")
     if (profile.source_width, profile.source_height) == (0, 0):
@@ -294,10 +414,22 @@ def apply_manual_classification(
     flat_automatic = np.asarray(automatic_tiles, dtype=np.uint8).reshape(-1)
     flat_result = flat_automatic.copy()
 
+    region_labels = _rasterize_regions(profile, width, height)
+    effective_samples = _make_effective_samples(
+        profile,
+        region_labels,
+        width,
+        height,
+    )
+    if not effective_samples:
+        raise ValueError(
+            "classification profile does not cover a target pixel"
+        )
     sample_positions, sample_indices = _sample_target_positions(
         profile,
         width,
         height,
+        effective_samples,
     )
     sample_color = flat_color[sample_indices]
     sample_texture = flat_texture[sample_indices]
@@ -309,17 +441,20 @@ def apply_manual_classification(
                 int(flat_automatic[target_index]),
                 tile_names,
             )
-            for sample, target_index in zip(profile.samples, sample_indices)
+            for sample, target_index in zip(effective_samples, sample_indices)
         ],
         dtype=np.uint8,
     )
 
-    sample_surface_indices = np.arange(len(profile.samples), dtype=np.int16)
-    assigned_sample = np.full(flat_result.shape, -1, dtype=np.int16)
+    sample_surface_indices = np.asarray(
+        [SURFACE_IDS.index(sample.surface) for sample in effective_samples],
+        dtype=np.int8,
+    )
+    assigned_surface = np.full(flat_result.shape, -1, dtype=np.int8)
     local_squared = profile.local_influence * profile.local_influence
     chunk_size = max(
         512,
-        min(16384, 1_000_000 // max(1, len(profile.samples))),
+        min(16384, 1_000_000 // max(1, len(effective_samples))),
     )
     for start in range(0, flat_result.size, chunk_size):
         end = min(flat_result.size, start + chunk_size)
@@ -353,7 +488,7 @@ def apply_manual_classification(
             color_distance[rows, nearest] + texture_distance[rows, nearest]
         )
         nearest_spatial = spatial_distance[rows, nearest]
-        if len(profile.samples) == 1:
+        if len(effective_samples) == 1:
             apply_mask = nearest_spatial <= local_squared
         else:
             apply_mask = (
@@ -361,25 +496,62 @@ def apply_manual_classification(
             ) | (nearest_spatial <= local_squared)
         target = flat_result[start:end]
         target[apply_mask] = sample_tiles[nearest[apply_mask]]
-        assigned = assigned_sample[start:end]
+        assigned = assigned_surface[start:end]
         assigned[apply_mask] = sample_surface_indices[nearest[apply_mask]]
 
+    flat_region_labels = region_labels.reshape(-1)
+    for region_index, region in enumerate(profile.regions):
+        region_mask = flat_region_labels == region_index
+        if not np.any(region_mask):
+            continue
+        tile_lookup = np.asarray(
+            [
+                _resolve_tile_index(
+                    region.surface,
+                    region.biotope,
+                    automatic_index,
+                    tile_names,
+                )
+                for automatic_index in range(len(tile_names))
+            ],
+            dtype=np.uint8,
+        )
+        flat_result[region_mask] = tile_lookup[flat_automatic[region_mask]]
+        assigned_surface[region_mask] = SURFACE_IDS.index(region.surface)
+
     # The exact sampled cell and its immediate neighbors are authoritative.
-    for sample_offset, target_index in enumerate(sample_indices):
+    point_positions, point_indices = _sample_target_positions(
+        profile,
+        width,
+        height,
+        profile.samples,
+    )
+    del point_positions
+    for sample_offset, target_index in enumerate(point_indices):
+        sample = profile.samples[sample_offset]
+        sample_tile = _resolve_tile_index(
+            sample.surface,
+            sample.biotope,
+            int(flat_automatic[target_index]),
+            tile_names,
+        )
+        surface_index = SURFACE_IDS.index(sample.surface)
         target_y, target_x = divmod(int(target_index), width)
         for y in range(max(0, target_y - 1), min(height, target_y + 2)):
             row_start = y * width
             for x in range(max(0, target_x - 1), min(width, target_x + 2)):
                 index = row_start + x
-                flat_result[index] = sample_tiles[sample_offset]
-                assigned_sample[index] = sample_offset
+                flat_result[index] = sample_tile
+                assigned_surface[index] = surface_index
 
     result = make_index_image(flat_result.reshape((height, width)), tile_names)
     elevation = _interpolate_elevation(
         width,
         height,
         profile,
-        assigned_sample.reshape((height, width)),
+        effective_samples,
+        assigned_surface.reshape((height, width)),
+        region_labels,
     )
     return result, elevation
 
@@ -513,10 +685,12 @@ def _sample_target_positions(
     profile: ClassificationProfile,
     width: int,
     height: int,
+    samples: Optional[Sequence[ClassificationSample]] = None,
 ) -> Tuple[np.ndarray, np.ndarray]:
     positions = []
     indices = []
-    for sample in profile.samples:
+    source_samples = profile.samples if samples is None else samples
+    for sample in source_samples:
         normalized_x = (sample.x + 0.5) / profile.source_width
         normalized_y = (sample.y + 0.5) / profile.source_height
         x = min(width - 1, max(0, int(normalized_x * width)))
@@ -527,6 +701,128 @@ def _sample_target_positions(
         np.asarray(positions, dtype=np.float32),
         np.asarray(indices, dtype=np.int64),
     )
+
+
+def _rasterize_regions(
+    profile: ClassificationProfile,
+    width: int,
+    height: int,
+) -> np.ndarray:
+    labels_image = Img.new("I", (width, height), -1)
+    try:
+        drawing = ImageDraw.Draw(labels_image)
+        for region_index, region in enumerate(profile.regions):
+            vertices = []
+            for source_x, source_y in region.vertices:
+                target_x = int(
+                    round(
+                        ((source_x + 0.5) / profile.source_width) * width
+                        - 0.5
+                    )
+                )
+                target_y = int(
+                    round(
+                        ((source_y + 0.5) / profile.source_height) * height
+                        - 0.5
+                    )
+                )
+                vertices.append(
+                    (
+                        min(width - 1, max(0, target_x)),
+                        min(height - 1, max(0, target_y)),
+                    )
+                )
+            drawing.polygon(vertices, fill=region_index)
+        return np.asarray(labels_image, dtype=np.int32).copy()
+    finally:
+        labels_image.close()
+
+
+def _make_effective_samples(
+    profile: ClassificationProfile,
+    region_labels: np.ndarray,
+    width: int,
+    height: int,
+) -> Tuple[ClassificationSample, ...]:
+    samples = list(profile.samples)
+    remaining = max(0, MAXIMUM_EFFECTIVE_SAMPLES - len(samples))
+    if remaining == 0 or not profile.regions:
+        return tuple(samples)
+
+    occupied = {(sample.x, sample.y) for sample in samples}
+    flat_labels = region_labels.reshape(-1)
+    candidate_groups = []
+    for region_index, region in enumerate(profile.regions):
+        region_indices = np.flatnonzero(flat_labels == region_index)
+        if region_indices.size == 0:
+            candidate_groups.append([])
+            continue
+
+        desired = min(
+            MAXIMUM_REGION_TRAINING_SAMPLES,
+            int(region_indices.size),
+            max(4, int(math.ceil(math.sqrt(region_indices.size) / 16.0))),
+        )
+        offsets = np.linspace(
+            0,
+            region_indices.size - 1,
+            num=desired,
+            dtype=np.int64,
+        )
+        candidates = []
+        for target_index in region_indices[offsets]:
+            target_y, target_x = divmod(int(target_index), width)
+            source_x = min(
+                profile.source_width - 1,
+                max(
+                    0,
+                    int(
+                        ((target_x + 0.5) / width)
+                        * profile.source_width
+                    ),
+                ),
+            )
+            source_y = min(
+                profile.source_height - 1,
+                max(
+                    0,
+                    int(
+                        ((target_y + 0.5) / height)
+                        * profile.source_height
+                    ),
+                ),
+            )
+            coordinate = (source_x, source_y)
+            if coordinate in occupied:
+                continue
+            occupied.add(coordinate)
+            candidates.append(
+                ClassificationSample(
+                    x=source_x,
+                    y=source_y,
+                    surface=region.surface,
+                    biotope=region.biotope,
+                    elevation=region.elevation,
+                )
+            )
+        candidate_groups.append(candidates)
+
+    round_index = 0
+    while remaining > 0:
+        added = False
+        for candidates in candidate_groups:
+            if round_index >= len(candidates):
+                continue
+            samples.append(candidates[round_index])
+            remaining -= 1
+            added = True
+            if remaining == 0:
+                break
+        if not added:
+            break
+        round_index += 1
+
+    return tuple(samples)
 
 
 def _resolve_tile_index(
@@ -577,7 +873,9 @@ def _interpolate_elevation(
     width: int,
     height: int,
     profile: ClassificationProfile,
-    assigned_sample: np.ndarray,
+    effective_samples: Sequence[ClassificationSample],
+    assigned_surface: np.ndarray,
+    region_labels: np.ndarray,
 ) -> np.ndarray:
     maximum_dimension = 512
     scale = min(1.0, maximum_dimension / max(width, height))
@@ -587,9 +885,10 @@ def _interpolate_elevation(
         profile,
         coarse_width,
         coarse_height,
+        effective_samples,
     )
     sample_elevations = np.asarray(
-        [sample.elevation for sample in profile.samples],
+        [sample.elevation for sample in effective_samples],
         dtype=np.float32,
     )
 
@@ -597,9 +896,9 @@ def _interpolate_elevation(
     interpolated = np.empty(total, dtype=np.float32)
     chunk_size = max(
         512,
-        min(32768, 1_500_000 // max(1, len(profile.samples))),
+        min(32768, 1_500_000 // max(1, len(effective_samples))),
     )
-    nearest_count = min(8, len(profile.samples))
+    nearest_count = min(8, len(effective_samples))
     for start in range(0, total, chunk_size):
         end = min(total, start + chunk_size)
         positions = np.arange(start, end, dtype=np.int64)
@@ -614,7 +913,7 @@ def _interpolate_elevation(
         )
         delta = normalized[:, None, :] - sample_positions[None, :, :]
         distance_squared = np.sum(delta * delta, axis=2)
-        if nearest_count < len(profile.samples):
+        if nearest_count < len(effective_samples):
             nearest = np.argpartition(
                 distance_squared,
                 nearest_count - 1,
@@ -653,27 +952,33 @@ def _interpolate_elevation(
 
     nodata_mask = np.zeros(full.shape, dtype=bool)
     if not profile.interpolate_elevation_globally:
-        nodata_mask = assigned_sample < 0
+        nodata_mask = assigned_surface < 0
+
+    for region_index, region in enumerate(profile.regions):
+        mask = region_labels == region_index
+        if np.any(mask):
+            full[mask] = region.elevation
 
     sample_positions_full, sample_indices = _sample_target_positions(
         profile,
         width,
         height,
+        profile.samples,
     )
     del sample_positions_full
     for sample, target_index in zip(profile.samples, sample_indices):
         y, x = divmod(int(target_index), width)
         full[y, x] = sample.elevation
 
-    for sample_index, sample in enumerate(profile.samples):
-        mask = assigned_sample == sample_index
+    for surface_index, surface in enumerate(SURFACE_IDS):
+        mask = assigned_surface == surface_index
         if not np.any(mask):
             continue
-        if sample.surface == "deep_ocean":
+        if surface == "deep_ocean":
             full[mask] = np.minimum(full[mask], -151.0)
-        elif sample.surface == "shelf":
+        elif surface == "shelf":
             full[mask] = np.clip(full[mask], -150.0, -6.0)
-        elif sample.surface == "shallow_water":
+        elif surface == "shallow_water":
             full[mask] = np.clip(full[mask], -5.0, -1.0)
 
     full = np.clip(full, ELEVATION_MINIMUM, ELEVATION_MAXIMUM)
@@ -681,6 +986,124 @@ def _interpolate_elevation(
     result[(result == ELEVATION_NODATA) & ~nodata_mask] = ELEVATION_MAXIMUM
     result[nodata_mask] = ELEVATION_NODATA
     return result
+
+
+def _validate_polygon(
+    vertices: Sequence[Tuple[int, int]],
+    name: str,
+) -> None:
+    if len(vertices) < 3:
+        raise ValueError(f"{name} must contain at least three vertices")
+    if len(vertices) > MAXIMUM_REGION_VERTICES:
+        raise ValueError(
+            f"{name} has more than {MAXIMUM_REGION_VERTICES} vertices"
+        )
+    if len(set(vertices)) != len(vertices):
+        raise ValueError(f"{name} contains duplicate vertices")
+
+    count = len(vertices)
+    for first in range(count):
+        first_next = (first + 1) % count
+        for second in range(first + 1, count):
+            second_next = (second + 1) % count
+            if (
+                first == second
+                or first_next == second
+                or second_next == first
+            ):
+                continue
+            if _segments_intersect(
+                vertices[first],
+                vertices[first_next],
+                vertices[second],
+                vertices[second_next],
+            ):
+                raise ValueError(f"{name} is self-intersecting")
+    if _polygon_area_twice(vertices) == 0:
+        raise ValueError(f"{name} has zero area")
+
+
+def _polygon_area_twice(vertices: Sequence[Tuple[int, int]]) -> int:
+    area = 0
+    previous_x, previous_y = vertices[-1]
+    for x, y in vertices:
+        area += previous_x * y - x * previous_y
+        previous_x, previous_y = x, y
+    return area
+
+
+def _segments_intersect(
+    first_start: Tuple[int, int],
+    first_end: Tuple[int, int],
+    second_start: Tuple[int, int],
+    second_end: Tuple[int, int],
+) -> bool:
+    first_orientation = _orientation(
+        first_start,
+        first_end,
+        second_start,
+    )
+    second_orientation = _orientation(
+        first_start,
+        first_end,
+        second_end,
+    )
+    third_orientation = _orientation(
+        second_start,
+        second_end,
+        first_start,
+    )
+    fourth_orientation = _orientation(
+        second_start,
+        second_end,
+        first_end,
+    )
+    if (
+        first_orientation == 0
+        and _point_on_segment(second_start, first_start, first_end)
+    ):
+        return True
+    if (
+        second_orientation == 0
+        and _point_on_segment(second_end, first_start, first_end)
+    ):
+        return True
+    if (
+        third_orientation == 0
+        and _point_on_segment(first_start, second_start, second_end)
+    ):
+        return True
+    if (
+        fourth_orientation == 0
+        and _point_on_segment(first_end, second_start, second_end)
+    ):
+        return True
+    return (
+        (first_orientation > 0) != (second_orientation > 0)
+        and (third_orientation > 0) != (fourth_orientation > 0)
+    )
+
+
+def _orientation(
+    start: Tuple[int, int],
+    end: Tuple[int, int],
+    point: Tuple[int, int],
+) -> int:
+    return (
+        (end[0] - start[0]) * (point[1] - start[1])
+        - (end[1] - start[1]) * (point[0] - start[0])
+    )
+
+
+def _point_on_segment(
+    point: Tuple[int, int],
+    start: Tuple[int, int],
+    end: Tuple[int, int],
+) -> bool:
+    return (
+        min(start[0], end[0]) <= point[0] <= max(start[0], end[0])
+        and min(start[1], end[1]) <= point[1] <= max(start[1], end[1])
+    )
 
 
 def _mapping(value: Any, name: str) -> Mapping[str, Any]:

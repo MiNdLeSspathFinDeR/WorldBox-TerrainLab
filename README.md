@@ -91,13 +91,17 @@ converter, active file, and failures. The in-game watcher accepts `PNG`,
 it does not accept SVG, PDF, PSD, or archives. Drop one of those rasters there
 after enabling the watcher; each stable image becomes a new `saveN` slot while
 the open world remains untouched. The Project chapter's manual-classification
-command opens a source raster over the map. Each clicked pixel can receive an
+command opens a source raster over the map. Point mode labels individual
+pixels; Polygon mode digitizes QGIS-style training areas with a live outline
+and right-click or double-click completion. Every annotation receives an
 independent surface morphotype, biotope, and `-20000..9000 m` elevation.
-Samples persist beside the source in
+Points and polygons persist beside the source in
 `<image>.terrainlab-classification.json`; Build map reruns the adaptive
-colour/texture/spatial classifier and publishes `terrainlab-elevation.tif`
-with the new save so TerrainLab can restore the interpolated Int16 DEM when
-that world is opened. Save opens a name form before writing the
+colour/texture/spatial classifier. Polygon interiors are authoritative and
+provide bounded distributed training pixels without bloating the profile.
+The conversion publishes `terrainlab-elevation.tif` with the new save so
+TerrainLab can restore the interpolated Int16 DEM when that world is opened.
+Save opens a name form before writing the
 ordinary map and WBXGEO sidecar. The other pages hold numeric parameters, layer
 diagnostics, and settings. Erosion provides a deterministic,
 exact-mass-balance preview that can be applied as one undoable DEM edit. See

@@ -2157,9 +2157,10 @@ namespace TerrainLab
                             LM.Get(
                                 "terrain_lab_manual_active_format"),
                             _classificationOverlay.CurrentImageName,
-                            _classificationOverlay.SampleCount),
+                            _classificationOverlay.SampleCount,
+                            _classificationOverlay.RegionCount),
                         SuccessText,
-                        30f);
+                        42f);
                 }
                 if (imageWorkspace.FailedCount > 0)
                 {

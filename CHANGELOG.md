@@ -2,6 +2,23 @@
 
 ## Unreleased
 
+## 1.8.0 - 2026-07-18
+
+- Added QGIS-style polygon training to the manual image classifier. Point and
+  Polygon modes are explicit; polygon vertices use a live rubber band and can
+  be completed by right-click, double-click, or the panel command.
+- Classification profiles now store up to 128 validated simple polygons, 256
+  vertices per polygon, and 8192 total polygon vertices without expanding the
+  sidecar into millions of pixel samples. Existing point-only schema-1
+  profiles remain compatible.
+- Every output cell covered by a polygon receives its surface, biotope, and
+  elevation authoritatively. Up to 32 spatially distributed interior pixels
+  per polygon feed the bounded colour/texture/spatial classifier and IDW DEM,
+  giving broad training areas stronger influence outside their exact boundary.
+- Added translucent filled polygon rendering, active mode highlighting,
+  unfinished-ring undo/cancel, point-or-polygon removal, scrollable controls,
+  and complete Russian/English hover guidance.
+
 ## 1.7.0 - 2026-07-18
 
 - Added an in-game manual raster-classification canvas over the WorldBox map.

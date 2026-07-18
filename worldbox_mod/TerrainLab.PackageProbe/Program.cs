@@ -748,6 +748,17 @@ internal static class Program
             "plain",
             "grass",
             120);
+        profile.AddRegion(
+            new[]
+            {
+                new TerrainImageClassificationVertex(40, 40),
+                new TerrainImageClassificationVertex(160, 35),
+                new TerrainImageClassificationVertex(180, 120),
+                new TerrainImageClassificationVertex(55, 135)
+            },
+            "upland",
+            "savanna",
+            900);
         profile.Save(imagePath);
 
         TerrainImageClassificationProfile restored =
@@ -760,6 +771,11 @@ internal static class Program
             restored.Samples[0].Surface == "rocks" &&
             restored.Samples[0].Elevation == 3200 &&
             restored.Samples[1].Biotope == "grass" &&
+            restored.Regions.Count == 1 &&
+            restored.Regions[0].Vertices.Count == 4 &&
+            restored.Regions[0].Surface == "upland" &&
+            restored.Regions[0].Elevation == 900 &&
+            restored.HasUsableTraining &&
             restored.Settings.InterpolateElevationGlobally,
             "Manual classification profile did not round-trip.");
         Assert(
@@ -785,6 +801,33 @@ internal static class Program
         Assert(
             rejectedNoData,
             "Manual classification accepted reserved NODATA as a height.");
+
+        bool rejectedSelfIntersection = false;
+        try
+        {
+            restored.AddRegion(
+                new[]
+                {
+                    new TerrainImageClassificationVertex(20, 20),
+                    new TerrainImageClassificationVertex(100, 100),
+                    new TerrainImageClassificationVertex(20, 100),
+                    new TerrainImageClassificationVertex(100, 20)
+                },
+                "plain",
+                "auto",
+                100);
+        }
+        catch (InvalidDataException)
+        {
+            rejectedSelfIntersection = true;
+        }
+        Assert(
+            rejectedSelfIntersection,
+            "Manual classification accepted a self-intersecting polygon.");
+        Assert(
+            restored.RemoveRegionAt(80, 80) &&
+            restored.Regions.Count == 0,
+            "Manual classification could not remove a polygon by location.");
     }
 
     private static void ValidateGeneratedDem(

@@ -196,10 +196,48 @@ namespace TerrainLab
         public short Elevation { get; set; }
     }
 
+    public sealed class TerrainImageClassificationVertex
+    {
+        public TerrainImageClassificationVertex()
+        {
+        }
+
+        public TerrainImageClassificationVertex(int x, int y)
+        {
+            X = x;
+            Y = y;
+        }
+
+        [JsonProperty("x")]
+        public int X { get; set; }
+
+        [JsonProperty("y")]
+        public int Y { get; set; }
+    }
+
+    public sealed class TerrainImageClassificationRegion
+    {
+        [JsonProperty("vertices")]
+        public List<TerrainImageClassificationVertex> Vertices { get; set; } =
+            new List<TerrainImageClassificationVertex>();
+
+        [JsonProperty("surface")]
+        public string Surface { get; set; }
+
+        [JsonProperty("biotope")]
+        public string Biotope { get; set; }
+
+        [JsonProperty("elevation")]
+        public short Elevation { get; set; }
+    }
+
     public sealed class TerrainImageClassificationProfile
     {
         public const int CurrentSchemaVersion = 1;
         public const int MaximumSamples = 512;
+        public const int MaximumRegions = 128;
+        public const int MaximumRegionVertices = 256;
+        public const int MaximumTotalRegionVertices = 8192;
         public const int MaximumProfileBytes = 4 * 1024 * 1024;
         public const string SidecarSuffix =
             ".terrainlab-classification.json";
@@ -218,8 +256,17 @@ namespace TerrainLab
         public List<TerrainImageClassificationSample> Samples { get; set; } =
             new List<TerrainImageClassificationSample>();
 
+        [JsonProperty("regions")]
+        public List<TerrainImageClassificationRegion> Regions { get; set; } =
+            new List<TerrainImageClassificationRegion>();
+
         [JsonProperty("updated_utc")]
         public string UpdatedUtc { get; set; }
+
+        [JsonIgnore]
+        public bool HasUsableTraining =>
+            (Samples?.Count ?? 0) >= 2 ||
+            (Regions?.Count ?? 0) >= 1;
 
         public static string GetSidecarPath(string imagePath)
         {
@@ -341,8 +388,81 @@ namespace TerrainLab
             Validate(Source.Width, Source.Height);
         }
 
-        public bool RemoveLastSample()
+        public void AddRegion(
+            IEnumerable<TerrainImageClassificationVertex> vertices,
+            string surface,
+            string biotope,
+            short elevation)
         {
+            if (Source == null)
+            {
+                throw new InvalidOperationException(
+                    "Classification profile has no source image.");
+            }
+            if (TerrainImageClassificationCatalog.FindSurface(surface) == null ||
+                TerrainImageClassificationCatalog.FindBiotope(biotope) == null ||
+                !TerrainElevationEncoding.IsDataValue(elevation) ||
+                elevation == TerrainElevationEncoding.NoData)
+            {
+                throw new InvalidDataException(
+                    "Manual classification region has invalid class values.");
+            }
+            if (Regions == null)
+            {
+                Regions = new List<TerrainImageClassificationRegion>();
+            }
+            if (Regions.Count >= MaximumRegions)
+            {
+                throw new InvalidOperationException(
+                    "Manual classification is limited to 128 regions.");
+            }
+
+            List<TerrainImageClassificationVertex> copied =
+                vertices?
+                    .Select(vertex =>
+                        vertex == null
+                            ? null
+                            : new TerrainImageClassificationVertex(
+                                vertex.X,
+                                vertex.Y))
+                    .ToList() ??
+                new List<TerrainImageClassificationVertex>();
+            if (copied.Count >= 4 &&
+                copied[0].X == copied[copied.Count - 1].X &&
+                copied[0].Y == copied[copied.Count - 1].Y)
+            {
+                copied.RemoveAt(copied.Count - 1);
+            }
+            ValidateRegionVertices(
+                copied,
+                Source.Width,
+                Source.Height);
+            int totalVertices = Regions.Sum(region =>
+                region?.Vertices?.Count ?? 0);
+            if (totalVertices + copied.Count > MaximumTotalRegionVertices)
+            {
+                throw new InvalidOperationException(
+                    "Manual classification is limited to 8192 polygon vertices.");
+            }
+
+            Regions.Add(
+                new TerrainImageClassificationRegion
+                {
+                    Vertices = copied,
+                    Surface = surface,
+                    Biotope = biotope,
+                    Elevation = elevation
+                });
+            Validate(Source.Width, Source.Height);
+        }
+
+        public bool RemoveLastAnnotation()
+        {
+            if (Regions != null && Regions.Count > 0)
+            {
+                Regions.RemoveAt(Regions.Count - 1);
+                return true;
+            }
             if (Samples == null || Samples.Count == 0)
             {
                 return false;
@@ -350,6 +470,25 @@ namespace TerrainLab
 
             Samples.RemoveAt(Samples.Count - 1);
             return true;
+        }
+
+        public bool RemoveRegionAt(int x, int y)
+        {
+            if (Regions == null)
+            {
+                return false;
+            }
+            for (int index = Regions.Count - 1; index >= 0; index--)
+            {
+                if (!ContainsPoint(Regions[index]?.Vertices, x, y))
+                {
+                    continue;
+                }
+
+                Regions.RemoveAt(index);
+                return true;
+            }
+            return false;
         }
 
         public void Save(string imagePath)
@@ -466,6 +605,246 @@ namespace TerrainLab
                         "Manual classification contains duplicate sample coordinates.");
                 }
             }
+
+            if (Regions == null)
+            {
+                Regions = new List<TerrainImageClassificationRegion>();
+            }
+            if (Regions.Count > MaximumRegions)
+            {
+                throw new InvalidDataException(
+                    "Manual classification exceeds 128 regions.");
+            }
+
+            int totalRegionVertices = 0;
+            foreach (TerrainImageClassificationRegion region in Regions)
+            {
+                if (region == null ||
+                    TerrainImageClassificationCatalog.FindSurface(
+                        region.Surface) == null ||
+                    TerrainImageClassificationCatalog.FindBiotope(
+                        region.Biotope) == null ||
+                    !TerrainElevationEncoding.IsDataValue(region.Elevation) ||
+                    region.Elevation == TerrainElevationEncoding.NoData)
+                {
+                    throw new InvalidDataException(
+                        "Manual classification contains an invalid region.");
+                }
+
+                if (region.Vertices?.Count >= 4)
+                {
+                    TerrainImageClassificationVertex first =
+                        region.Vertices[0];
+                    TerrainImageClassificationVertex last =
+                        region.Vertices[region.Vertices.Count - 1];
+                    if (first != null &&
+                        last != null &&
+                        first.X == last.X &&
+                        first.Y == last.Y)
+                    {
+                        region.Vertices.RemoveAt(region.Vertices.Count - 1);
+                    }
+                }
+                ValidateRegionVertices(
+                    region.Vertices,
+                    Source.Width,
+                    Source.Height);
+                totalRegionVertices += region.Vertices.Count;
+                if (totalRegionVertices > MaximumTotalRegionVertices)
+                {
+                    throw new InvalidDataException(
+                        "Manual classification exceeds 8192 polygon vertices.");
+                }
+            }
+        }
+
+        private static void ValidateRegionVertices(
+            IReadOnlyList<TerrainImageClassificationVertex> vertices,
+            int width,
+            int height)
+        {
+            if (vertices == null ||
+                vertices.Count < 3 ||
+                vertices.Count > MaximumRegionVertices)
+            {
+                throw new InvalidDataException(
+                    "A classification region needs 3..256 vertices.");
+            }
+
+            HashSet<long> coordinates = new HashSet<long>();
+            for (int index = 0; index < vertices.Count; index++)
+            {
+                TerrainImageClassificationVertex vertex = vertices[index];
+                if (vertex == null ||
+                    vertex.X < 0 || vertex.X >= width ||
+                    vertex.Y < 0 || vertex.Y >= height)
+                {
+                    throw new InvalidDataException(
+                        "A classification region vertex is outside the image.");
+                }
+                long coordinate = ((long)vertex.Y << 32) | (uint)vertex.X;
+                if (!coordinates.Add(coordinate))
+                {
+                    throw new InvalidDataException(
+                        "A classification region contains duplicate vertices.");
+                }
+            }
+
+            for (int first = 0; first < vertices.Count; first++)
+            {
+                int firstNext = (first + 1) % vertices.Count;
+                for (int second = first + 1;
+                     second < vertices.Count;
+                     second++)
+                {
+                    int secondNext = (second + 1) % vertices.Count;
+                    if (firstNext == second || secondNext == first)
+                    {
+                        continue;
+                    }
+                    if (SegmentsIntersect(
+                            vertices[first],
+                            vertices[firstNext],
+                            vertices[second],
+                            vertices[secondNext]))
+                    {
+                        throw new InvalidDataException(
+                            "A classification region is self-intersecting.");
+                    }
+                }
+            }
+            if (SignedAreaTwice(vertices) == 0)
+            {
+                throw new InvalidDataException(
+                    "A classification region has zero area.");
+            }
+        }
+
+        private static bool ContainsPoint(
+            IReadOnlyList<TerrainImageClassificationVertex> vertices,
+            int x,
+            int y)
+        {
+            if (vertices == null || vertices.Count < 3)
+            {
+                return false;
+            }
+
+            bool inside = false;
+            TerrainImageClassificationVertex previous =
+                vertices[vertices.Count - 1];
+            for (int index = 0; index < vertices.Count; index++)
+            {
+                TerrainImageClassificationVertex current = vertices[index];
+                if (Orientation(previous, current, x, y) == 0 &&
+                    x >= Math.Min(previous.X, current.X) &&
+                    x <= Math.Max(previous.X, current.X) &&
+                    y >= Math.Min(previous.Y, current.Y) &&
+                    y <= Math.Max(previous.Y, current.Y))
+                {
+                    return true;
+                }
+
+                if ((current.Y > y) != (previous.Y > y))
+                {
+                    double intersectionX =
+                        current.X +
+                        (double)(previous.X - current.X) *
+                        (y - current.Y) /
+                        (previous.Y - current.Y);
+                    if (x < intersectionX)
+                    {
+                        inside = !inside;
+                    }
+                }
+                previous = current;
+            }
+            return inside;
+        }
+
+        private static long SignedAreaTwice(
+            IReadOnlyList<TerrainImageClassificationVertex> vertices)
+        {
+            long area = 0;
+            TerrainImageClassificationVertex previous =
+                vertices[vertices.Count - 1];
+            foreach (TerrainImageClassificationVertex current in vertices)
+            {
+                area += (long)previous.X * current.Y -
+                        (long)current.X * previous.Y;
+                previous = current;
+            }
+            return area;
+        }
+
+        private static bool SegmentsIntersect(
+            TerrainImageClassificationVertex firstStart,
+            TerrainImageClassificationVertex firstEnd,
+            TerrainImageClassificationVertex secondStart,
+            TerrainImageClassificationVertex secondEnd)
+        {
+            long first = Orientation(
+                firstStart,
+                firstEnd,
+                secondStart.X,
+                secondStart.Y);
+            long second = Orientation(
+                firstStart,
+                firstEnd,
+                secondEnd.X,
+                secondEnd.Y);
+            long third = Orientation(
+                secondStart,
+                secondEnd,
+                firstStart.X,
+                firstStart.Y);
+            long fourth = Orientation(
+                secondStart,
+                secondEnd,
+                firstEnd.X,
+                firstEnd.Y);
+            if (first == 0 && PointOnSegment(
+                    secondStart,
+                    firstStart,
+                    firstEnd) ||
+                second == 0 && PointOnSegment(
+                    secondEnd,
+                    firstStart,
+                    firstEnd) ||
+                third == 0 && PointOnSegment(
+                    firstStart,
+                    secondStart,
+                    secondEnd) ||
+                fourth == 0 && PointOnSegment(
+                    firstEnd,
+                    secondStart,
+                    secondEnd))
+            {
+                return true;
+            }
+            return (first > 0) != (second > 0) &&
+                   (third > 0) != (fourth > 0);
+        }
+
+        private static long Orientation(
+            TerrainImageClassificationVertex start,
+            TerrainImageClassificationVertex end,
+            int x,
+            int y)
+        {
+            return (long)(end.X - start.X) * (y - start.Y) -
+                   (long)(end.Y - start.Y) * (x - start.X);
+        }
+
+        private static bool PointOnSegment(
+            TerrainImageClassificationVertex point,
+            TerrainImageClassificationVertex start,
+            TerrainImageClassificationVertex end)
+        {
+            return point.X >= Math.Min(start.X, end.X) &&
+                   point.X <= Math.Max(start.X, end.X) &&
+                   point.Y >= Math.Min(start.Y, end.Y) &&
+                   point.Y <= Math.Max(start.Y, end.Y);
         }
 
         private static bool IsFiniteRange(

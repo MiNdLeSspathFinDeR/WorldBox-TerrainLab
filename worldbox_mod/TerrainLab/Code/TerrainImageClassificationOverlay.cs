@@ -21,12 +21,20 @@ using UnityColor = UnityEngine.Color;
 
 namespace TerrainLab
 {
+    internal enum TerrainImageClassificationDrawMode
+    {
+        Point,
+        Polygon
+    }
+
     internal sealed class TerrainImageCanvasInput : MonoBehaviour,
         IPointerClickHandler,
         IScrollHandler,
         IBeginDragHandler,
         IDragHandler,
-        IEndDragHandler
+        IEndDragHandler,
+        IPointerMoveHandler,
+        IPointerExitHandler
     {
         private TerrainImageClassificationOverlay _owner;
         private bool _dragging;
@@ -47,11 +55,17 @@ namespace TerrainLab
 
             if (eventData.button == PointerEventData.InputButton.Left)
             {
-                _owner.HandleImageClick(eventData.position, false);
+                _owner.HandleImageClick(
+                    eventData.position,
+                    false,
+                    eventData.clickCount >= 2);
             }
             else if (eventData.button == PointerEventData.InputButton.Right)
             {
-                _owner.HandleImageClick(eventData.position, true);
+                _owner.HandleImageClick(
+                    eventData.position,
+                    true,
+                    false);
             }
         }
 
@@ -87,6 +101,16 @@ namespace TerrainLab
         {
             _dragging = false;
         }
+
+        public void OnPointerMove(PointerEventData eventData)
+        {
+            _owner?.HandlePointerMove(eventData.position);
+        }
+
+        public void OnPointerExit(PointerEventData eventData)
+        {
+            _owner?.HandlePointerExit();
+        }
     }
 
     public sealed class TerrainImageClassificationOverlay : MonoBehaviour
@@ -97,6 +121,10 @@ namespace TerrainLab
         private const float MaximumZoom = 12f;
 
         private readonly List<GameObject> _markers = new List<GameObject>();
+        private readonly List<TerrainImagePolygonGraphic> _regionGraphics =
+            new List<TerrainImagePolygonGraphic>();
+        private readonly List<TerrainImageClassificationVertex> _draftVertices =
+            new List<TerrainImageClassificationVertex>();
         private readonly DefaultControls.Resources _defaultResources =
             new DefaultControls.Resources();
 
@@ -115,6 +143,11 @@ namespace TerrainLab
         private Dropdown _biotopeDropdown;
         private InputField _elevationInput;
         private Toggle _globalDemToggle;
+        private Button _pointModeButton;
+        private Button _polygonModeButton;
+        private Button _finishPolygonButton;
+        private Button _cancelPolygonButton;
+        private TerrainImagePolygonGraphic _draftGraphic;
         private Texture2D _texture;
         private TerrainImageClassificationProfile _profile;
         private List<string> _images = new List<string>();
@@ -125,6 +158,10 @@ namespace TerrainLab
         private float _zoom = 1f;
         private Vector2 _lastViewportSize;
         private float _clearArmedUntil;
+        private TerrainImageClassificationDrawMode _drawMode =
+            TerrainImageClassificationDrawMode.Point;
+        private TerrainImageClassificationVertex _hoverVertex;
+        private bool _hasHoverVertex;
         private bool _initialized;
 
         public event Action<string, bool> StatusChanged;
@@ -140,6 +177,8 @@ namespace TerrainLab
                 : Path.GetFileName(_imagePath);
 
         public int SampleCount => _profile?.Samples?.Count ?? 0;
+
+        public int RegionCount => _profile?.Regions?.Count ?? 0;
 
         public void Initialize(
             TerrainImageWorkspaceService workspace,
@@ -195,6 +234,7 @@ namespace TerrainLab
         {
             if (_root != null)
             {
+                CancelPolygon(false);
                 _root.SetActive(false);
                 if (_image != null)
                 {
@@ -205,7 +245,10 @@ namespace TerrainLab
             }
         }
 
-        public void HandleImageClick(Vector2 screenPosition, bool remove)
+        public void HandleImageClick(
+            Vector2 screenPosition,
+            bool secondary,
+            bool doubleClick)
         {
             if (!IsVisible || _profile == null || _imageRect == null)
             {
@@ -227,29 +270,41 @@ namespace TerrainLab
                 sourceY);
             try
             {
-                if (remove)
+                if (_drawMode ==
+                    TerrainImageClassificationDrawMode.Polygon)
                 {
-                    if (!RemoveNearestSample(sourceX, sourceY))
+                    if (secondary)
+                    {
+                        FinishPolygon();
+                        return;
+                    }
+                    AddPolygonVertex(sourceX, sourceY);
+                    if (doubleClick && _draftVertices.Count >= 3)
+                    {
+                        FinishPolygon();
+                    }
+                    return;
+                }
+
+                if (secondary)
+                {
+                    if (!RemoveNearestAnnotation(sourceX, sourceY))
                     {
                         SetPanelStatus(
-                            LM.Get("terrain_lab_manual_no_near_sample"),
+                            LM.Get("terrain_lab_manual_no_near_annotation"),
                             false);
                         return;
                     }
                 }
+                else if (!TryReadSelection(
+                             out TerrainImageClassOption surface,
+                             out TerrainImageBiotopeOption biotope,
+                             out short elevation))
+                {
+                    return;
+                }
                 else
                 {
-                    if (!TryReadElevation(out short elevation))
-                    {
-                        return;
-                    }
-
-                    TerrainImageClassOption surface =
-                        TerrainImageClassificationCatalog.Surfaces[
-                            _surfaceDropdown.value];
-                    TerrainImageBiotopeOption biotope =
-                        TerrainImageClassificationCatalog.Biotopes[
-                            _biotopeDropdown.value];
                     _profile.AddOrReplaceSample(
                         sourceX,
                         sourceY,
@@ -257,21 +312,69 @@ namespace TerrainLab
                         biotope.Id,
                         elevation);
                 }
-
                 SaveProfile();
-                RebuildMarkers();
+                RebuildAnnotations();
                 UpdateLabels();
                 SetPanelStatus(
-                    string.Format(
-                        LM.Get("terrain_lab_manual_sample_saved_format"),
-                        sourceX,
-                        sourceY),
+                    secondary
+                        ? LM.Get(
+                            "terrain_lab_manual_annotation_removed")
+                        : string.Format(
+                            LM.Get(
+                                "terrain_lab_manual_sample_saved_format"),
+                            sourceX,
+                            sourceY),
                     false);
             }
             catch (Exception exception)
             {
                 SetPanelStatus(exception.Message, true);
             }
+        }
+
+        public void HandlePointerMove(Vector2 screenPosition)
+        {
+            if (!IsVisible ||
+                !TryScreenToSource(
+                    screenPosition,
+                    out int sourceX,
+                    out int sourceY))
+            {
+                HandlePointerExit();
+                return;
+            }
+
+            _coordinateLabel.text = string.Format(
+                CultureInfo.InvariantCulture,
+                "X {0}  Y {1}",
+                sourceX,
+                sourceY);
+            if (_drawMode != TerrainImageClassificationDrawMode.Polygon ||
+                _draftVertices.Count == 0)
+            {
+                return;
+            }
+            if (_hasHoverVertex &&
+                _hoverVertex.X == sourceX &&
+                _hoverVertex.Y == sourceY)
+            {
+                return;
+            }
+            _hoverVertex =
+                new TerrainImageClassificationVertex(sourceX, sourceY);
+            _hasHoverVertex = true;
+            RefreshDraftGraphic();
+        }
+
+        public void HandlePointerExit()
+        {
+            if (!_hasHoverVertex)
+            {
+                return;
+            }
+            _hasHoverVertex = false;
+            _hoverVertex = null;
+            RefreshDraftGraphic();
         }
 
         public void HandleZoom(Vector2 screenPosition, float delta)
@@ -364,6 +467,9 @@ namespace TerrainLab
                 _sourceWidth = width;
                 _sourceHeight = height;
                 _profile = nextProfile;
+                _draftVertices.Clear();
+                _hoverVertex = null;
+                _hasHoverVertex = false;
                 _globalDemToggle.SetIsOnWithoutNotify(
                     _profile.Settings.InterpolateElevationGlobally);
                 _zoom = 1f;
@@ -378,7 +484,8 @@ namespace TerrainLab
 
                 Canvas.ForceUpdateCanvases();
                 FitImageToViewport(true);
-                RebuildMarkers();
+                SetDrawMode(TerrainImageClassificationDrawMode.Point);
+                RebuildAnnotations();
                 UpdateLabels();
                 SetPanelStatus(
                     LM.Get("terrain_lab_manual_ready"),
@@ -399,6 +506,13 @@ namespace TerrainLab
 
         private void CycleImage(int direction)
         {
+            if (_draftVertices.Count > 0)
+            {
+                SetPanelStatus(
+                    LM.Get("terrain_lab_manual_finish_draft"),
+                    true);
+                return;
+            }
             if (_images.Count == 0)
             {
                 return;
@@ -491,7 +605,8 @@ namespace TerrainLab
                 "TerrainLabClassificationPanel",
                 typeof(RectTransform),
                 typeof(Image),
-                typeof(VerticalLayoutGroup));
+                typeof(RectMask2D),
+                typeof(ScrollRect));
             panel.transform.SetParent(parent, false);
             RectTransform rect = panel.GetComponent<RectTransform>();
             rect.anchorMin = new Vector2(1f, 0f);
@@ -506,8 +621,33 @@ namespace TerrainLab
             background.color = new UnityColor(0.20f, 0.22f, 0.18f, 0.98f);
             background.raycastTarget = true;
 
+            GameObject contentObject = new GameObject(
+                "TerrainLabClassificationPanelContent",
+                typeof(RectTransform),
+                typeof(VerticalLayoutGroup),
+                typeof(ContentSizeFitter));
+            contentObject.transform.SetParent(panel.transform, false);
+            RectTransform contentRect =
+                contentObject.GetComponent<RectTransform>();
+            contentRect.anchorMin = new Vector2(0f, 1f);
+            contentRect.anchorMax = new Vector2(1f, 1f);
+            contentRect.pivot = new Vector2(0.5f, 1f);
+            contentRect.offsetMin = Vector2.zero;
+            contentRect.offsetMax = Vector2.zero;
+            ContentSizeFitter fitter =
+                contentObject.GetComponent<ContentSizeFitter>();
+            fitter.horizontalFit = ContentSizeFitter.FitMode.Unconstrained;
+            fitter.verticalFit = ContentSizeFitter.FitMode.PreferredSize;
+            ScrollRect scroll = panel.GetComponent<ScrollRect>();
+            scroll.content = contentRect;
+            scroll.viewport = rect;
+            scroll.horizontal = false;
+            scroll.vertical = true;
+            scroll.movementType = ScrollRect.MovementType.Clamped;
+            scroll.scrollSensitivity = 24f;
+
             VerticalLayoutGroup layout =
-                panel.GetComponent<VerticalLayoutGroup>();
+                contentObject.GetComponent<VerticalLayoutGroup>();
             layout.padding = new RectOffset(9, 9, 8, 8);
             layout.spacing = 5f;
             layout.childAlignment = TextAnchor.UpperCenter;
@@ -515,22 +655,23 @@ namespace TerrainLab
             layout.childControlHeight = false;
             layout.childForceExpandWidth = true;
             layout.childForceExpandHeight = false;
+            Transform content = contentObject.transform;
 
             CreateLabel(
-                panel.transform,
+                content,
                 LM.Get("terrain_lab_manual_heading"),
                 18,
                 FontStyle.Bold,
                 30f,
                 UnityColor.white);
             _fileLabel = CreateLabel(
-                panel.transform,
+                content,
                 string.Empty,
                 11,
                 FontStyle.Bold,
                 34f,
                 new UnityColor(0.95f, 0.76f, 0.28f, 1f));
-            Transform navigation = CreateRow(panel.transform, 30f);
+            Transform navigation = CreateRow(content, 30f);
             CreateButton(
                 navigation,
                 "<",
@@ -556,15 +697,37 @@ namespace TerrainLab
                 48f,
                 "terrain_lab_manual_next_image");
 
+            Transform drawModes = CreateRow(content, 30f);
+            _pointModeButton = CreateButton(
+                drawModes,
+                LM.Get("terrain_lab_manual_mode_point"),
+                delegate
+                {
+                    SetDrawMode(
+                        TerrainImageClassificationDrawMode.Point);
+                },
+                118f,
+                "terrain_lab_manual_mode_point");
+            _polygonModeButton = CreateButton(
+                drawModes,
+                LM.Get("terrain_lab_manual_mode_polygon"),
+                delegate
+                {
+                    SetDrawMode(
+                        TerrainImageClassificationDrawMode.Polygon);
+                },
+                118f,
+                "terrain_lab_manual_mode_polygon");
+
             CreateLabel(
-                panel.transform,
+                content,
                 LM.Get("terrain_lab_manual_surface"),
                 11,
                 FontStyle.Bold,
                 18f,
                 new UnityColor(0.83f, 0.79f, 0.66f, 1f));
             _surfaceDropdown = CreateDropdown(
-                panel.transform,
+                content,
                 TerrainImageClassificationCatalog.Surfaces
                     .Select(option => LM.Get(option.LocalizationKey)),
                 "terrain_lab_manual_surface");
@@ -572,34 +735,34 @@ namespace TerrainLab
                 HandleSurfaceChanged);
 
             CreateLabel(
-                panel.transform,
+                content,
                 LM.Get("terrain_lab_manual_biotope"),
                 11,
                 FontStyle.Bold,
                 18f,
                 new UnityColor(0.83f, 0.79f, 0.66f, 1f));
             _biotopeDropdown = CreateDropdown(
-                panel.transform,
+                content,
                 TerrainImageClassificationCatalog.Biotopes
                     .Select(option => LM.Get(option.LocalizationKey)),
                 "terrain_lab_manual_biotope");
 
             CreateLabel(
-                panel.transform,
+                content,
                 LM.Get("terrain_lab_manual_elevation"),
                 11,
                 FontStyle.Bold,
                 18f,
                 new UnityColor(0.83f, 0.79f, 0.66f, 1f));
             _elevationInput = CreateInputField(
-                panel.transform,
+                content,
                 "150",
                 "terrain_lab_manual_elevation");
             _surfaceDropdown.SetValueWithoutNotify(5);
             _surfaceDropdown.RefreshShownValue();
 
             _globalDemToggle = CreateToggle(
-                panel.transform,
+                content,
                 LM.Get("terrain_lab_manual_global_dem"),
                 true,
                 "terrain_lab_manual_global_dem");
@@ -614,28 +777,42 @@ namespace TerrainLab
                 });
 
             _sampleLabel = CreateLabel(
-                panel.transform,
+                content,
                 string.Empty,
                 11,
                 FontStyle.Normal,
                 24f,
                 UnityColor.white);
             _coordinateLabel = CreateLabel(
-                panel.transform,
+                content,
                 "X -  Y -",
                 11,
                 FontStyle.Normal,
                 20f,
                 new UnityColor(0.72f, 0.84f, 0.94f, 1f));
             _panelStatus = CreateLabel(
-                panel.transform,
+                content,
                 string.Empty,
                 10,
                 FontStyle.Normal,
                 38f,
                 new UnityColor(0.83f, 0.79f, 0.66f, 1f));
 
-            Transform profileActions = CreateRow(panel.transform, 30f);
+            Transform polygonActions = CreateRow(content, 30f);
+            _finishPolygonButton = CreateButton(
+                polygonActions,
+                LM.Get("terrain_lab_manual_finish_polygon"),
+                FinishPolygon,
+                118f,
+                "terrain_lab_manual_finish_polygon");
+            _cancelPolygonButton = CreateButton(
+                polygonActions,
+                LM.Get("terrain_lab_manual_cancel_polygon"),
+                delegate { CancelPolygon(true); },
+                118f,
+                "terrain_lab_manual_cancel_polygon");
+
+            Transform profileActions = CreateRow(content, 30f);
             CreateButton(
                 profileActions,
                 LM.Get("terrain_lab_manual_undo"),
@@ -649,7 +826,7 @@ namespace TerrainLab
                 118f,
                 "terrain_lab_manual_clear");
 
-            Transform saveActions = CreateRow(panel.transform, 34f);
+            Transform saveActions = CreateRow(content, 34f);
             CreateButton(
                 saveActions,
                 LM.Get("terrain_lab_manual_save_profile"),
@@ -665,11 +842,12 @@ namespace TerrainLab
                 true);
 
             CreateButton(
-                panel.transform,
+                content,
                 LM.Get("terrain_lab_manual_close"),
                 Hide,
                 252f,
                 "terrain_lab_manual_close");
+            UpdateModeButtons();
         }
 
         private void HandleSurfaceChanged(int index)
@@ -686,12 +864,180 @@ namespace TerrainLab
             _elevationInput.SetTextWithoutNotify(
                 option.DefaultElevation.ToString(
                     CultureInfo.InvariantCulture));
+            RefreshDraftGraphic();
+        }
+
+        private void SetDrawMode(TerrainImageClassificationDrawMode mode)
+        {
+            if (_drawMode == mode)
+            {
+                UpdateModeButtons();
+                return;
+            }
+            if (_draftVertices.Count > 0)
+            {
+                SetPanelStatus(
+                    LM.Get("terrain_lab_manual_finish_draft"),
+                    true);
+                return;
+            }
+            HandlePointerExit();
+            _drawMode = mode;
+            UpdateModeButtons();
+            SetPanelStatus(
+                LM.Get(
+                    mode == TerrainImageClassificationDrawMode.Point
+                        ? "terrain_lab_manual_mode_point_active"
+                        : "terrain_lab_manual_mode_polygon_active"),
+                false);
+        }
+
+        private void UpdateModeButtons()
+        {
+            SetModeButtonState(
+                _pointModeButton,
+                _drawMode == TerrainImageClassificationDrawMode.Point);
+            SetModeButtonState(
+                _polygonModeButton,
+                _drawMode == TerrainImageClassificationDrawMode.Polygon);
+            bool polygonMode =
+                _drawMode == TerrainImageClassificationDrawMode.Polygon;
+            if (_finishPolygonButton != null)
+            {
+                _finishPolygonButton.interactable =
+                    polygonMode && _draftVertices.Count >= 3;
+            }
+            if (_cancelPolygonButton != null)
+            {
+                _cancelPolygonButton.interactable =
+                    polygonMode && _draftVertices.Count > 0;
+            }
+        }
+
+        private static void SetModeButtonState(Button button, bool selected)
+        {
+            if (button == null)
+            {
+                return;
+            }
+            Image image = button.GetComponent<Image>();
+            if (image != null)
+            {
+                image.color = selected
+                    ? new UnityColor(0.91f, 0.34f, 0.19f, 1f)
+                    : new UnityColor(0.36f, 0.38f, 0.32f, 1f);
+            }
+        }
+
+        private void AddPolygonVertex(int sourceX, int sourceY)
+        {
+            if (_draftVertices.Count >=
+                TerrainImageClassificationProfile.MaximumRegionVertices)
+            {
+                SetPanelStatus(
+                    LM.Get("terrain_lab_manual_polygon_vertex_limit"),
+                    true);
+                return;
+            }
+            if (_draftVertices.Count > 0)
+            {
+                TerrainImageClassificationVertex previous =
+                    _draftVertices[_draftVertices.Count - 1];
+                if (previous.X == sourceX && previous.Y == sourceY)
+                {
+                    return;
+                }
+            }
+
+            _draftVertices.Add(
+                new TerrainImageClassificationVertex(sourceX, sourceY));
+            RefreshDraftGraphic();
+            UpdateLabels();
+            UpdateModeButtons();
+            SetPanelStatus(
+                string.Format(
+                    LM.Get("terrain_lab_manual_polygon_vertex_format"),
+                    _draftVertices.Count),
+                false);
+        }
+
+        private void FinishPolygon()
+        {
+            if (_drawMode != TerrainImageClassificationDrawMode.Polygon)
+            {
+                return;
+            }
+            if (_draftVertices.Count < 3)
+            {
+                SetPanelStatus(
+                    LM.Get("terrain_lab_manual_polygon_need_vertices"),
+                    true);
+                return;
+            }
+
+            try
+            {
+                if (!TryReadSelection(
+                        out TerrainImageClassOption surface,
+                        out TerrainImageBiotopeOption biotope,
+                        out short elevation))
+                {
+                    return;
+                }
+                _profile.AddRegion(
+                    _draftVertices,
+                    surface.Id,
+                    biotope.Id,
+                    elevation);
+                _draftVertices.Clear();
+                _hoverVertex = null;
+                _hasHoverVertex = false;
+                SaveProfile();
+                RebuildAnnotations();
+                UpdateLabels();
+                UpdateModeButtons();
+                SetPanelStatus(
+                    LM.Get("terrain_lab_manual_polygon_saved"),
+                    false);
+            }
+            catch (Exception exception)
+            {
+                SetPanelStatus(exception.Message, true);
+            }
+        }
+
+        private void CancelPolygon(bool notify)
+        {
+            _hoverVertex = null;
+            _hasHoverVertex = false;
+            if (_draftVertices.Count == 0)
+            {
+                UpdateModeButtons();
+                return;
+            }
+            _draftVertices.Clear();
+            RefreshDraftGraphic();
+            UpdateLabels();
+            UpdateModeButtons();
+            if (notify)
+            {
+                SetPanelStatus(
+                    LM.Get("terrain_lab_manual_polygon_cancelled"),
+                    false);
+            }
         }
 
         private void SaveProfileCommand()
         {
             try
             {
+                if (_draftVertices.Count > 0)
+                {
+                    SetPanelStatus(
+                        LM.Get("terrain_lab_manual_finish_draft"),
+                        true);
+                    return;
+                }
                 if (!TryReadElevation(out short _))
                 {
                     return;
@@ -712,7 +1058,14 @@ namespace TerrainLab
         {
             try
             {
-                if (_profile == null || _profile.Samples.Count < 2)
+                if (_draftVertices.Count > 0)
+                {
+                    SetPanelStatus(
+                        LM.Get("terrain_lab_manual_finish_draft"),
+                        true);
+                    return;
+                }
+                if (_profile == null || !_profile.HasUsableTraining)
                 {
                     SetPanelStatus(
                         LM.Get("terrain_lab_manual_need_samples"),
@@ -746,7 +1099,17 @@ namespace TerrainLab
         {
             try
             {
-                if (_profile == null || !_profile.RemoveLastSample())
+                if (_draftVertices.Count > 0)
+                {
+                    _draftVertices.RemoveAt(_draftVertices.Count - 1);
+                    RefreshDraftGraphic();
+                    UpdateLabels();
+                    SetPanelStatus(
+                        LM.Get("terrain_lab_manual_vertex_removed"),
+                        false);
+                    return;
+                }
+                if (_profile == null || !_profile.RemoveLastAnnotation())
                 {
                     SetPanelStatus(
                         LM.Get("terrain_lab_manual_nothing_to_undo"),
@@ -755,7 +1118,7 @@ namespace TerrainLab
                 }
 
                 SaveProfile();
-                RebuildMarkers();
+                RebuildAnnotations();
                 UpdateLabels();
                 SetPanelStatus(
                     LM.Get("terrain_lab_manual_sample_removed"),
@@ -769,7 +1132,10 @@ namespace TerrainLab
 
         private void ClearSamples()
         {
-            if (_profile == null || _profile.Samples.Count == 0)
+            if (_profile == null ||
+                ((_profile.Samples?.Count ?? 0) == 0 &&
+                 (_profile.Regions?.Count ?? 0) == 0 &&
+                 _draftVertices.Count == 0))
             {
                 SetPanelStatus(
                     LM.Get("terrain_lab_manual_nothing_to_undo"),
@@ -789,8 +1155,10 @@ namespace TerrainLab
             try
             {
                 _profile.Samples.Clear();
+                _profile.Regions.Clear();
+                _draftVertices.Clear();
                 SaveProfile();
-                RebuildMarkers();
+                RebuildAnnotations();
                 UpdateLabels();
                 _clearArmedUntil = 0f;
                 SetPanelStatus(
@@ -803,9 +1171,9 @@ namespace TerrainLab
             }
         }
 
-        private bool RemoveNearestSample(int sourceX, int sourceY)
+        private bool RemoveNearestAnnotation(int sourceX, int sourceY)
         {
-            if (_profile?.Samples == null || _profile.Samples.Count == 0)
+            if (_profile == null)
             {
                 return false;
             }
@@ -816,7 +1184,9 @@ namespace TerrainLab
             double maximumSquared = maximumDistance * maximumDistance;
             int nearest = -1;
             double nearestSquared = double.MaxValue;
-            for (int index = 0; index < _profile.Samples.Count; index++)
+            for (int index = 0;
+                 index < (_profile.Samples?.Count ?? 0);
+                 index++)
             {
                 TerrainImageClassificationSample sample =
                     _profile.Samples[index];
@@ -831,13 +1201,13 @@ namespace TerrainLab
                 }
             }
 
-            if (nearest < 0)
+            if (nearest >= 0)
             {
-                return false;
+                _profile.Samples.RemoveAt(nearest);
+                return true;
             }
 
-            _profile.Samples.RemoveAt(nearest);
-            return true;
+            return _profile.RemoveRegionAt(sourceX, sourceY);
         }
 
         private void SaveProfile()
@@ -851,6 +1221,33 @@ namespace TerrainLab
             _profile.Settings.InterpolateElevationGlobally =
                 _globalDemToggle.isOn;
             _profile.Save(_imagePath);
+        }
+
+        private bool TryReadSelection(
+            out TerrainImageClassOption surface,
+            out TerrainImageBiotopeOption biotope,
+            out short elevation)
+        {
+            surface = null;
+            biotope = null;
+            elevation = 0;
+            if (_surfaceDropdown == null ||
+                _biotopeDropdown == null ||
+                _surfaceDropdown.value < 0 ||
+                _surfaceDropdown.value >=
+                TerrainImageClassificationCatalog.Surfaces.Count ||
+                _biotopeDropdown.value < 0 ||
+                _biotopeDropdown.value >=
+                TerrainImageClassificationCatalog.Biotopes.Count ||
+                !TryReadElevation(out elevation))
+            {
+                return false;
+            }
+            surface = TerrainImageClassificationCatalog.Surfaces[
+                _surfaceDropdown.value];
+            biotope = TerrainImageClassificationCatalog.Biotopes[
+                _biotopeDropdown.value];
+            return true;
         }
 
         private bool TryReadElevation(out short elevation)
@@ -961,21 +1358,49 @@ namespace TerrainLab
             _imageRect.anchoredPosition = position;
         }
 
-        private void RebuildMarkers()
+        private void RebuildAnnotations()
         {
             foreach (GameObject marker in _markers)
             {
                 Destroy(marker);
             }
             _markers.Clear();
+            foreach (TerrainImagePolygonGraphic graphic in _regionGraphics)
+            {
+                if (graphic != null)
+                {
+                    Destroy(graphic.gameObject);
+                }
+            }
+            _regionGraphics.Clear();
+            if (_draftGraphic != null)
+            {
+                Destroy(_draftGraphic.gameObject);
+                _draftGraphic = null;
+            }
 
-            if (_profile?.Samples == null)
+            if (_profile == null)
             {
                 return;
             }
 
+            foreach (TerrainImageClassificationRegion region in
+                     _profile.Regions ??
+                     Enumerable.Empty<TerrainImageClassificationRegion>())
+            {
+                TerrainImagePolygonGraphic graphic = CreatePolygonGraphic(
+                    region.Vertices,
+                    region.Surface,
+                    true,
+                    false,
+                    "TerrainLabClassificationRegion");
+                _regionGraphics.Add(graphic);
+            }
+
+            RefreshDraftGraphic();
             foreach (TerrainImageClassificationSample sample in
-                     _profile.Samples)
+                     _profile.Samples ??
+                     Enumerable.Empty<TerrainImageClassificationSample>())
             {
                 GameObject marker = new GameObject(
                     "TerrainLabClassificationSample",
@@ -1000,6 +1425,92 @@ namespace TerrainLab
 
             PositionMarkers();
             UpdateMarkerScale();
+        }
+
+        private TerrainImagePolygonGraphic CreatePolygonGraphic(
+            IEnumerable<TerrainImageClassificationVertex> vertices,
+            string surface,
+            bool closed,
+            bool showVertices,
+            string objectName)
+        {
+            GameObject polygonObject = new GameObject(
+                objectName,
+                typeof(RectTransform),
+                typeof(CanvasRenderer),
+                typeof(TerrainImagePolygonGraphic));
+            polygonObject.transform.SetParent(_markerRoot, false);
+            RectTransform rect = polygonObject.GetComponent<RectTransform>();
+            rect.anchorMin = Vector2.zero;
+            rect.anchorMax = Vector2.one;
+            rect.offsetMin = Vector2.zero;
+            rect.offsetMax = Vector2.zero;
+            TerrainImagePolygonGraphic graphic =
+                polygonObject.GetComponent<TerrainImagePolygonGraphic>();
+            graphic.Configure(
+                vertices,
+                _sourceWidth,
+                _sourceHeight,
+                GetSurfaceColor(surface),
+                closed,
+                showVertices,
+                1f / Mathf.Max(_zoom, 0.01f));
+            return graphic;
+        }
+
+        private void RefreshDraftGraphic()
+        {
+            if (_markerRoot == null)
+            {
+                return;
+            }
+            if (_draftVertices.Count == 0 ||
+                _surfaceDropdown == null ||
+                _surfaceDropdown.value < 0 ||
+                _surfaceDropdown.value >=
+                TerrainImageClassificationCatalog.Surfaces.Count)
+            {
+                if (_draftGraphic != null)
+                {
+                    Destroy(_draftGraphic.gameObject);
+                    _draftGraphic = null;
+                }
+                return;
+            }
+
+            string surface =
+                TerrainImageClassificationCatalog.Surfaces[
+                    _surfaceDropdown.value].Id;
+            List<TerrainImageClassificationVertex> displayVertices =
+                new List<TerrainImageClassificationVertex>(_draftVertices);
+            TerrainImageClassificationVertex last =
+                displayVertices[displayVertices.Count - 1];
+            if (_hasHoverVertex &&
+                _hoverVertex != null &&
+                (last.X != _hoverVertex.X || last.Y != _hoverVertex.Y))
+            {
+                displayVertices.Add(_hoverVertex);
+            }
+            if (_draftGraphic == null)
+            {
+                _draftGraphic = CreatePolygonGraphic(
+                    displayVertices,
+                    surface,
+                    false,
+                    true,
+                    "TerrainLabClassificationDraftRegion");
+            }
+            else
+            {
+                _draftGraphic.Configure(
+                    displayVertices,
+                    _sourceWidth,
+                    _sourceHeight,
+                    GetSurfaceColor(surface),
+                    false,
+                    true,
+                    1f / Mathf.Max(_zoom, 0.01f));
+            }
         }
 
         private void PositionMarkers()
@@ -1033,6 +1544,11 @@ namespace TerrainLab
             {
                 marker.transform.localScale = scale;
             }
+            foreach (TerrainImagePolygonGraphic graphic in _regionGraphics)
+            {
+                graphic?.SetInverseZoom(inverse);
+            }
+            _draftGraphic?.SetInverseZoom(inverse);
         }
 
         private void UpdateLabels()
@@ -1050,7 +1566,11 @@ namespace TerrainLab
             _sampleLabel.text = string.Format(
                 LM.Get("terrain_lab_manual_samples_format"),
                 _profile.Samples.Count,
-                TerrainImageClassificationProfile.MaximumSamples);
+                TerrainImageClassificationProfile.MaximumSamples,
+                _profile.Regions.Count,
+                TerrainImageClassificationProfile.MaximumRegions,
+                _draftVertices.Count);
+            UpdateModeButtons();
         }
 
         private static Texture2D LoadPreview(

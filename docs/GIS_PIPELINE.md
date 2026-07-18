@@ -27,9 +27,12 @@ inspected, replaced, or controlled independently.
 
 ## Implemented manual calibration
 
-TerrainLab can display a workspace raster over the live map and store clicked
-source-pixel samples in `<image>.terrainlab-classification.json`. Every sample
-contains three independent observations:
+TerrainLab can display a workspace raster over the live map and store point or
+polygon annotations in `<image>.terrainlab-classification.json`. Point mode
+labels individual source pixels. Polygon mode follows desktop GIS digitizing:
+left-click adds vertices, a live rubber band shows the open edge, and
+right-click or double-click closes the ring. Every annotation contains three
+independent observations:
 
 - a surface morphotype such as shelf, river/lake, plain, hill, rock, summit, or
   local depression;
@@ -40,11 +43,18 @@ contains three independent observations:
 The guided classifier normalizes the source's own colour range and combines
 colour, local gradient/roughness, and normalized image position. Spatial
 distance breaks ties between equal-colour samples, so a repeated cartographic
-colour can describe different regional morphotypes or biotopes. Calculations
-run in bounded chunks and accept at most 512 samples.
+colour can describe different regional morphotypes or biotopes. Every target
+cell inside a polygon is authoritative. Up to 32 spatially distributed interior
+pixels per polygon feed propagation outside it; the combined effective
+training set remains capped at 512. Profiles accept at most 128 simple
+non-self-intersecting polygons, 256 vertices per polygon, and 8192 polygon
+vertices in total, so broad areas do not become millions of JSON samples.
+Later overlapping polygons own their overlap, while precise point controls are
+applied last. Calculations run in bounded chunks.
 
-Sample heights form an inverse-distance-weighted DEM on a coarse bounded grid,
-are bicubically expanded, smoothed, and restored exactly at control points.
+Point and distributed polygon heights form an inverse-distance-weighted DEM on
+a coarse bounded grid, are bicubically expanded, smoothed, and restored exactly
+at point controls and throughout completed polygon interiors.
 Deep ocean, shelf, and marine shallows retain their defined depth intervals;
 the river/lake class is intentionally independent of absolute elevation so
 high-altitude water remains possible. The generated save contains the

@@ -807,7 +807,7 @@ namespace TerrainLab
                     JsonConvert.DeserializeObject<
                         TerrainImageClassificationProfile>(
                         File.ReadAllText(path));
-                return profile?.Samples?.Count >= 2;
+                return profile?.HasUsableTraining == true;
             }
             catch
             {

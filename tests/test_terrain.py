@@ -11,6 +11,7 @@ from PIL import Image, ImageDraw
 from imagetomap import convert, fit_map_size_to_budget, validate_map_size
 from imagetomap.calibration import (
     ClassificationProfile,
+    ClassificationRegion,
     ClassificationSample,
     GENERATED_ELEVATION_FILE_NAME,
     GENERATED_PROFILE_FILE_NAME,
@@ -52,6 +53,10 @@ PARAMETER_TOOLTIP_KEYS = (
     "terrain_lab_manual_biotope",
     "terrain_lab_manual_elevation",
     "terrain_lab_manual_global_dem",
+    "terrain_lab_manual_mode_point",
+    "terrain_lab_manual_mode_polygon",
+    "terrain_lab_manual_finish_polygon",
+    "terrain_lab_manual_cancel_polygon",
 )
 
 
@@ -214,6 +219,97 @@ class TerrainConversionTests(unittest.TestCase):
         finally:
             converted.preview.close()
             source.close()
+
+    def test_manual_polygons_aggressively_split_same_colour_and_dem(self) -> None:
+        source = Image.new("RGB", (128, 64), (112, 126, 104))
+        profile = ClassificationProfile(
+            source_file_name="same-colour-polygons.png",
+            source_width=128,
+            source_height=64,
+            samples=(),
+            regions=(
+                ClassificationRegion(
+                    ((2, 2), (58, 2), (58, 61), (2, 61)),
+                    "rocks",
+                    "none",
+                    3200,
+                ),
+                ClassificationRegion(
+                    ((69, 2), (125, 2), (125, 61), (69, 61)),
+                    "plain",
+                    "grass",
+                    120,
+                ),
+            ),
+        )
+        converted = convert(
+            source,
+            width=2,
+            height=1,
+            classification_profile=profile,
+        )
+        try:
+            pixels = converted.preview.load()
+            self.assertEqual(
+                SAFE_TILES_TUPLE[pixels[20, 32]],
+                "mountains",
+            )
+            self.assertEqual(
+                SAFE_TILES_TUPLE[pixels[108, 32]],
+                "soil_low:grass_low",
+            )
+            self.assertEqual(int(converted.elevation[32, 20]), 3200)
+            self.assertEqual(int(converted.elevation[32, 108]), 120)
+            self.assertGreater(
+                int(converted.elevation[32, 48]),
+                int(converted.elevation[32, 80]),
+            )
+            self.assertFalse(np.any(converted.elevation == ELEVATION_NODATA))
+        finally:
+            converted.preview.close()
+            source.close()
+
+    def test_manual_polygon_profile_round_trips_and_rejects_bow_tie(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            profile_path = Path(temporary_directory) / "polygon.json"
+            profile = ClassificationProfile(
+                source_file_name="polygon.png",
+                source_width=64,
+                source_height=64,
+                samples=(),
+                regions=(
+                    ClassificationRegion(
+                        ((4, 4), (50, 4), (50, 50), (4, 50)),
+                        "upland",
+                        "savanna",
+                        900,
+                    ),
+                ),
+            )
+            profile_path.write_text(
+                json.dumps(profile.to_json_dict()),
+                encoding="utf-8-sig",
+            )
+            restored = load_classification_profile(
+                profile_path,
+                (64, 64),
+            )
+            self.assertEqual(restored.samples, ())
+            self.assertEqual(restored.regions, profile.regions)
+
+            payload = profile.to_json_dict()
+            payload["regions"][0]["vertices"] = [
+                {"x": 4, "y": 4},
+                {"x": 50, "y": 50},
+                {"x": 4, "y": 50},
+                {"x": 50, "y": 4},
+            ]
+            profile_path.write_text(
+                json.dumps(payload),
+                encoding="utf-8",
+            )
+            with self.assertRaisesRegex(ValueError, "self-intersecting"):
+                load_classification_profile(profile_path, (64, 64))
 
     def test_manual_save_contains_profile_and_signed_dem_geotiff(self) -> None:
         source = Image.new("RGB", (64, 64), (90, 140, 80))

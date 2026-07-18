@@ -365,7 +365,8 @@ def process_image(image_path: Path, args: Dict[str, Any], tiles: Iterable[str]) 
         )
 
     manual_status = (
-        f", {len(classification_profile.samples)} manual samples + Int16 DEM"
+        f", {len(classification_profile.samples)} manual samples + "
+        f"{len(classification_profile.regions)} regions + Int16 DEM"
         if classification_profile is not None
         else ""
     )

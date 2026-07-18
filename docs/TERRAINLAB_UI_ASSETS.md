@@ -20,7 +20,7 @@ against screen edges and can be collapsed independently.
 
 ## Implementation status
 
-Version 1.6.1 implements the standalone side button, an adaptive top GIS
+Version 1.8.0 implements the standalone side button, an adaptive top GIS
 toolbar, and a stock WorldBox internal window. The toolbar copies the bottom
 WorldBox panel and button sprites, stretches to the logical canvas width, and
 balances commands across as few rows as the current UI scale permits. Its frame
@@ -69,6 +69,13 @@ the folder, queue, active file, converter backend, completed count, and
 failures, and exposes an explicit retry action. Stable files are converted with
 the adaptive safe palette into complete new WorldBox save slots without
 changing the open world.
+
+The Project chapter's raster classifier uses a text segmented
+`Point | Polygon` control, so it needs no additional icon asset. Polygon mode
+shows a surface-coloured translucent fill, fixed-width outline, vertex handles,
+and a live edge to the cursor. Right-click or double-click completes the ring;
+the side panel also exposes explicit Finish and Cancel commands and scrolls on
+short screens.
 
 The Analysis chapter also exposes `Live DEM water` with WorldBox's native rain
 icon. It is a repeat-click toggle with a green native activity lamp; the lamp
