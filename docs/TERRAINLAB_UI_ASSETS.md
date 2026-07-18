@@ -20,7 +20,7 @@ against screen edges and can be collapsed independently.
 
 ## Implementation status
 
-Version 1.9.0 implements the standalone side button, an adaptive top GIS
+Version 1.9.1 implements the standalone side button, an adaptive top GIS
 toolbar, and a stock WorldBox internal window. The toolbar copies the bottom
 WorldBox panel and button sprites, stretches to the logical canvas width, and
 balances commands across as few rows as the current UI scale permits. Its frame
@@ -78,11 +78,12 @@ independent area-of-interest polygon with a cyan outline. Its exterior is
 excluded from adaptive clustering and manual training, then forced to deep
 ocean at `-4000 m` in the result. Right-click or double-click completes either
 ring; the side panel also exposes explicit Finish, Cancel, and Remove commands
-and scrolls on short screens. Opening the classifier first shows an in-game
-filename dropdown and a distinct **Open selected** command. Arrow or dropdown
+and scrolls on short screens. Opening the classifier first shows one compact
+`previous | filename | next` selector and a distinct **Open selected** command.
+The filename is not repeated in a popup or pending-status caption. Arrow
 changes only select a candidate; all classification controls remain disabled
-until that file has loaded. The watched-folder command remains a plain
-file-browser shortcut and cannot return the Explorer selection to WorldBox.
+until that file has loaded. The watched-folder command remains a plain file
+browser shortcut and cannot return the Explorer selection to WorldBox.
 
 The Analysis chapter also exposes `Live DEM water` with WorldBox's native rain
 icon. It is a repeat-click toggle with a green native activity lamp; the lamp

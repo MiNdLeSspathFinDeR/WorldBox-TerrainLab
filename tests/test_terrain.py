@@ -132,9 +132,14 @@ class TerrainConversionTests(unittest.TestCase):
         ).read_text(encoding="utf-8")
 
         self.assertIn("private int _pendingImageIndex = -1;", overlay_source)
+        self.assertNotIn("private Dropdown _imageDropdown;", overlay_source)
         self.assertIn(
-            "_imageDropdown.onValueChanged.AddListener(\n"
-            "                HandlePendingImageChanged);",
+            "private void SelectPendingImage(int index)",
+            overlay_source,
+        )
+        self.assertIn("SelectPendingImage(next);", overlay_source)
+        self.assertIn(
+            "_fileLabel = CreateFileSelectorField(",
             overlay_source,
         )
         self.assertIn("SetEditorControlsEnabled(false);", overlay_source)
@@ -147,6 +152,8 @@ class TerrainConversionTests(unittest.TestCase):
             "new UnityColor(0.01f, 0.01f, 0.01f, 1f)",
             overlay_source,
         )
+        self.assertIn('arrowText.text = "v";', overlay_source)
+        self.assertIn("item.graphic = null;", overlay_source)
         self.assertIn(
             "TerrainImageClassificationDrawMode.MapBoundary",
             overlay_source,

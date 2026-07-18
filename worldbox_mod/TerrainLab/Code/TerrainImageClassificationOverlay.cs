@@ -142,7 +142,6 @@ namespace TerrainLab
         private Text _sampleLabel;
         private Text _coordinateLabel;
         private Text _panelStatus;
-        private Dropdown _imageDropdown;
         private Dropdown _surfaceDropdown;
         private Dropdown _biotopeDropdown;
         private InputField _elevationInput;
@@ -236,7 +235,7 @@ namespace TerrainLab
                 _images = _workspace.GetRecentImages(64).ToList();
                 EnsureUi();
                 ResetLoadedImage();
-                PopulateImageChoices(previous);
+                InitializePendingImage(previous);
                 _root.SetActive(true);
                 _root.transform.SetAsLastSibling();
                 if (_toolbarTransform != null)
@@ -255,7 +254,6 @@ namespace TerrainLab
                 }
                 else
                 {
-                    UpdatePendingImageLabels();
                     SetPanelStatus(
                         LM.Get("terrain_lab_manual_select_and_confirm"),
                         false);
@@ -513,11 +511,6 @@ namespace TerrainLab
                 _imagePath = path;
                 _imageIndex = imageIndex;
                 _pendingImageIndex = imageIndex;
-                if (_imageDropdown != null)
-                {
-                    _imageDropdown.SetValueWithoutNotify(imageIndex);
-                    _imageDropdown.RefreshShownValue();
-                }
                 _sourceWidth = width;
                 _sourceHeight = height;
                 _profile = nextProfile;
@@ -559,12 +552,8 @@ namespace TerrainLab
             }
         }
 
-        private void PopulateImageChoices(string previousPath)
+        private void InitializePendingImage(string previousPath)
         {
-            _imageDropdown.ClearOptions();
-            _imageDropdown.AddOptions(
-                _images.Select(Path.GetFileName).ToList());
-
             int selected = string.IsNullOrWhiteSpace(previousPath)
                 ? -1
                 : _images.FindIndex(path => string.Equals(
@@ -574,15 +563,11 @@ namespace TerrainLab
             _pendingImageIndex = selected >= 0
                 ? selected
                 : (_images.Count > 0 ? 0 : -1);
-            if (_pendingImageIndex >= 0)
-            {
-                _imageDropdown.SetValueWithoutNotify(_pendingImageIndex);
-            }
-            _imageDropdown.RefreshShownValue();
+            UpdatePendingImageLabels();
             UpdateImageSelectorControls();
         }
 
-        private void HandlePendingImageChanged(int index)
+        private void SelectPendingImage(int index)
         {
             if (index < 0 || index >= _images.Count)
             {
@@ -591,9 +576,6 @@ namespace TerrainLab
 
             if (_draftVertices.Count > 0)
             {
-                _imageDropdown.SetValueWithoutNotify(
-                    _imageIndex >= 0 ? _imageIndex : _pendingImageIndex);
-                _imageDropdown.RefreshShownValue();
                 SetPanelStatus(
                     LM.Get("terrain_lab_manual_finish_draft"),
                     true);
@@ -636,7 +618,7 @@ namespace TerrainLab
                 next += _images.Count;
             }
 
-            _imageDropdown.value = next;
+            SelectPendingImage(next);
         }
 
         private void ConfirmImageSelection()
@@ -691,20 +673,14 @@ namespace TerrainLab
                 return;
             }
 
-            _fileLabel.text = string.Format(
-                LM.Get("terrain_lab_manual_pending_format"),
-                Path.GetFileName(_images[_pendingImageIndex]));
+            _fileLabel.text =
+                Path.GetFileName(_images[_pendingImageIndex]);
             _sampleLabel.text =
                 LM.Get("terrain_lab_manual_select_and_confirm");
         }
 
         private void UpdateImageSelectorControls()
         {
-            bool hasImages = _images.Count > 0;
-            if (_imageDropdown != null)
-            {
-                _imageDropdown.interactable = hasImages;
-            }
             if (_previousImageButton != null)
             {
                 _previousImageButton.interactable = _images.Count > 1;
@@ -871,39 +847,29 @@ namespace TerrainLab
                 FontStyle.Bold,
                 18f,
                 new UnityColor(0.83f, 0.79f, 0.66f, 1f));
-            _imageDropdown = CreateDropdown(
-                content,
-                Enumerable.Empty<string>(),
-                "terrain_lab_manual_image_choice");
-            _imageDropdown.onValueChanged.AddListener(
-                HandlePendingImageChanged);
-            _fileLabel = CreateLabel(
-                content,
-                string.Empty,
-                11,
-                FontStyle.Bold,
-                34f,
-                new UnityColor(0.95f, 0.76f, 0.28f, 1f));
-            Transform navigation = CreateRow(content, 30f);
+            Transform navigation = CreateRow(content, 36f);
             _previousImageButton = CreateButton(
                 navigation,
                 "<",
                 delegate { MovePendingImage(-1); },
-                48f,
+                38f,
                 "terrain_lab_manual_previous_image");
-            _openSelectedButton = CreateButton(
+            _fileLabel = CreateFileSelectorField(
                 navigation,
-                LM.Get("terrain_lab_manual_open_selected"),
-                ConfirmImageSelection,
-                144f,
-                "terrain_lab_manual_open_selected",
-                true);
+                "terrain_lab_manual_image_choice");
             _nextImageButton = CreateButton(
                 navigation,
                 ">",
                 delegate { MovePendingImage(1); },
-                48f,
+                38f,
                 "terrain_lab_manual_next_image");
+            _openSelectedButton = CreateButton(
+                content,
+                LM.Get("terrain_lab_manual_open_selected"),
+                ConfirmImageSelection,
+                252f,
+                "terrain_lab_manual_open_selected",
+                true);
 
             TrackEditorControl(
                 CreateButton(
@@ -2151,6 +2117,57 @@ namespace TerrainLab
             return label;
         }
 
+        private Text CreateFileSelectorField(
+            Transform parent,
+            string tooltipKey)
+        {
+            GameObject fieldObject = new GameObject(
+                "TerrainLabClassificationFileSelector",
+                typeof(RectTransform),
+                typeof(Image),
+                typeof(LayoutElement));
+            fieldObject.transform.SetParent(parent, false);
+            Image background = fieldObject.GetComponent<Image>();
+            background.sprite = SpriteTextureLoader.getSprite(
+                "ui/special/darkInputFieldEmpty");
+            background.type = Image.Type.Sliced;
+            background.color =
+                new UnityColor(0.01f, 0.01f, 0.01f, 1f);
+            background.raycastTarget = true;
+
+            LayoutElement element =
+                fieldObject.GetComponent<LayoutElement>();
+            element.preferredWidth = 174f;
+            element.preferredHeight = 36f;
+
+            GameObject textObject = new GameObject(
+                "TerrainLabClassificationFileName",
+                typeof(RectTransform),
+                typeof(Text));
+            textObject.transform.SetParent(fieldObject.transform, false);
+            RectTransform textRect =
+                textObject.GetComponent<RectTransform>();
+            textRect.anchorMin = Vector2.zero;
+            textRect.anchorMax = Vector2.one;
+            textRect.offsetMin = new Vector2(6f, 2f);
+            textRect.offsetMax = new Vector2(-6f, -2f);
+
+            Text label = textObject.GetComponent<Text>();
+            label.font = LocalizedTextManager.current_font;
+            label.fontSize = 11;
+            label.fontStyle = FontStyle.Bold;
+            label.alignment = TextAnchor.MiddleCenter;
+            label.color = UnityColor.white;
+            label.horizontalOverflow = HorizontalWrapMode.Wrap;
+            label.verticalOverflow = VerticalWrapMode.Truncate;
+            label.resizeTextForBestFit = true;
+            label.resizeTextMinSize = 7;
+            label.resizeTextMaxSize = 11;
+            label.raycastTarget = false;
+            ConfigureTooltip(fieldObject, tooltipKey);
+            return label;
+        }
+
         private T TrackEditorControl<T>(T control)
             where T : Selectable
         {
@@ -2239,6 +2256,37 @@ namespace TerrainLab
 
         private static void StyleDropdownPopup(GameObject dropdownObject)
         {
+            Transform arrow = dropdownObject.transform.Find("Arrow");
+            if (arrow != null)
+            {
+                Image arrowImage = arrow.GetComponent<Image>();
+                if (arrowImage != null)
+                {
+                    arrowImage.enabled = false;
+                }
+
+                GameObject arrowGlyph = new GameObject(
+                    "TerrainLabDropdownArrow",
+                    typeof(RectTransform),
+                    typeof(Text));
+                arrowGlyph.transform.SetParent(arrow, false);
+                RectTransform arrowRect =
+                    arrowGlyph.GetComponent<RectTransform>();
+                arrowRect.anchorMin = Vector2.zero;
+                arrowRect.anchorMax = Vector2.one;
+                arrowRect.offsetMin = Vector2.zero;
+                arrowRect.offsetMax = Vector2.zero;
+                Text arrowText = arrowGlyph.GetComponent<Text>();
+                arrowText.font = LocalizedTextManager.current_font;
+                arrowText.text = "v";
+                arrowText.fontSize = 10;
+                arrowText.fontStyle = FontStyle.Bold;
+                arrowText.alignment = TextAnchor.MiddleCenter;
+                arrowText.color =
+                    new UnityColor(0.83f, 0.79f, 0.66f, 1f);
+                arrowText.raycastTarget = false;
+            }
+
             Transform template = dropdownObject.transform.Find("Template");
             if (template == null)
             {
@@ -2279,6 +2327,19 @@ namespace TerrainLab
                 if (item.targetGraphic != null)
                 {
                     item.targetGraphic.color = colors.normalColor;
+                }
+                if (item.graphic != null)
+                {
+                    item.graphic.enabled = false;
+                    item.graphic = null;
+                }
+
+                Transform itemLabel = item.transform.Find("Item Label");
+                if (itemLabel is RectTransform itemLabelRect)
+                {
+                    itemLabelRect.offsetMin = new Vector2(
+                        8f,
+                        itemLabelRect.offsetMin.y);
                 }
             }
 

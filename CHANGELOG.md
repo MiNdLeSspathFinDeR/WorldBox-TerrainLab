@@ -2,6 +2,17 @@
 
 ## Unreleased
 
+## 1.9.1 - 2026-07-18
+
+- Replaced the source-image dropdown with one compact
+  `previous | filename | next` selector and a separate full-width confirmation
+  command. The candidate filename is now shown only once.
+- Removed the redundant pending-file caption. Remaining morphotype and biotope
+  dropdowns now use a text arrow and selected-row background instead of Unity
+  arrow/checkmark graphics that appeared as white blocks. Explicit loading is
+  preserved, so changing the candidate still cannot silently replace the
+  active raster or its annotations.
+
 ## 1.9.0 - 2026-07-18
 
 - Added a QGIS-style Boundary mode to the manual raster classifier. A single

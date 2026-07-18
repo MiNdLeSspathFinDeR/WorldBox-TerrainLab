@@ -93,11 +93,12 @@ after enabling the watcher; each stable image becomes a new `saveN` slot while
 the open world remains untouched. The Project chapter's image-folder command
 only opens `ImageWorkspace` in the operating-system file browser; selecting a
 file there does not select it in WorldBox. The separate classification command
-opens an in-game file list. Choose the source raster and press **Open
-selected** before editing controls unlock. Point mode then labels individual
-pixels; Polygon mode digitizes QGIS-style training areas with a live outline
-and right-click or double-click completion. Every annotation receives an
-independent surface morphotype, biotope, and `-20000..9000 m` elevation.
+opens a compact previous/next file selector. Choose the source raster and press
+**Open selected** before editing controls unlock. Point mode then labels
+individual pixels; Polygon mode digitizes QGIS-style training areas with a
+live outline and right-click or double-click completion. Every annotation
+receives an independent surface morphotype, biotope, and `-20000..9000 m`
+elevation.
 Boundary mode digitizes one independent area-of-interest polygon. Pixels
 outside it are removed from adaptive clustering and manual learning, then
 written as `deep_ocean` at `-4000 m`; this keeps scan margins, legends, labels,
