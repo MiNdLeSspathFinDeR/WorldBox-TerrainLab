@@ -9,6 +9,17 @@ from PIL.Image import Image
 from .consts import TILES
 
 
+LIVING_SOIL_BIOMES = (
+    "grass",
+    "savanna",
+    "jungle",
+    "desert",
+    "permafrost",
+    "swamp",
+    "enchanted",
+)
+
+
 @dataclass(frozen=True)
 class TerrainState:
     luma_low: float
@@ -126,7 +137,11 @@ def classify_adaptive_terrain(
         water_threshold=water_threshold,
     )
 
-    indices = np.full(luma.shape, tile_index(tile_names, "soil_low"), dtype=np.uint8)
+    indices = np.full(
+        luma.shape,
+        living_soil_index(tile_names, "low"),
+        dtype=np.uint8,
+    )
     water_mask = detect_water(water_score, hue, saturation, luma_norm, non_void, state)
     if state.sat_mid < 0.28:
         water_mask |= detect_muted_boundary_water(
@@ -167,6 +182,7 @@ def classify_adaptive_terrain(
             tile_names,
             passes=settings.smooth_passes,
         )
+    indices = replace_bare_soil(indices, tile_names)
     if valid_mask is not None:
         indices[~analysis_mask] = tile_index(tile_names, "deep_ocean")
 
@@ -603,7 +619,12 @@ def classify_centers(
             hue=hue,
             state=state,
         )
-        result[index] = tile_index(tile_names, tile, "soil_low")
+        result[index] = tile_index(
+            tile_names,
+            tile,
+            "soil_low:grass_low",
+            "soil_high:grass_high",
+        )
     return result
 
 
@@ -650,14 +671,18 @@ def classify_land_tile(
             return "soil_low:savanna_low"
         return "soil_low:desert_low" if luma > 0.66 else "soil_high:desert_high"
     if warm and red_score > 0.05:
-        return "soil_high" if luma < 0.45 else "soil_low"
+        return (
+            "soil_high:savanna_high"
+            if luma < 0.45
+            else "soil_low:savanna_low"
+        )
     if saturation < 0.16 and luma < 0.52:
-        return "hills" if slope > 0.25 else "soil_high"
+        return "hills" if slope > 0.25 else "soil_high:grass_high"
     if saturation < 0.20 and luma > 0.70:
         return "sand"
     if luma < 0.36:
-        return "soil_high"
-    return "soil_low:grass_low" if green_score > -0.03 else "soil_low"
+        return "soil_high:grass_high"
+    return "soil_low:grass_low"
 
 
 def smooth_tiles(
@@ -852,6 +877,53 @@ def tile_index(tile_names: Sequence[str], *preferred: str) -> int:
         if tile in lookup:
             return lookup[tile]
     return 0
+
+
+def living_soil_index(
+    tile_names: Sequence[str],
+    level: str,
+    preferred_biotope: str = "grass",
+) -> int:
+    if level not in {"low", "high"}:
+        raise ValueError("living soil level must be low or high")
+
+    lookup: Dict[str, int] = {tile: index for index, tile in enumerate(tile_names)}
+    biotopes = (preferred_biotope,) + tuple(
+        biome
+        for biome in LIVING_SOIL_BIOMES
+        if biome != preferred_biotope
+    )
+    for biome in biotopes:
+        candidate = f"soil_{level}:{biome}_{level}"
+        if candidate in lookup:
+            return lookup[candidate]
+
+    other_level = "high" if level == "low" else "low"
+    for biome in biotopes:
+        candidate = f"soil_{other_level}:{biome}_{other_level}"
+        if candidate in lookup:
+            return lookup[candidate]
+
+    raise ValueError(
+        "adaptive terrain conversion requires at least one living soil "
+        "tile with a biome suffix"
+    )
+
+
+def replace_bare_soil(
+    indices: np.ndarray,
+    tile_names: Sequence[str],
+) -> np.ndarray:
+    lookup = {tile: index for index, tile in enumerate(tile_names)}
+    result = indices
+    for bare_tile, level in (("soil_low", "low"), ("soil_high", "high")):
+        bare_index = lookup.get(bare_tile)
+        if bare_index is None or not np.any(result == bare_index):
+            continue
+        if result is indices:
+            result = indices.copy()
+        result[result == bare_index] = living_soil_index(tile_names, level)
+    return result
 
 
 def make_index_image(indices: np.ndarray, tile_names: Sequence[str]) -> Image:

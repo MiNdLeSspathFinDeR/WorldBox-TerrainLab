@@ -437,6 +437,119 @@ class TerrainConversionTests(unittest.TestCase):
     def test_safe_palette_excludes_gameplay_hazards(self) -> None:
         self.assertFalse(set(SAFE_TILES_TUPLE) & set(UNPLAYABLE_TILES))
 
+    def test_adaptive_clustering_never_outputs_bare_soil(self) -> None:
+        pixels = np.zeros((128, 128, 3), dtype=np.uint8)
+        pixels[:64, :64] = (122, 74, 62)
+        pixels[:64, 64:] = (82, 82, 82)
+        pixels[64:, :64] = (150, 142, 130)
+        pixels[64:, 64:] = (92, 132, 78)
+        source = Image.fromarray(pixels, mode="RGB")
+        converted = convert(
+            source,
+            width=2,
+            height=2,
+            terrain_clusters=8,
+            terrain_smooth=0,
+            terrain_min_region=0,
+        )
+        try:
+            selected = {
+                SAFE_TILES_TUPLE[int(index)]
+                for index in np.unique(np.asarray(converted.preview))
+            }
+            self.assertNotIn("soil_low", selected)
+            self.assertNotIn("soil_high", selected)
+            self.assertTrue(
+                any(
+                    tile.startswith("soil_") and ":" in tile
+                    for tile in selected
+                )
+            )
+        finally:
+            converted.preview.close()
+            source.close()
+
+    def test_legacy_manual_none_soil_becomes_living_biome(self) -> None:
+        source = Image.new("RGB", (64, 64), (112, 108, 96))
+        profile = ClassificationProfile(
+            source_file_name="legacy-none.png",
+            source_width=64,
+            source_height=64,
+            samples=(
+                ClassificationSample(4, 4, "plain", "none", 120),
+                ClassificationSample(59, 59, "upland", "none", 900),
+            ),
+        )
+        converted = convert(
+            source,
+            width=1,
+            height=1,
+            classification_profile=profile,
+        )
+        try:
+            selected = {
+                SAFE_TILES_TUPLE[int(index)]
+                for index in np.unique(np.asarray(converted.preview))
+            }
+            self.assertNotIn("soil_low", selected)
+            self.assertNotIn("soil_high", selected)
+            self.assertTrue(
+                all(
+                    ":" in tile
+                    for tile in selected
+                    if tile.startswith("soil_")
+                )
+            )
+        finally:
+            converted.preview.close()
+            source.close()
+
+    def test_manual_ui_excludes_bare_biotope_and_seeds_native_vegetation(
+        self,
+    ) -> None:
+        catalog_source = (
+            ROOT
+            / "worldbox_mod"
+            / "TerrainLab"
+            / "Code"
+            / "TerrainImageClassification.cs"
+        ).read_text(encoding="utf-8")
+        overlay_source = (
+            ROOT
+            / "worldbox_mod"
+            / "TerrainLab"
+            / "Code"
+            / "TerrainImageClassificationOverlay.cs"
+        ).read_text(encoding="utf-8")
+        seeder_source = (
+            ROOT
+            / "worldbox_mod"
+            / "TerrainLab"
+            / "Code"
+            / "TerrainVegetationSeeder.cs"
+        ).read_text(encoding="utf-8")
+
+        self.assertIn("SelectableBiotopes = Biotopes", catalog_source)
+        self.assertNotIn(
+            "TerrainImageClassificationCatalog.Biotopes",
+            overlay_source,
+        )
+        self.assertIn(
+            "BuildingActions.tryGrowVegetationRandom(",
+            seeder_source,
+        )
+        for vegetation_type in ("Trees", "Plants", "Bushes"):
+            self.assertIn(
+                f"VegetationType.{vegetation_type}",
+                seeder_source,
+            )
+        self.assertIn("WorkPerFrame = 48", seeder_source)
+        self.assertIn(
+            "MaximumCandidateCount = MaximumSeedCount * 8",
+            seeder_source,
+        )
+        self.assertIn("mapStats.custom_data.addFlag", seeder_source)
+
     def test_uniform_image_converts(self) -> None:
         source = Image.new("RGB", (128, 128), (100, 120, 140))
         converted = convert(source, width=2, height=2)

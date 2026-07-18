@@ -21,6 +21,7 @@ namespace TerrainLab
         private static readonly TerrainWaterDynamicsService WaterDynamicsService;
         private static readonly TerrainErosionModule ErosionModule;
         private static readonly TerrainImageWorkspaceService ImageWorkspaceService;
+        private static readonly TerrainVegetationSeeder VegetationSeeder;
         private static readonly FieldInfo MapStatsField =
             AccessTools.Field(typeof(MapBox), "map_stats");
 
@@ -41,6 +42,7 @@ namespace TerrainLab
             WaterDynamicsService = new TerrainWaterDynamicsService();
             ErosionModule = new TerrainErosionModule();
             ImageWorkspaceService = new TerrainImageWorkspaceService();
+            VegetationSeeder = new TerrainVegetationSeeder();
             ModuleRegistry.Register(HydrologyModule);
             ModuleRegistry.Register(WaterDynamicsModule);
             ModuleRegistry.Register(ErosionModule);
@@ -184,6 +186,7 @@ namespace TerrainLab
                 changed |= ErosionModule.Poll(State);
                 changed |= WaterDynamicsService.Poll(State, HasRunningAnalysis);
                 changed |= ImageWorkspaceService.Poll();
+                changed |= VegetationSeeder.Poll();
             }
 
             if (changed)
@@ -669,6 +672,7 @@ namespace TerrainLab
             HydrologyModule.Cancel();
             ErosionModule.Cancel();
             WaterDynamicsService.Reset();
+            VegetationSeeder.Reset();
             try
             {
                 if (!TerrainMapLimits.TryValidate(MapBox.width, MapBox.height, out string limitError))
@@ -764,6 +768,7 @@ namespace TerrainLab
             {
                 _pendingLoadDirectory = null;
                 WaterDynamicsService.AttachState(State);
+                VegetationSeeder.Schedule(GetCurrentMapStats());
                 NotifyStateChanged();
             }
         }
@@ -869,6 +874,7 @@ namespace TerrainLab
             HydrologyModule.Cancel();
             ErosionModule.Cancel();
             WaterDynamicsService.Reset();
+            VegetationSeeder.Reset();
             ImageWorkspaceService.Dispose();
             if (_worldLoadedField != null && _worldLoadedCallback != null)
             {

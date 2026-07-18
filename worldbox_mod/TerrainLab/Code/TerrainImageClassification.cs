@@ -126,6 +126,15 @@ namespace TerrainLab
                     "terrain_lab_manual_biotope_enchanted")
             };
 
+        public static readonly IReadOnlyList<TerrainImageBiotopeOption>
+            SelectableBiotopes = Biotopes
+                .Where(option =>
+                    !string.Equals(
+                        option.Id,
+                        "none",
+                        StringComparison.Ordinal))
+                .ToArray();
+
         public static TerrainImageClassOption FindSurface(string id)
         {
             return Surfaces.FirstOrDefault(option =>

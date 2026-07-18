@@ -2,6 +2,19 @@
 
 ## Unreleased
 
+## 1.13.0 - 2026-07-18
+
+- Removed bare `soil_low` and `soil_high` outcomes from automatic clustering.
+  Warm, neutral, and fallback land clusters now resolve to a playable living
+  biome while preserving sand, rock, mountain, ice, and water morphotypes.
+- Removed the bare-biotope choice from new manual annotations. Legacy profiles
+  containing `biotope: none` remain loadable and are projected to grass on soil
+  surfaces instead of producing sterile ground.
+- Added one-time native WorldBox vegetation seeding for imported ImageToMap
+  worlds. Trees, plants, and bushes are selected through each tile's own biome
+  asset, spread over multiple frames, capped, and recorded in map custom data
+  so reopening a save cannot duplicate the initial vegetation.
+
 ## 1.12.0 - 2026-07-18
 
 - Matched the adaptive top toolbar more closely to WorldBox's lower power bar:

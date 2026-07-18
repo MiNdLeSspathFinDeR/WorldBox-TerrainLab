@@ -103,7 +103,8 @@ Settings and the boundary persist per source in
 `<image>.terrainlab-clustering.json`. The 15 controls cover cluster count,
 multiscale spline radius, cleanup, water sensitivity, colour, luminance,
 saturation, texture, edge and spatial weights, retained detail, sample budget,
-K-means iterations, and deterministic seed.
+K-means iterations, and deterministic seed. Soil clusters always receive a
+living gameplay biome; sterile bare-soil tiles are not emitted.
 
 **Manual classification** opens a compact previous/next file selector for
 deliberate training. Choose the source raster and press
@@ -132,6 +133,11 @@ polygon clicked on the canvas; Delete all immediately removes every training
 polygon while preserving point samples and the map boundary.
 The conversion publishes `terrainlab-elevation.tif` with the new save so
 TerrainLab can restore the interpolated Int16 DEM when that world is opened.
+The manual biotope list likewise excludes bare ground. Older profiles using
+`none` remain compatible and resolve soil to grass. On the first load of an
+imported map, TerrainLab uses WorldBox's native biome selectors to seed a
+bounded mix of trees, plants, and bushes, then stores a completion flag in the
+save so the process does not repeat.
 Save opens a name form before writing the
 ordinary map and WBXGEO sidecar. The other pages hold numeric parameters, layer
 diagnostics, and settings. Erosion provides a deterministic,

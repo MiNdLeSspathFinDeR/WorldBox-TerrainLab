@@ -69,6 +69,7 @@ internal static class Program
             ValidateImageWorkspaceProtocol(testRoot);
             ValidateImageClassificationProfile(testRoot);
             ValidateImageClusteringProfile(testRoot);
+            ValidateVegetationSeedingContract();
             if (generatedDemPath != null)
             {
                 ValidateGeneratedDem(
@@ -143,6 +144,77 @@ internal static class Program
             postfixParameters[0].ParameterType == typeof(Building) &&
             postfixParameters[1].ParameterType == typeof(int),
             "The geyser Harmony patch no longer forwards the live Building instance.");
+    }
+
+    private static void ValidateVegetationSeedingContract()
+    {
+        Assert(
+            TerrainImageClassificationCatalog.Biotopes.Any(option =>
+                option.Id == "none"),
+            "Legacy manual profiles can no longer load the none biotope.");
+        Assert(
+            TerrainImageClassificationCatalog.SelectableBiotopes.All(option =>
+                option.Id != "none"),
+            "Manual classification still exposes bare soil.");
+
+        Type seederType = typeof(TerrainLabMod).Assembly.GetType(
+            "TerrainLab.TerrainVegetationSeeder",
+            true);
+        MethodInfo shouldSeed = seederType.GetMethod(
+            "ShouldSeed",
+            BindingFlags.NonPublic | BindingFlags.Static);
+        MethodInfo calculateTarget = seederType.GetMethod(
+            "CalculateSeedTarget",
+            BindingFlags.NonPublic | BindingFlags.Static);
+        MethodInfo getVegetationType = seederType.GetMethod(
+            "GetVegetationType",
+            BindingFlags.NonPublic | BindingFlags.Static);
+        Assert(
+            shouldSeed != null &&
+            calculateTarget != null &&
+            getVegetationType != null,
+            "Initial vegetation seeder test hooks are unavailable.");
+
+        MapStats imported = new MapStats { player_name = "ImageToMap" };
+        MapStats vanilla = new MapStats { player_name = "WorldBox" };
+        Assert(
+            (bool)shouldSeed.Invoke(null, new object[] { imported }) &&
+            !(bool)shouldSeed.Invoke(null, new object[] { vanilla }),
+            "Initial vegetation is not restricted to imported maps.");
+        Assert(
+            (int)calculateTarget.Invoke(null, new object[] { 0 }) == 0 &&
+            (int)calculateTarget.Invoke(null, new object[] { 192 }) == 3 &&
+            (int)calculateTarget.Invoke(null, new object[] { 1_000_000 }) ==
+                4096,
+            "Initial vegetation density or cap changed.");
+        Assert(
+            (VegetationType)getVegetationType.Invoke(
+                null,
+                new object[] { 0 }) == VegetationType.Trees &&
+            (VegetationType)getVegetationType.Invoke(
+                null,
+                new object[] { 1 }) == VegetationType.Plants &&
+            (VegetationType)getVegetationType.Invoke(
+                null,
+                new object[] { 2 }) == VegetationType.Bushes,
+            "Initial vegetation no longer includes trees, plants, and bushes.");
+
+        MethodInfo nativeGrow = typeof(BuildingActions).GetMethod(
+            "tryGrowVegetationRandom",
+            BindingFlags.Public | BindingFlags.Static,
+            null,
+            new[]
+            {
+                typeof(WorldTile),
+                typeof(VegetationType),
+                typeof(bool),
+                typeof(bool),
+                typeof(bool)
+            },
+            null);
+        Assert(
+            nativeGrow != null,
+            "WorldBox native vegetation API signature changed.");
     }
 
     private static void ValidateReliefAlgorithm()

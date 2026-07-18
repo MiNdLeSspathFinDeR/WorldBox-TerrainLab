@@ -20,7 +20,7 @@ against screen edges and can be collapsed independently.
 
 ## Implementation status
 
-Version 1.12.0 implements the standalone side button, an adaptive top GIS
+Version 1.13.0 implements the standalone side button, an adaptive top GIS
 toolbar, and a stock WorldBox internal window. The toolbar copies the bottom
 WorldBox panel and button sprites, stretches to the logical canvas width, and
 balances commands across as few rows as the current UI scale permits. Its frame
@@ -84,6 +84,11 @@ from both sampling and cluster fitting; every exterior output cell becomes deep
 ocean. Five basic controls remain visible, while a collapsible expert section
 adds ten feature, regularization, quality, and reproducibility controls. All 15
 rows have English and Russian hover explanations.
+
+Both interpretation paths now reject sterile bare-soil output. Soil always has
+a living biome, the manual selector omits `none`, and old profiles using it
+fall back to grass. Imported worlds receive one bounded, multi-frame pass of
+native biome-specific trees, plants, and bushes on first load.
 
 The manual raster classifier uses a compact text-segmented
 `Point | Line | Polygon` geometry control plus independent extent and deletion

@@ -21,7 +21,9 @@ inspected, replaced, or controlled independently.
 6. Cluster land in an adaptive feature space containing normalized luminance,
    saturation, cyclic hue, relative slope, vegetation, warm-soil, and coolness
    signals. Cluster assignment is deterministic.
-7. Project semantic classes only onto the safe gameplay palette. Explosives,
+7. Project semantic classes only onto the safe gameplay palette. Soil classes
+   always carry a living biome suffix; bare `soil_low` and `soil_high` are not
+   automatic outputs. Explosives,
    lava, grey goo, corruption, tumors, biomass, cyber tiles, and other disruptive
    materials are excluded unless the full palette is explicitly requested.
 
@@ -71,7 +73,7 @@ annotation contains three independent observations:
 
 - a surface morphotype such as shelf, river/lake, plain, hill, rock, summit, or
   local depression;
-- an optional playable WorldBox biotope for soil surfaces;
+- a required playable WorldBox biotope for soil surfaces (`auto` may infer it);
 - a signed Int16 elevation in `-20000..9000 m`, excluding reserved
   `NODATA=9999`.
 
@@ -79,6 +81,12 @@ Lines additionally store an authoritative `1..32`-cell output width. Completed
 polygon drafts and saved polygons use a repeated morphotype pattern; points and
 all line/polygon vertices use the shared Turbo DEM palette. Both update live as
 the draft attributes change.
+
+The editor no longer offers a bare-soil biotope. Schema version 1 profiles that
+already contain `none` still load, but soil is projected to grass. When an
+ImageToMap world is opened for the first time, the mod incrementally calls
+WorldBox's native biome vegetation selector for trees, plants, and bushes. A
+custom-data flag makes this initial seed pass idempotent.
 
 The guided classifier normalizes the source's own colour range and combines
 colour, local gradient/roughness, and normalized image position. Spatial

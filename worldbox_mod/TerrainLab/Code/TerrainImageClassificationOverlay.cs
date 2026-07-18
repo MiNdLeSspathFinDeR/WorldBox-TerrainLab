@@ -1052,7 +1052,7 @@ namespace TerrainLab
                     {
                         LM.Get("terrain_lab_manual_not_selected")
                     }.Concat(
-                        TerrainImageClassificationCatalog.Biotopes
+                        TerrainImageClassificationCatalog.SelectableBiotopes
                             .Select(option =>
                                 LM.Get(option.LocalizationKey))),
                     "terrain_lab_manual_biotope"));
@@ -1176,7 +1176,7 @@ namespace TerrainLab
             _outsideBiotopeDropdown = TrackEditorControl(
                 CreateDropdown(
                     content,
-                    TerrainImageClassificationCatalog.Biotopes
+                    TerrainImageClassificationCatalog.SelectableBiotopes
                         .Select(option => LM.Get(option.LocalizationKey)),
                     "terrain_lab_manual_outside_biotope"));
             _outsideBiotopeDropdown.onValueChanged.AddListener(
@@ -1369,7 +1369,7 @@ namespace TerrainLab
                                 StringComparison.Ordinal)));
                 int biotopeIndex = Math.Max(
                     0,
-                    TerrainImageClassificationCatalog.Biotopes
+                    TerrainImageClassificationCatalog.SelectableBiotopes
                         .ToList()
                         .FindIndex(option =>
                             string.Equals(
@@ -1427,7 +1427,7 @@ namespace TerrainLab
                 TerrainImageClassificationCatalog.Surfaces.Count ||
                 _outsideBiotopeDropdown.value < 0 ||
                 _outsideBiotopeDropdown.value >=
-                TerrainImageClassificationCatalog.Biotopes.Count ||
+                TerrainImageClassificationCatalog.SelectableBiotopes.Count ||
                 !short.TryParse(
                     _outsideElevationInput.text,
                     NumberStyles.Integer,
@@ -1448,7 +1448,7 @@ namespace TerrainLab
                     TerrainImageClassificationCatalog.Surfaces[
                         _outsideSurfaceDropdown.value];
                 TerrainImageBiotopeOption biotope =
-                    TerrainImageClassificationCatalog.Biotopes[
+                    TerrainImageClassificationCatalog.SelectableBiotopes[
                         _outsideBiotopeDropdown.value];
                 _profile.SetOutsideMapArea(
                     surface.Id,
@@ -1709,7 +1709,7 @@ namespace TerrainLab
                 TerrainImageClassificationCatalog.Surfaces.Count ||
                 _biotopeDropdown.value <= 0 ||
                 _biotopeDropdown.value >
-                TerrainImageClassificationCatalog.Biotopes.Count ||
+                TerrainImageClassificationCatalog.SelectableBiotopes.Count ||
                 !short.TryParse(
                     _elevationInput.text,
                     NumberStyles.Integer,
@@ -2353,7 +2353,7 @@ namespace TerrainLab
                 TerrainImageClassificationCatalog.Surfaces.Count ||
                 _biotopeDropdown.value <= 0 ||
                 _biotopeDropdown.value >
-                TerrainImageClassificationCatalog.Biotopes.Count ||
+                TerrainImageClassificationCatalog.SelectableBiotopes.Count ||
                 !TryReadElevation(out elevation))
             {
                 if (_surfaceDropdown?.value <= 0 ||
@@ -2368,7 +2368,7 @@ namespace TerrainLab
             }
             surface = TerrainImageClassificationCatalog.Surfaces[
                 _surfaceDropdown.value - 1];
-            biotope = TerrainImageClassificationCatalog.Biotopes[
+            biotope = TerrainImageClassificationCatalog.SelectableBiotopes[
                 _biotopeDropdown.value - 1];
             return true;
         }

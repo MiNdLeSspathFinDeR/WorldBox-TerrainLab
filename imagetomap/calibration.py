@@ -13,6 +13,7 @@ from PIL.Image import Image
 from .consts import ELEVATION_MAXIMUM, ELEVATION_MINIMUM, ELEVATION_NODATA
 from .terrain import (
     gradient_magnitude,
+    living_soil_index,
     local_roughness,
     make_index_image,
     normalize,
@@ -1296,23 +1297,28 @@ def _resolve_tile_index(
     if base_candidates[0] in {"soil_low", "soil_high"}:
         soil_level = "low" if base_candidates[0] == "soil_low" else "high"
 
-    if soil_level is not None and biotope == "auto":
-        automatic_biotope = _extract_biotope(automatic_tile)
-        if automatic_biotope is not None:
-            candidate = (
-                f"soil_{soil_level}:{automatic_biotope}_{soil_level}"
-            )
-            if candidate in lookup:
-                return lookup[candidate]
-    elif soil_level is not None and biotope in _BIOTOPE_SUFFIX:
-        suffix = _BIOTOPE_SUFFIX[biotope]
-        candidate = f"soil_{soil_level}:{suffix}_{soil_level}"
-        if candidate in lookup:
-            return lookup[candidate]
+    if soil_level is not None:
+        selected_biotope = None
+        if biotope == "auto":
+            selected_biotope = _extract_biotope(automatic_tile)
+        elif biotope in _BIOTOPE_SUFFIX:
+            selected_biotope = _BIOTOPE_SUFFIX[biotope]
+
+        return living_soil_index(
+            tile_names,
+            soil_level,
+            selected_biotope or "grass",
+        )
 
     for candidate in base_candidates:
+        if candidate in {"soil_low", "soil_high"}:
+            level = "low" if candidate == "soil_low" else "high"
+            return living_soil_index(tile_names, level)
         if candidate in lookup:
             return lookup[candidate]
+    if automatic_tile in {"soil_low", "soil_high"}:
+        level = "low" if automatic_tile == "soil_low" else "high"
+        return living_soil_index(tile_names, level)
     return automatic_index
 
 
