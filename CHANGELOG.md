@@ -2,6 +2,15 @@
 
 ## Unreleased
 
+## 1.9.2 - 2026-07-18
+
+- Fixed the manual-classifier vertical layout so Unity applies every declared
+  preferred height. Mode, annotation, save, and close controls now render as
+  compact `24..36`-unit rows comparable to the native WorldBox panel buttons,
+  instead of retaining Unity's oversized default `100`-unit row height.
+- Added a source-level regression check for the non-expanding,
+  preferred-height-driven panel layout.
+
 ## 1.9.1 - 2026-07-18
 
 - Replaced the source-image dropdown with one compact

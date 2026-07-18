@@ -828,7 +828,7 @@ namespace TerrainLab
             layout.spacing = 5f;
             layout.childAlignment = TextAnchor.UpperCenter;
             layout.childControlWidth = true;
-            layout.childControlHeight = false;
+            layout.childControlHeight = true;
             layout.childForceExpandWidth = true;
             layout.childForceExpandHeight = false;
             Transform content = contentObject.transform;

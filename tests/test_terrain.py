@@ -142,6 +142,13 @@ class TerrainConversionTests(unittest.TestCase):
             "_fileLabel = CreateFileSelectorField(",
             overlay_source,
         )
+        self.assertIn(
+            "layout.childControlWidth = true;\n"
+            "            layout.childControlHeight = true;\n"
+            "            layout.childForceExpandWidth = true;\n"
+            "            layout.childForceExpandHeight = false;",
+            overlay_source,
+        )
         self.assertIn("SetEditorControlsEnabled(false);", overlay_source)
         self.assertNotIn("CycleImage(", overlay_source)
         self.assertIn(
