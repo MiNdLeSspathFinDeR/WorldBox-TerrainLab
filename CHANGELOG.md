@@ -2,6 +2,16 @@
 
 ## Unreleased
 
+## 1.8.1 - 2026-07-18
+
+- Replaced implicit newest-image loading with an in-game workspace file
+  selector and a separate, explicit Open selected confirmation command.
+- Classification controls now remain locked until the chosen raster has loaded
+  successfully. Changing the candidate clears the old preview instead of
+  silently editing the wrong image.
+- Clarified that Open image folder only opens the operating-system file
+  browser; selecting a file there does not pass a selection back to WorldBox.
+
 ## 1.8.0 - 2026-07-18
 
 - Added QGIS-style polygon training to the manual image classifier. Point and

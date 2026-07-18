@@ -48,6 +48,10 @@ PARAMETER_TOOLTIP_KEYS = (
     "terrain_lab_water_evaporation_per_climate_step",
     "terrain_lab_water_bank_erosion_radius",
     "terrain_lab_water_orphaned_channel_drain",
+    "terrain_lab_manual_image_choice",
+    "terrain_lab_manual_open_selected",
+    "terrain_lab_manual_previous_image",
+    "terrain_lab_manual_next_image",
     "terrain_lab_manual_canvas",
     "terrain_lab_manual_surface",
     "terrain_lab_manual_biotope",
@@ -112,6 +116,34 @@ class TerrainConversionTests(unittest.TestCase):
             "                3);",
             ui_source,
         )
+
+    def test_manual_image_picker_requires_explicit_confirmation(self) -> None:
+        overlay_source = (
+            ROOT
+            / "worldbox_mod"
+            / "TerrainLab"
+            / "Code"
+            / "TerrainImageClassificationOverlay.cs"
+        ).read_text(encoding="utf-8")
+
+        self.assertIn("private int _pendingImageIndex = -1;", overlay_source)
+        self.assertIn(
+            "_imageDropdown.onValueChanged.AddListener(\n"
+            "                HandlePendingImageChanged);",
+            overlay_source,
+        )
+        self.assertIn("SetEditorControlsEnabled(false);", overlay_source)
+        self.assertNotIn("CycleImage(", overlay_source)
+
+        confirm_start = overlay_source.index(
+            "private void ConfirmImageSelection()"
+        )
+        confirm_end = overlay_source.index(
+            "private void ResetLoadedImage()",
+            confirm_start,
+        )
+        confirm_source = overlay_source[confirm_start:confirm_end]
+        self.assertIn("OpenImage(_pendingImageIndex);", confirm_source)
 
     def test_geyser_patch_forwards_the_building_lifecycle(self) -> None:
         patch_source = (

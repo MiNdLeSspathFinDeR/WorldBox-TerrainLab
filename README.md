@@ -90,8 +90,11 @@ converter, active file, and failures. The in-game watcher accepts `PNG`,
 `JPG/JPEG/JFIF`, `TIFF/TIF`, `WebP`, `BMP`, `GIF`, `TGA`, `DDS`, and `JP2`;
 it does not accept SVG, PDF, PSD, or archives. Drop one of those rasters there
 after enabling the watcher; each stable image becomes a new `saveN` slot while
-the open world remains untouched. The Project chapter's manual-classification
-command opens a source raster over the map. Point mode labels individual
+the open world remains untouched. The Project chapter's image-folder command
+only opens `ImageWorkspace` in the operating-system file browser; selecting a
+file there does not select it in WorldBox. The separate classification command
+opens an in-game file list. Choose the source raster and press **Open
+selected** before editing controls unlock. Point mode then labels individual
 pixels; Polygon mode digitizes QGIS-style training areas with a live outline
 and right-click or double-click completion. Every annotation receives an
 independent surface morphotype, biotope, and `-20000..9000 m` elevation.
