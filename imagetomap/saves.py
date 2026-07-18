@@ -11,6 +11,11 @@ import uuid
 
 from PIL import Image as Img
 
+from .calibration import (
+    GENERATED_ELEVATION_FILE_NAME,
+    GENERATED_PROFILE_FILE_NAME,
+    write_int16_geotiff,
+)
 from .models import Map
 
 SAVE_SLOT_RE = re.compile(r"save(\d+)$")
@@ -223,6 +228,22 @@ def write_map_folder(
             json.dumps(meta, separators=(",", ":")).encode("utf-8")
         )
         create_stats_db(output_path / "map_stats.s3db", stats_template)
+
+    if converted_map.elevation is not None:
+        write_int16_geotiff(
+            output_path / GENERATED_ELEVATION_FILE_NAME,
+            converted_map.elevation,
+        )
+    if converted_map.classification_profile is not None:
+        (output_path / GENERATED_PROFILE_FILE_NAME).write_text(
+            json.dumps(
+                converted_map.classification_profile,
+                ensure_ascii=False,
+                indent=2,
+            )
+            + "\n",
+            encoding="utf-8",
+        )
 
 
 def write_game_save_atomically(

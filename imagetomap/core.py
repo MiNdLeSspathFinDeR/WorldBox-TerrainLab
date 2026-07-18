@@ -1,4 +1,4 @@
-from typing import Iterable, Tuple
+from typing import Iterable, Optional, Tuple
 
 from copy import deepcopy
 from decimal import ROUND_CEILING as CEILING, ROUND_HALF_EVEN as HALF_EVEN, Decimal
@@ -10,6 +10,10 @@ import zlib
 from PIL import Image as Img
 from PIL.Image import Image
 
+from .calibration import (
+    ClassificationProfile,
+    apply_manual_classification,
+)
 from .consts import CHUNK_SIZE, MAP_TEMPLATE, MAX_MAP_CELLS, SAFE_TILES_TUPLE, TILES
 from .models import Map
 from .terrain import classify_adaptive_terrain
@@ -179,6 +183,8 @@ def build_map(
     height: int,
     tiles: Iterable[str],
     name: str,
+    elevation=None,
+    classification_profile: Optional[ClassificationProfile] = None,
 ) -> Map:
     tiles = tuple(tiles)
     flipped_image = tile_image.transpose(Img.Transpose.FLIP_TOP_BOTTOM)
@@ -208,6 +214,12 @@ def build_map(
         width=width,
         height=height,
         preview=tile_image,
+        elevation=elevation,
+        classification_profile=(
+            classification_profile.to_json_dict()
+            if classification_profile is not None
+            else None
+        ),
     )
 
 
@@ -222,6 +234,7 @@ def convert(
     terrain_clusters: int = 14,
     terrain_smooth: int = 1,
     terrain_min_region: int = 32,
+    classification_profile: Optional[ClassificationProfile] = None,
 ) -> Map:
     """Convert an image to a WorldBox map.
 
@@ -280,12 +293,24 @@ def convert(
             smooth_passes=terrain_smooth,
             min_land_region=terrain_min_region,
         )
+        elevation = None
+        if classification_profile is not None:
+            manual_tile_image, elevation = apply_manual_classification(
+                image=resized_image,
+                automatic_tiles=tile_image,
+                tile_names=tiles,
+                profile=classification_profile,
+            )
+            tile_image.close()
+            tile_image = manual_tile_image
         return build_map(
             tile_image=tile_image,
             width=width,
             height=height,
             tiles=tiles,
             name=name,
+            elevation=elevation,
+            classification_profile=classification_profile,
         )
 
     palette = make_palette(tiles=tiles)

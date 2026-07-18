@@ -9,6 +9,13 @@ import numpy as np
 from PIL import Image, ImageDraw
 
 from imagetomap import convert, fit_map_size_to_budget, validate_map_size
+from imagetomap.calibration import (
+    ClassificationProfile,
+    ClassificationSample,
+    GENERATED_ELEVATION_FILE_NAME,
+    GENERATED_PROFILE_FILE_NAME,
+    load_classification_profile,
+)
 from imagetomap.consts import (
     ELEVATION_MAXIMUM,
     ELEVATION_MINIMUM,
@@ -40,6 +47,11 @@ PARAMETER_TOOLTIP_KEYS = (
     "terrain_lab_water_evaporation_per_climate_step",
     "terrain_lab_water_bank_erosion_radius",
     "terrain_lab_water_orphaned_channel_drain",
+    "terrain_lab_manual_canvas",
+    "terrain_lab_manual_surface",
+    "terrain_lab_manual_biotope",
+    "terrain_lab_manual_elevation",
+    "terrain_lab_manual_global_dem",
 )
 
 
@@ -168,6 +180,113 @@ class TerrainConversionTests(unittest.TestCase):
 
         self.assertEqual((converted.width, converted.height), (2, 2))
         self.assertEqual(converted.preview.size, (128, 128))
+
+    def test_manual_samples_split_same_colour_and_interpolate_dem(self) -> None:
+        source = Image.new("RGB", (128, 64), (112, 126, 104))
+        profile = ClassificationProfile(
+            source_file_name="same-colour.png",
+            source_width=128,
+            source_height=64,
+            samples=(
+                ClassificationSample(8, 32, "rocks", "none", 3200),
+                ClassificationSample(119, 32, "plain", "grass", 120),
+            ),
+        )
+        converted = convert(
+            source,
+            width=2,
+            height=1,
+            classification_profile=profile,
+        )
+        try:
+            palette = SAFE_TILES_TUPLE
+            pixels = converted.preview.load()
+            self.assertEqual(palette[pixels[8, 32]], "mountains")
+            self.assertEqual(palette[pixels[119, 32]], "soil_low:grass_low")
+            self.assertEqual(converted.elevation.shape, (64, 128))
+            self.assertEqual(int(converted.elevation[32, 8]), 3200)
+            self.assertEqual(int(converted.elevation[32, 119]), 120)
+            self.assertGreater(
+                int(converted.elevation[32, 32]),
+                int(converted.elevation[32, 96]),
+            )
+            self.assertFalse(np.any(converted.elevation == ELEVATION_NODATA))
+        finally:
+            converted.preview.close()
+            source.close()
+
+    def test_manual_save_contains_profile_and_signed_dem_geotiff(self) -> None:
+        source = Image.new("RGB", (64, 64), (90, 140, 80))
+        profile = ClassificationProfile(
+            source_file_name="manual.png",
+            source_width=64,
+            source_height=64,
+            samples=(
+                ClassificationSample(4, 4, "deep_ocean", "auto", -4000),
+                ClassificationSample(59, 59, "summit", "none", 5000),
+            ),
+        )
+        converted = convert(
+            source,
+            width=1,
+            height=1,
+            classification_profile=profile,
+        )
+        try:
+            with tempfile.TemporaryDirectory() as temporary_directory:
+                destination = Path(temporary_directory) / "save1"
+                write_game_save_atomically(
+                    output_path=destination,
+                    converted_map=converted,
+                    name="Manual map",
+                )
+                self.assertTrue(
+                    (destination / GENERATED_ELEVATION_FILE_NAME).is_file()
+                )
+                self.assertTrue(
+                    (destination / GENERATED_PROFILE_FILE_NAME).is_file()
+                )
+                with Image.open(
+                    destination / GENERATED_ELEVATION_FILE_NAME
+                ) as dem:
+                    self.assertEqual(dem.size, (64, 64))
+                    self.assertEqual(dem.tag_v2[258], (16,))
+                    self.assertEqual(dem.tag_v2[339], (2,))
+                    self.assertEqual(
+                        dem.tag_v2[42113].rstrip("\0"),
+                        str(ELEVATION_NODATA),
+                    )
+        finally:
+            converted.preview.close()
+            source.close()
+
+    def test_manual_profile_rejects_reserved_nodata(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            profile_path = Path(temporary_directory) / "invalid.json"
+            profile_path.write_text(
+                json.dumps(
+                    {
+                        "schema_version": 1,
+                        "source": {
+                            "file_name": "invalid.png",
+                            "width": 2,
+                            "height": 2,
+                        },
+                        "samples": [
+                            {
+                                "x": 0,
+                                "y": 0,
+                                "surface": "plain",
+                                "biotope": "auto",
+                                "elevation": ELEVATION_NODATA,
+                            }
+                        ],
+                    }
+                ),
+                encoding="utf-8",
+            )
+            with self.assertRaisesRegex(ValueError, "reserved"):
+                load_classification_profile(profile_path, (2, 2))
 
     def test_game_save_is_published_as_a_complete_directory(self) -> None:
         source = Image.new("RGB", (64, 64), (70, 130, 80))

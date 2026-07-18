@@ -25,6 +25,33 @@ inspected, replaced, or controlled independently.
    lava, grey goo, corruption, tumors, biomass, cyber tiles, and other disruptive
    materials are excluded unless the full palette is explicitly requested.
 
+## Implemented manual calibration
+
+TerrainLab can display a workspace raster over the live map and store clicked
+source-pixel samples in `<image>.terrainlab-classification.json`. Every sample
+contains three independent observations:
+
+- a surface morphotype such as shelf, river/lake, plain, hill, rock, summit, or
+  local depression;
+- an optional playable WorldBox biotope for soil surfaces;
+- a signed Int16 elevation in `-20000..9000 m`, excluding reserved
+  `NODATA=9999`.
+
+The guided classifier normalizes the source's own colour range and combines
+colour, local gradient/roughness, and normalized image position. Spatial
+distance breaks ties between equal-colour samples, so a repeated cartographic
+colour can describe different regional morphotypes or biotopes. Calculations
+run in bounded chunks and accept at most 512 samples.
+
+Sample heights form an inverse-distance-weighted DEM on a coarse bounded grid,
+are bicubically expanded, smoothed, and restored exactly at control points.
+Deep ocean, shelf, and marine shallows retain their defined depth intervals;
+the river/lake class is intentionally independent of absolute elevation so
+high-altitude water remains possible. The generated save contains the
+uncompressed signed Int16 `terrainlab-elevation.tif`. On first load TerrainLab
+combines that DEM with the vanilla-safe surface map; a subsequent normal save
+promotes the state into WBXGEO.
+
 ## Implemented Earth-like initial DEM
 
 When no WBXGEO project exists, TerrainLab infers the first metric DEM from the

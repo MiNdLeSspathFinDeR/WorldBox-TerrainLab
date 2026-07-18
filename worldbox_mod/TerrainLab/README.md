@@ -62,6 +62,11 @@ under `Code` when the game starts.
   and atomically publishes a complete new vanilla `saveN` slot. Its explicit
   input contract is `PNG`, `JPG/JPEG/JFIF`, `TIFF/TIF`, `WebP`, `BMP`, `GIF`,
   `TGA`, `DDS`, and `JP2`;
+- a manual source-raster canvas with zoom, pan, persistent sample markers, and
+  independent surface, biotope, and Int16-height labels. Its validated JSON
+  profile guides an adaptive colour/texture/spatial classifier, while IDW
+  interpolation is transferred into the generated save as a signed Int16
+  `terrainlab-elevation.tif` and adopted on first world load;
 - an in-game save form that edits the WorldBox map name before saving the
   ordinary map and WBXGEO sidecar, or hands a new world to the native slot
   picker;

@@ -11,6 +11,8 @@ namespace TerrainLab
     public sealed class TerrainLabRuntime : MonoBehaviour
     {
         public const int MaximumWorldNameLength = 80;
+        public const string GeneratedElevationFileName =
+            "terrainlab-elevation.tif";
 
         private static readonly TerrainModuleRegistry ModuleRegistry;
         private static readonly TerrainReliefService ReliefService;
@@ -705,8 +707,53 @@ namespace TerrainLab
                         "[TerrainLab] WBXGEO ignored; using vanilla terrain: " + packageError);
                 }
 
-                State = TerrainWorldState.CaptureCurrentWorld();
-                Debug.Log("[TerrainLab] Initialized GIS layers from the vanilla world.");
+                TerrainWorldState captured =
+                    TerrainWorldState.CaptureCurrentWorld();
+                string generatedElevationPath =
+                    string.IsNullOrWhiteSpace(directory)
+                        ? null
+                        : Path.Combine(
+                            directory,
+                            GeneratedElevationFileName);
+                if (generatedElevationPath != null &&
+                    File.Exists(generatedElevationPath))
+                {
+                    try
+                    {
+                        short[] elevation = TerrainGeoTiff.ReadInt16(
+                            generatedElevationPath,
+                            MapBox.width,
+                            MapBox.height);
+                        State = TerrainWorldState.CreateFromLayers(
+                            captured.ProjectId,
+                            captured.CreatedUtc,
+                            captured.Width,
+                            captured.Height,
+                            0,
+                            elevation,
+                            captured.Landform,
+                            captured.Material,
+                            captured.HorizontalMetresPerCell);
+                        State.ApplyElevationToWorldCache();
+                        State.MarkSemanticLayersChanged();
+                        Debug.Log(
+                            "[TerrainLab] Loaded manually interpolated DEM from " +
+                            generatedElevationPath);
+                    }
+                    catch (Exception generatedDemException)
+                    {
+                        State = captured;
+                        Debug.LogWarning(
+                            "[TerrainLab] Generated DEM ignored; using vanilla " +
+                            "terrain: " + generatedDemException.Message);
+                    }
+                }
+                else
+                {
+                    State = captured;
+                    Debug.Log(
+                        "[TerrainLab] Initialized GIS layers from the vanilla world.");
+                }
             }
             catch (Exception exception)
             {

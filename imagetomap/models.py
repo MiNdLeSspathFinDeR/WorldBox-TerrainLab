@@ -1,4 +1,5 @@
 from dataclasses import dataclass
+from typing import Any, Dict, Optional
 
 from PIL.Image import Image
 
@@ -9,3 +10,5 @@ class Map:
     width: int
     height: int
     preview: Image
+    elevation: Optional[Any] = None
+    classification_profile: Optional[Dict[str, Any]] = None

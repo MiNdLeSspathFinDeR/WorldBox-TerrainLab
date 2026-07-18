@@ -275,6 +275,89 @@ namespace TerrainLab
             }
         }
 
+        public IReadOnlyList<string> GetRecentImages(int maximumCount = 32)
+        {
+            if (maximumCount <= 0)
+            {
+                return Array.Empty<string>();
+            }
+
+            EnsureReady();
+            return Directory
+                .EnumerateFiles(
+                    WorkspaceDirectory,
+                    "*",
+                    SearchOption.TopDirectoryOnly)
+                .Where(IsSupportedImage)
+                .OrderByDescending(File.GetLastWriteTimeUtc)
+                .ThenBy(Path.GetFileName, StringComparer.OrdinalIgnoreCase)
+                .Take(Math.Min(maximumCount, MaximumScanFiles))
+                .Select(Path.GetFullPath)
+                .ToArray();
+        }
+
+        public bool TryQueueImageNow(string imagePath, out string error)
+        {
+            error = null;
+            try
+            {
+                EnsureReady();
+                string fullPath = Path.GetFullPath(imagePath ?? string.Empty);
+                string parent = Path.GetDirectoryName(fullPath);
+                if (!string.Equals(
+                        parent?.TrimEnd(
+                            Path.DirectorySeparatorChar,
+                            Path.AltDirectorySeparatorChar),
+                        Path.GetFullPath(WorkspaceDirectory).TrimEnd(
+                            Path.DirectorySeparatorChar,
+                            Path.AltDirectorySeparatorChar),
+                        StringComparison.OrdinalIgnoreCase) ||
+                    !IsSupportedImage(fullPath))
+                {
+                    throw new InvalidOperationException(
+                        "Choose a supported image from the TerrainLab image workspace.");
+                }
+
+                string name = Path.GetFileName(fullPath);
+                if (string.Equals(
+                        fullPath,
+                        _activeImagePath,
+                        StringComparison.OrdinalIgnoreCase) ||
+                    _pendingNames.Contains(name))
+                {
+                    LastError = null;
+                    LastMessage = name + " is already queued.";
+                    return true;
+                }
+
+                TerrainImageFingerprint fingerprint =
+                    CaptureFingerprint(fullPath);
+                if (fingerprint == null)
+                {
+                    throw new IOException(
+                        "The image is unavailable or is still being written.");
+                }
+
+                _processed.Remove(name);
+                _failed.Remove(name);
+                _observed.Remove(name);
+                _pending.Enqueue(fullPath);
+                _pendingNames.Add(name);
+                _pendingFingerprints[name] = fingerprint;
+                LastError = null;
+                LastMessage =
+                    "Manual classification queued for " + name + ".";
+                SaveState();
+                return true;
+            }
+            catch (Exception exception)
+            {
+                error = exception.Message;
+                LastError = error;
+                return false;
+            }
+        }
+
         public bool Poll()
         {
             if (!_initialized || _disposed)
@@ -689,7 +772,49 @@ namespace TerrainLab
             arguments.Append(" --fit-budget --save-to-game --strict");
             arguments.Append(" --game-saves-dir ");
             arguments.Append(QuoteArgument(SavesDirectory));
+            string profilePath =
+                TerrainImageClassificationProfile.GetSidecarPath(
+                    _activeImagePath);
+            if (HasUsableClassificationProfile(profilePath))
+            {
+                arguments.Append(" --classification-profile ");
+                arguments.Append(QuoteArgument(profilePath));
+            }
+            else
+            {
+                arguments.Append(" --no-classification-profile");
+            }
             return arguments.ToString();
+        }
+
+        private static bool HasUsableClassificationProfile(string path)
+        {
+            if (string.IsNullOrWhiteSpace(path) || !File.Exists(path))
+            {
+                return false;
+            }
+
+            try
+            {
+                FileInfo info = new FileInfo(path);
+                if (info.Length >
+                    TerrainImageClassificationProfile.MaximumProfileBytes)
+                {
+                    return true;
+                }
+
+                TerrainImageClassificationProfile profile =
+                    JsonConvert.DeserializeObject<
+                        TerrainImageClassificationProfile>(
+                        File.ReadAllText(path));
+                return profile?.Samples?.Count >= 2;
+            }
+            catch
+            {
+                // Malformed non-draft profiles must fail visibly in Python
+                // instead of being silently ignored.
+                return true;
+            }
         }
 
         private void BuildBackendCandidates()

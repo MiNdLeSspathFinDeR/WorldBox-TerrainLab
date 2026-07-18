@@ -137,7 +137,7 @@ handler; there are no visible placeholder or no-op buttons.
 |---|---:|---|
 | Side switch | 1 | Cycles off, toolbar, and toolbar plus settings |
 | Critical and chapter row | 7 | Opens settings, saves, and selects one of five chapters |
-| Project chapter | 8 | Image-folder open/watcher, WBXGEO export/validation, GeoTIFF export, and three sync commands |
+| Project chapter | 9 | Image-folder open/watcher/manual classification, WBXGEO export/validation, GeoTIFF export, and three sync commands |
 | Terrain chapter | 8 | Six DEM tools, including a two-point ramp, plus undo and redo |
 | Digitizing chapter | 8 | Six surface tools, apply selection, and cancel |
 | Analysis chapter | 5 | Relief, hydrology, live DEM water, erosion preview, and explicit erosion apply |

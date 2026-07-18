@@ -133,6 +133,7 @@ namespace TerrainLab
         private TerrainReliefOverlay _reliefOverlay;
         private TerrainHydrologyOverlay _hydrologyOverlay;
         private TerrainErosionOverlay _erosionOverlay;
+        private TerrainImageClassificationOverlay _classificationOverlay;
         private Transform _moduleContent;
         private Text _statusText;
         private Text _brushRadiusText;
@@ -233,6 +234,20 @@ namespace TerrainLab
             CreateWindow();
             ScrollWindow.addCallbackHide(HandleWindowHidden);
             CreateTopToolbar();
+            _classificationOverlay =
+                GetComponent<TerrainImageClassificationOverlay>();
+            if (_classificationOverlay == null)
+            {
+                _classificationOverlay =
+                    gameObject.AddComponent<TerrainImageClassificationOverlay>();
+            }
+            _classificationOverlay.Initialize(
+                TerrainLabRuntime.Instance?.ImageWorkspace,
+                _topToolbar.transform);
+            _classificationOverlay.StatusChanged +=
+                HandleClassificationStatusChanged;
+            _classificationOverlay.VisibilityChanged +=
+                HandleClassificationVisibilityChanged;
             CreateSideButton(declaration.GetIcon());
             CreateMapStatusBar();
             _editor.EditApplied += HandleElevationEditApplied;
@@ -271,7 +286,9 @@ namespace TerrainLab
             bool analysisRunning = IsAnalysisRunning();
             _editor.SetInterfaceState(
                 _workspaceVisible,
-                _workspaceVisible && !analysisRunning);
+                _workspaceVisible &&
+                !analysisRunning &&
+                _classificationOverlay?.IsVisible != true);
 
             TryApplyBottomToolbarStyle();
             UpdateAdaptiveToolbarLayout(false);
@@ -615,6 +632,15 @@ namespace TerrainLab
                 ToggleImageWorkspaceWatcher,
                 "terrain_lab_action_toggle_image_watcher",
                 "terrain_lab_action_toggle_image_watcher_description");
+            _toolbarCommandButtons["image_manual_classify"] =
+                CreateToolbarButton(
+                    row,
+                    "image_manual_classify",
+                    "layer_style",
+                    "C",
+                    ToggleManualImageClassification,
+                    "terrain_lab_action_manual_classification",
+                    "terrain_lab_action_manual_classification_description");
             CreateToolbarSeparator(row);
             _toolbarCommandButtons["export"] = CreateToolbarButton(
                 row,
@@ -1457,6 +1483,9 @@ namespace TerrainLab
             SetToolbarCommandEnabled(
                 "image_workspace_watch",
                 imageWorkspaceAvailable);
+            SetToolbarCommandEnabled(
+                "image_manual_classify",
+                imageWorkspaceAvailable);
             SetToolbarCommandEnabled("export", hasState);
             SetToolbarCommandEnabled("validate", hasState);
             SetToolbarCommandEnabled("export_gis", hasState);
@@ -1521,6 +1550,10 @@ namespace TerrainLab
                     : imageWorkspace?.IsConverting == true
                         ? ActivityAmber
                         : ActivityGreen);
+            SetToolbarActivity(
+                _toolbarCommandButtons["image_manual_classify"],
+                _classificationOverlay?.IsVisible == true,
+                ActivityGreen);
 
             foreach (KeyValuePair<TerrainEditorTool, SimpleButton> pair in
                      _toolbarEditorButtons)
@@ -2108,6 +2141,26 @@ namespace TerrainLab
                         : "ui/Icons/iconPlay",
                     watcherActionKey,
                     watcherActionKey + "_description");
+                CreateActionButton(
+                    _moduleContent,
+                    LM.Get("terrain_lab_action_manual_classification"),
+                    ToggleManualImageClassification,
+                    194f,
+                    28f,
+                    "layer_style",
+                    "terrain_lab_action_manual_classification",
+                    "terrain_lab_action_manual_classification_description");
+                if (_classificationOverlay?.IsVisible == true)
+                {
+                    CreateInfoText(
+                        string.Format(
+                            LM.Get(
+                                "terrain_lab_manual_active_format"),
+                            _classificationOverlay.CurrentImageName,
+                            _classificationOverlay.SampleCount),
+                        SuccessText,
+                        30f);
+                }
                 if (imageWorkspace.FailedCount > 0)
                 {
                     CreateActionButton(
@@ -5219,6 +5272,47 @@ namespace TerrainLab
             }
         }
 
+        private void ToggleManualImageClassification()
+        {
+            if (_classificationOverlay == null)
+            {
+                SetError(LM.Get(
+                    "terrain_lab_manual_unavailable"));
+                return;
+            }
+
+            _classificationOverlay.ToggleLatest();
+            UpdateToolbarState();
+        }
+
+        private void HandleClassificationStatusChanged(
+            string message,
+            bool error)
+        {
+            if (error)
+            {
+                SetError(message);
+            }
+            else
+            {
+                SetStatus(message, false, true);
+            }
+        }
+
+        private void HandleClassificationVisibilityChanged()
+        {
+            UpdateToolbarState();
+            if (_window != null &&
+                _window.gameObject.activeInHierarchy &&
+                string.Equals(
+                    _selectedModule,
+                    "project",
+                    StringComparison.Ordinal))
+            {
+                RebuildModuleContent();
+            }
+        }
+
         private void ToggleImageWorkspaceWatcher()
         {
             TerrainImageWorkspaceService workspace =
@@ -5454,6 +5548,10 @@ namespace TerrainLab
         private void SetWorkspaceVisible(bool visible)
         {
             _workspaceVisible = visible;
+            if (!visible)
+            {
+                _classificationOverlay?.Hide();
+            }
             if (_topToolbar != null)
             {
                 _topToolbar.SetActive(visible);
@@ -6616,6 +6714,14 @@ namespace TerrainLab
                     HandleWaterCellsChanged;
                 TerrainLabRuntime.Instance.WaterDynamics.ElevationChanged -=
                     HandleWaterElevationChanged;
+            }
+
+            if (_classificationOverlay != null)
+            {
+                _classificationOverlay.StatusChanged -=
+                    HandleClassificationStatusChanged;
+                _classificationOverlay.VisibilityChanged -=
+                    HandleClassificationVisibilityChanged;
             }
 
             if (_sideButton != null)

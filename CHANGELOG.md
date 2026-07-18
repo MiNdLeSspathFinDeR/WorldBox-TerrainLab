@@ -2,6 +2,29 @@
 
 ## Unreleased
 
+## 1.7.0 - 2026-07-18
+
+- Added an in-game manual raster-classification canvas over the WorldBox map.
+  Source pixels can be labelled with an independent surface morphotype,
+  playable biotope, and signed Int16 elevation. The canvas supports zoom, pan,
+  persistent coloured sample markers, point removal, profile undo/clear, image
+  cycling, and localized plain-language tooltips.
+- Manual samples are stored in a validated
+  `<image>.terrainlab-classification.json` sidecar. The Project toolbar can
+  force a previously processed source back into the conversion queue after the
+  profile changes.
+- Added a bounded adaptive nearest-sample classifier combining the source
+  image's normalized colour scale, local texture, and spatial position. This
+  allows equal or similar colours to represent different morphotypes or
+  biotopes when the player provides separate regional samples.
+- Added IDW elevation interpolation with exact sample preservation,
+  configurable smoothing, explicit marine depth constraints, and
+  `NODATA=9999` protection. Generated saves carry the result as an uncompressed
+  signed Int16 `terrainlab-elevation.tif`.
+- TerrainLab now imports the generated DEM when the new world is first opened,
+  applies it to the WorldBox height cache, and preserves the ordinary
+  `map.wbox` fallback. The next normal save writes the full WBXGEO project.
+
 ## 1.6.1 - 2026-07-18
 
 - Added an explicit in-game watched-folder format contract: PNG,

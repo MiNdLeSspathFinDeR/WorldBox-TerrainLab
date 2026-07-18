@@ -21,6 +21,9 @@ internal static class Program
         bool preserveArtifacts = false;
         bool runStress = false;
         string outputParent = null;
+        string generatedDemPath = null;
+        int generatedDemWidth = 0;
+        int generatedDemHeight = 0;
         for (int index = 0; index < args.Length; index++)
         {
             if (args[index] == "--stress")
@@ -32,10 +35,22 @@ internal static class Program
                 preserveArtifacts = true;
                 outputParent = args[++index];
             }
+            else if (args[index] == "--read-dem" && index + 3 < args.Length)
+            {
+                generatedDemPath = Path.GetFullPath(args[++index]);
+                if (!int.TryParse(args[++index], out generatedDemWidth) ||
+                    !int.TryParse(args[++index], out generatedDemHeight))
+                {
+                    Console.Error.WriteLine(
+                        "--read-dem width and height must be integers.");
+                    return 2;
+                }
+            }
             else
             {
                 Console.Error.WriteLine(
-                    "Usage: TerrainLab.PackageProbe [--stress] [--output <directory>]");
+                    "Usage: TerrainLab.PackageProbe [--stress] " +
+                    "[--output <directory>] [--read-dem <tif> <width> <height>]");
                 return 2;
             }
         }
@@ -52,6 +67,14 @@ internal static class Program
         {
             ValidateMapBudget();
             ValidateImageWorkspaceProtocol(testRoot);
+            ValidateImageClassificationProfile(testRoot);
+            if (generatedDemPath != null)
+            {
+                ValidateGeneratedDem(
+                    generatedDemPath,
+                    generatedDemWidth,
+                    generatedDemHeight);
+            }
             ValidateGamePatchTargets();
             ValidateDigitizingRaster();
             ValidateEarthElevationModel();
@@ -699,6 +722,97 @@ internal static class Program
                 restored.TrySetWatching(false, out string stopError),
                 "Image workspace watcher could not stop: " + stopError);
         }
+    }
+
+    private static void ValidateImageClassificationProfile(string testRoot)
+    {
+        string directory = Path.Combine(testRoot, "manual-classification");
+        Directory.CreateDirectory(directory);
+        string imagePath = Path.Combine(directory, "source.tif");
+        File.WriteAllBytes(imagePath, new byte[] { 1, 2, 3, 4 });
+
+        TerrainImageClassificationProfile profile =
+            TerrainImageClassificationProfile.Create(
+                imagePath,
+                320,
+                180);
+        profile.AddOrReplaceSample(
+            10,
+            20,
+            "rocks",
+            "none",
+            3200);
+        profile.AddOrReplaceSample(
+            300,
+            150,
+            "plain",
+            "grass",
+            120);
+        profile.Save(imagePath);
+
+        TerrainImageClassificationProfile restored =
+            TerrainImageClassificationProfile.LoadOrCreate(
+                imagePath,
+                320,
+                180);
+        Assert(
+            restored.Samples.Count == 2 &&
+            restored.Samples[0].Surface == "rocks" &&
+            restored.Samples[0].Elevation == 3200 &&
+            restored.Samples[1].Biotope == "grass" &&
+            restored.Settings.InterpolateElevationGlobally,
+            "Manual classification profile did not round-trip.");
+        Assert(
+            File.Exists(
+                TerrainImageClassificationProfile.GetSidecarPath(
+                    imagePath)),
+            "Manual classification sidecar was not written.");
+
+        bool rejectedNoData = false;
+        try
+        {
+            restored.AddOrReplaceSample(
+                100,
+                100,
+                "plain",
+                "auto",
+                TerrainElevationEncoding.NoData);
+        }
+        catch (InvalidDataException)
+        {
+            rejectedNoData = true;
+        }
+        Assert(
+            rejectedNoData,
+            "Manual classification accepted reserved NODATA as a height.");
+    }
+
+    private static void ValidateGeneratedDem(
+        string path,
+        int width,
+        int height)
+    {
+        short[] elevation = TerrainGeoTiff.ReadInt16(
+            path,
+            width,
+            height);
+        short minimum = elevation
+            .Where(value => value != TerrainElevationEncoding.NoData)
+            .Min();
+        short maximum = elevation
+            .Where(value => value != TerrainElevationEncoding.NoData)
+            .Max();
+        Assert(
+            minimum >= TerrainElevationEncoding.Minimum &&
+            maximum <= TerrainElevationEncoding.Maximum &&
+            elevation.Length == checked(width * height),
+            "Generated manual-classification DEM is invalid.");
+        Console.WriteLine(
+            "Generated DEM accepted: {0} x {1}, {2}..{3} m.",
+            width,
+            height,
+            minimum,
+            maximum);
     }
 
     private static void ValidateMaximumGridStress()

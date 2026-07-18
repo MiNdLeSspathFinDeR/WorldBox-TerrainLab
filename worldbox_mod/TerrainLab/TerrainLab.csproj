@@ -7,9 +7,9 @@
     <GenerateAssemblyInfo>true</GenerateAssemblyInfo>
     <AssemblyName>TerrainLab</AssemblyName>
     <RootNamespace>TerrainLab</RootNamespace>
-    <Version>1.6.1</Version>
-    <AssemblyVersion>1.6.1.0</AssemblyVersion>
-    <FileVersion>1.6.1.0</FileVersion>
+    <Version>1.7.0</Version>
+    <AssemblyVersion>1.7.0.0</AssemblyVersion>
+    <FileVersion>1.7.0.0</FileVersion>
     <WorldBoxPath Condition="'$(WorldBoxPath)' == ''">C:\Program Files (x86)\Steam\steamapps\common\worldbox</WorldBoxPath>
     <ManagedPath>$(WorldBoxPath)\worldbox_Data\Managed</ManagedPath>
     <NmlPath>$(WorldBoxPath)\worldbox_Data\StreamingAssets\mods\NeoModLoader.dll</NmlPath>
@@ -47,6 +47,10 @@
       <HintPath>$(ManagedPath)\UnityEngine.InputLegacyModule.dll</HintPath>
       <Private>false</Private>
     </Reference>
+    <Reference Include="UnityEngine.ImageConversionModule">
+      <HintPath>$(ManagedPath)\UnityEngine.ImageConversionModule.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
     <Reference Include="UnityEngine.TextRenderingModule">
       <HintPath>$(ManagedPath)\UnityEngine.TextRenderingModule.dll</HintPath>
       <Private>false</Private>
@@ -57,6 +61,10 @@
     </Reference>
     <Reference Include="UnityEngine.UIModule">
       <HintPath>$(ManagedPath)\UnityEngine.UIModule.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+    <Reference Include="System.Drawing">
+      <HintPath>$(ManagedPath)\System.Drawing.dll</HintPath>
       <Private>false</Private>
     </Reference>
   </ItemGroup>

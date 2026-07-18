@@ -7,6 +7,10 @@ from pathlib import Path
 from PIL import Image as Img
 
 from . import convert, fit_map_size_to_budget
+from .calibration import (
+    classification_profile_path,
+    load_classification_profile,
+)
 from .consts import SAFE_TILES_TUPLE, TILES_TUPLE
 from .saves import (
     find_worldbox_stats_template,
@@ -146,6 +150,21 @@ parser.add_argument(
     default=False,
 )
 parser.add_argument(
+    "--classification-profile",
+    help=(
+        "TerrainLab manual classification JSON. If omitted, "
+        "<image>.terrainlab-classification.json is discovered automatically"
+    ),
+    type=Path,
+    default=None,
+)
+parser.add_argument(
+    "--no-classification-profile",
+    help=argparse.SUPPRESS,
+    action="store_true",
+    default=False,
+)
+parser.add_argument(
     "--strict",
     help=argparse.SUPPRESS,
     action="store_true",
@@ -189,6 +208,8 @@ def process_args() -> Dict[str, Any]:
         "watch",
         "watch_interval",
         "fit_budget",
+        "classification_profile",
+        "no_classification_profile",
         "strict",
     ):
         args[arg] = getattr(parsed_args, arg)
@@ -298,6 +319,19 @@ def process_image(image_path: Path, args: Dict[str, Any], tiles: Iterable[str]) 
     output_path = get_output_path(image_path=image_path, args=args)
 
     with Img.open(image_path) as image:
+        profile_path = (
+            None
+            if args["no_classification_profile"]
+            else args["classification_profile"]
+        )
+        if profile_path is None and not args["no_classification_profile"]:
+            discovered_profile = classification_profile_path(image_path)
+            profile_path = discovered_profile if discovered_profile.is_file() else None
+        classification_profile = (
+            load_classification_profile(profile_path, image.size)
+            if profile_path is not None
+            else None
+        )
         width = args["width"]
         height = args["height"]
         if args["fit_budget"] and width == 0 and height == 0:
@@ -313,6 +347,7 @@ def process_image(image_path: Path, args: Dict[str, Any], tiles: Iterable[str]) 
             terrain_clusters=args["terrain_clusters"],
             terrain_smooth=args["terrain_smooth"],
             terrain_min_region=args["terrain_min_region"],
+            classification_profile=classification_profile,
         )
 
     if args["save_to_game"]:
@@ -329,9 +364,14 @@ def process_image(image_path: Path, args: Dict[str, Any], tiles: Iterable[str]) 
             name=map_name,
         )
 
+    manual_status = (
+        f", {len(classification_profile.samples)} manual samples + Int16 DEM"
+        if classification_profile is not None
+        else ""
+    )
     print(
         f"Converted {image_path} -> {output_path} "
-        f"({converted_map.width}x{converted_map.height} blocks)"
+        f"({converted_map.width}x{converted_map.height} blocks{manual_status})"
     )
 
 
