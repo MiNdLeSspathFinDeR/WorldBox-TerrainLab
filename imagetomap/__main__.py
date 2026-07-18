@@ -11,6 +11,10 @@ from .calibration import (
     classification_profile_path,
     load_classification_profile,
 )
+from .clustering import (
+    clustering_profile_path,
+    load_clustering_profile,
+)
 from .consts import SAFE_TILES_TUPLE, TILES_TUPLE
 from .saves import (
     find_worldbox_stats_template,
@@ -165,6 +169,22 @@ parser.add_argument(
     default=False,
 )
 parser.add_argument(
+    "--clustering-profile",
+    help=(
+        "TerrainLab automatic clustering JSON. If no manual profile is "
+        "selected, <image>.terrainlab-clustering.json is discovered "
+        "automatically"
+    ),
+    type=Path,
+    default=None,
+)
+parser.add_argument(
+    "--no-clustering-profile",
+    help=argparse.SUPPRESS,
+    action="store_true",
+    default=False,
+)
+parser.add_argument(
     "--strict",
     help=argparse.SUPPRESS,
     action="store_true",
@@ -210,6 +230,8 @@ def process_args() -> Dict[str, Any]:
         "fit_budget",
         "classification_profile",
         "no_classification_profile",
+        "clustering_profile",
+        "no_clustering_profile",
         "strict",
     ):
         args[arg] = getattr(parsed_args, arg)
@@ -262,6 +284,14 @@ def process_args() -> Dict[str, Any]:
         parser.error("--terrain-min-region must be between 0 and 4096")
     if args["watch_interval"] <= 0:
         parser.error("--watch-interval must be greater than 0")
+    if (
+        args["classification_profile"] is not None
+        and args["clustering_profile"] is not None
+    ):
+        parser.error(
+            "--classification-profile and --clustering-profile "
+            "are mutually exclusive"
+        )
 
     return args
 
@@ -319,17 +349,43 @@ def process_image(image_path: Path, args: Dict[str, Any], tiles: Iterable[str]) 
     output_path = get_output_path(image_path=image_path, args=args)
 
     with Img.open(image_path) as image:
+        explicit_clustering = args["clustering_profile"] is not None
         profile_path = (
             None
-            if args["no_classification_profile"]
+            if args["no_classification_profile"] or explicit_clustering
             else args["classification_profile"]
         )
-        if profile_path is None and not args["no_classification_profile"]:
+        if (
+            profile_path is None
+            and not args["no_classification_profile"]
+            and not explicit_clustering
+        ):
             discovered_profile = classification_profile_path(image_path)
             profile_path = discovered_profile if discovered_profile.is_file() else None
         classification_profile = (
             load_classification_profile(profile_path, image.size)
             if profile_path is not None
+            else None
+        )
+        cluster_path = (
+            None
+            if args["no_clustering_profile"]
+            else args["clustering_profile"]
+        )
+        if (
+            cluster_path is None
+            and classification_profile is None
+            and not args["no_clustering_profile"]
+        ):
+            discovered_clustering = clustering_profile_path(image_path)
+            cluster_path = (
+                discovered_clustering
+                if discovered_clustering.is_file()
+                else None
+            )
+        clustering_profile = (
+            load_clustering_profile(cluster_path, image.size)
+            if cluster_path is not None
             else None
         )
         width = args["width"]
@@ -348,6 +404,7 @@ def process_image(image_path: Path, args: Dict[str, Any], tiles: Iterable[str]) 
             terrain_smooth=args["terrain_smooth"],
             terrain_min_region=args["terrain_min_region"],
             classification_profile=classification_profile,
+            clustering_profile=clustering_profile,
         )
 
     if args["save_to_game"]:
@@ -370,9 +427,15 @@ def process_image(image_path: Path, args: Dict[str, Any], tiles: Iterable[str]) 
         if classification_profile is not None
         else ""
     )
+    clustering_status = (
+        f", automatic clustering: {clustering_profile.clusters} clusters"
+        if clustering_profile is not None
+        else ""
+    )
     print(
         f"Converted {image_path} -> {output_path} "
-        f"({converted_map.width}x{converted_map.height} blocks{manual_status})"
+        f"({converted_map.width}x{converted_map.height} blocks"
+        f"{manual_status}{clustering_status})"
     )
 
 

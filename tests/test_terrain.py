@@ -19,6 +19,11 @@ from imagetomap.calibration import (
     load_classification_profile,
     rasterize_map_boundary,
 )
+from imagetomap.clustering import (
+    ClusteringProfile,
+    load_clustering_profile,
+    rasterize_clustering_boundary,
+)
 from imagetomap.consts import (
     ELEVATION_MAXIMUM,
     ELEVATION_MINIMUM,
@@ -77,6 +82,21 @@ PARAMETER_TOOLTIP_KEYS = (
     "terrain_lab_manual_outside_surface",
     "terrain_lab_manual_outside_biotope",
     "terrain_lab_manual_outside_elevation",
+    "terrain_lab_cluster_clusters",
+    "terrain_lab_cluster_spline_radius",
+    "terrain_lab_cluster_smooth_passes",
+    "terrain_lab_cluster_min_land_region",
+    "terrain_lab_cluster_water_sensitivity",
+    "terrain_lab_cluster_color_weight",
+    "terrain_lab_cluster_luma_weight",
+    "terrain_lab_cluster_saturation_weight",
+    "terrain_lab_cluster_texture_weight",
+    "terrain_lab_cluster_slope_weight",
+    "terrain_lab_cluster_spatial_weight",
+    "terrain_lab_cluster_detail_weight",
+    "terrain_lab_cluster_sample_limit",
+    "terrain_lab_cluster_iterations",
+    "terrain_lab_cluster_seed",
 )
 
 
@@ -262,6 +282,94 @@ class TerrainConversionTests(unittest.TestCase):
             "railRect.localScale = new Vector3(1f, -1f, 1f);",
             toolbar_source,
         )
+        self.assertIn(
+            "private const float ToolbarRowGap = 6f;",
+            toolbar_source,
+        )
+        self.assertIn(
+            "private const float ToolbarVerticalPadding = 6f;",
+            toolbar_source,
+        )
+        self.assertIn("TerrainLabToolbarRowDivider", toolbar_source)
+        self.assertIn("ToolbarDividerShadow", toolbar_source)
+        self.assertIn("ToolbarDividerHighlight", toolbar_source)
+        self.assertNotIn("TerrainLabToolbarGroupFlag", toolbar_source)
+
+    def test_automatic_clustering_is_independent_and_configurable(self) -> None:
+        overlay_source = (
+            ROOT
+            / "worldbox_mod"
+            / "TerrainLab"
+            / "Code"
+            / "TerrainImageClusteringOverlay.cs"
+        ).read_text(encoding="utf-8")
+        profile_source = (
+            ROOT
+            / "worldbox_mod"
+            / "TerrainLab"
+            / "Code"
+            / "TerrainImageClustering.cs"
+        ).read_text(encoding="utf-8")
+        workspace_source = (
+            ROOT
+            / "worldbox_mod"
+            / "TerrainLab"
+            / "Code"
+            / "TerrainImageWorkspace.cs"
+        ).read_text(encoding="utf-8")
+        toolbar_source = (
+            ROOT
+            / "worldbox_mod"
+            / "TerrainLab"
+            / "Code"
+            / "TerrainLabUi.cs"
+        ).read_text(encoding="utf-8")
+
+        self.assertIn(
+            'public const string SidecarSuffix = '
+            '".terrainlab-clustering.json";',
+            profile_source,
+        )
+        for json_name in (
+            "clusters",
+            "spline_radius",
+            "smooth_passes",
+            "min_land_region",
+            "water_sensitivity",
+            "color_weight",
+            "luma_weight",
+            "saturation_weight",
+            "texture_weight",
+            "slope_weight",
+            "spatial_weight",
+            "detail_weight",
+            "sample_limit",
+            "kmeans_iterations",
+            "random_seed",
+        ):
+            self.assertIn(f'[JsonProperty("{json_name}")]', profile_source)
+
+        self.assertIn(
+            "TerrainImageConversionMode.AutomaticClustering",
+            overlay_source,
+        )
+        self.assertIn("_profile.SetMapBoundary(_draftVertices);", overlay_source)
+        self.assertIn("private void ToggleExpertPanel()", overlay_source)
+        self.assertEqual(overlay_source.count("CreateParameterRow(") - 1, 15)
+        self.assertIn('"image_auto_cluster"', toolbar_source)
+        self.assertIn('"image_manual_classify"', toolbar_source)
+        self.assertIn(
+            'arguments.Append(" --no-classification-profile");',
+            workspace_source,
+        )
+        self.assertIn(
+            'arguments.Append(" --clustering-profile ");',
+            workspace_source,
+        )
+        self.assertIn(
+            'arguments.Append(" --no-clustering-profile");',
+            workspace_source,
+        )
 
     def test_geyser_patch_forwards_the_building_lifecycle(self) -> None:
         patch_source = (
@@ -335,6 +443,89 @@ class TerrainConversionTests(unittest.TestCase):
 
         self.assertEqual((converted.width, converted.height), (2, 2))
         self.assertEqual(converted.preview.size, (128, 128))
+
+    def test_clustering_profile_round_trips_and_masks_background(self) -> None:
+        rng = np.random.default_rng(2026)
+        pixels = rng.integers(0, 255, size=(128, 128, 3), dtype=np.uint8)
+        pixels[20:109, 20:109] = (112, 126, 104)
+        source = Image.fromarray(pixels, mode="RGB")
+        profile = ClusteringProfile(
+            source_file_name="clustered.png",
+            source_width=128,
+            source_height=128,
+            clusters=9,
+            spline_radius=2,
+            smooth_passes=2,
+            min_land_region=24,
+            water_sensitivity=1.15,
+            color_weight=1.25,
+            luma_weight=0.9,
+            saturation_weight=1.1,
+            texture_weight=0.4,
+            slope_weight=1.2,
+            spatial_weight=0.3,
+            detail_weight=0.6,
+            sample_limit=12_000,
+            kmeans_iterations=24,
+            random_seed=77,
+            map_boundary=((20, 20), (108, 20), (108, 108), (20, 108)),
+        )
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            path = Path(temporary_directory) / "cluster.json"
+            path.write_text(
+                json.dumps(profile.to_json_dict()),
+                encoding="utf-8",
+            )
+            restored = load_clustering_profile(path, source.size)
+
+        self.assertEqual(restored, profile)
+        converted = convert(
+            source,
+            width=2,
+            height=2,
+            clustering_profile=restored,
+        )
+        try:
+            mask = rasterize_clustering_boundary(restored, 128, 128)
+            tiles = np.asarray(converted.preview)
+            deep_ocean = SAFE_TILES_TUPLE.index("deep_ocean")
+            self.assertTrue(np.all(tiles[~mask] == deep_ocean))
+            self.assertEqual(
+                converted.clustering_profile["settings"]["clusters"],
+                9,
+            )
+            self.assertIsNone(converted.classification_profile)
+        finally:
+            converted.preview.close()
+            source.close()
+
+    def test_manual_and_clustering_profiles_are_exclusive(self) -> None:
+        source = Image.new("RGB", (64, 64), (100, 120, 140))
+        manual = ClassificationProfile(
+            source_file_name="exclusive.png",
+            source_width=64,
+            source_height=64,
+            samples=(
+                ClassificationSample(8, 8, "plain", "grass", 100),
+                ClassificationSample(48, 48, "rocks", "none", 2500),
+            ),
+        )
+        automatic = ClusteringProfile(
+            source_file_name="exclusive.png",
+            source_width=64,
+            source_height=64,
+        )
+        try:
+            with self.assertRaisesRegex(ValueError, "mutually exclusive"):
+                convert(
+                    source,
+                    width=1,
+                    height=1,
+                    classification_profile=manual,
+                    clustering_profile=automatic,
+                )
+        finally:
+            source.close()
 
     def test_manual_samples_split_same_colour_and_interpolate_dem(self) -> None:
         source = Image.new("RGB", (128, 64), (112, 126, 104))

@@ -20,7 +20,7 @@ against screen edges and can be collapsed independently.
 
 ## Implementation status
 
-Version 1.11.0 implements the standalone side button, an adaptive top GIS
+Version 1.12.0 implements the standalone side button, an adaptive top GIS
 toolbar, and a stock WorldBox internal window. The toolbar copies the bottom
 WorldBox panel and button sprites, stretches to the logical canvas width, and
 balances commands across as few rows as the current UI scale permits. Its frame
@@ -31,13 +31,17 @@ edge while keeping the decorative border facing away from the map canvas.
 The permanent control row uses red buttons for critical menu/save actions and
 gray chapter buttons for Project, Terrain, Digitizing, Analysis, and Layers.
 Selecting a chapter replaces the functional row below it. Functional groups
-retain distinct outline colors and matching flag separators; selection and
-readiness use WorldBox's native `ToggleIcon.spriteON/spriteOFF` lamps, while
-running jobs and the settings level use amber. Re-clicking an active chapter
-collapses its functional row; re-clicking a map tool or derived layer switches
-that state off, matching the base-game power bar. Toolbar chapters only control
-command visibility: switching to Layers or any other chapter preserves the
-active map tool and its inspector status strip.
+retain distinct outline colors. Neutral two-tone vertical dividers mark group
+boundaries, and matching etched lines run horizontally between adaptive rows.
+The 24-unit buttons use a 6-unit inter-row gap, 6-unit vertical frame padding,
+and 8-unit horizontal padding to follow the visual rhythm of the native lower
+panel. Selection and readiness use WorldBox's native
+`ToggleIcon.spriteON/spriteOFF` lamps, while running jobs and the settings level
+use amber. Re-clicking an active chapter collapses its functional row;
+re-clicking a map tool or derived layer switches that state off, matching the
+base-game power bar. Toolbar chapters only control command visibility:
+switching to Layers or any other chapter preserves the active map tool and its
+inspector status strip.
 Row breaks prefer semantic group boundaries.
 Active tools and overlays are highlighted, unavailable operations are disabled,
 and running jobs switch from play to pause. The bottom coordinate, DEM, slope,
@@ -71,7 +75,17 @@ failures, and exposes an explicit retry action. Stable files are converted with
 the adaptive safe palette into complete new WorldBox save slots without
 changing the open world.
 
-The Project chapter's raster classifier uses a compact text-segmented
+The Project chapter presents automatic clustering and manual classification as
+adjacent, equally visible image-interpretation paths. Automatic clustering has
+its own full-screen source preview, explicit file confirmation, and independent
+`<image>.terrainlab-clustering.json` sidecar. Its optional cyan
+area-of-interest boundary excludes scan margins, legends, and noisy background
+from both sampling and cluster fitting; every exterior output cell becomes deep
+ocean. Five basic controls remain visible, while a collapsible expert section
+adds ten feature, regularization, quality, and reproducibility controls. All 15
+rows have English and Russian hover explanations.
+
+The manual raster classifier uses a compact text-segmented
 `Point | Line | Polygon` geometry control plus independent extent and deletion
 controls, so it needs no additional icon asset. Geometry is always an
 unpublished draft first. A point completes on its first click; right-click,
@@ -166,14 +180,14 @@ are delivered; every toolbar control has a localized tooltip.
 
 ## Runtime button and tooltip audit
 
-The current top toolbar contains 64 controls. Every one is connected to a real
+The current top toolbar contains 65 controls. Every one is connected to a real
 handler; there are no visible placeholder or no-op buttons.
 
 | Surface | Count | Implemented behavior |
 |---|---:|---|
 | Side switch | 1 | Cycles off, toolbar, and toolbar plus settings |
 | Critical and chapter row | 7 | Opens settings, saves, and selects one of five chapters |
-| Project chapter | 9 | Image-folder open/watcher/manual classification, WBXGEO export/validation, GeoTIFF export, and three sync commands |
+| Project chapter | 10 | Image-folder open/watcher, automatic clustering, manual classification, WBXGEO export/validation, GeoTIFF export, and three sync commands |
 | Terrain chapter | 8 | Six DEM tools, including a two-point ramp, plus undo and redo |
 | Digitizing chapter | 8 | Six surface tools, apply selection, and cancel |
 | Analysis chapter | 5 | Relief, hydrology, live DEM water, erosion preview, and explicit erosion apply |

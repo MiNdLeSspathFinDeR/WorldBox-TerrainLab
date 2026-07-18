@@ -16,6 +16,12 @@ namespace TerrainLab
         Error
     }
 
+    public enum TerrainImageConversionMode
+    {
+        AutomaticClustering,
+        ManualClassification
+    }
+
     public sealed class TerrainImageFingerprint : IEquatable<TerrainImageFingerprint>
     {
         public long LastWriteUtcTicks { get; set; }
@@ -90,6 +96,10 @@ namespace TerrainLab
             _pendingFingerprints =
                 new Dictionary<string, TerrainImageFingerprint>(
                     StringComparer.OrdinalIgnoreCase);
+        private readonly Dictionary<string, TerrainImageConversionMode>
+            _pendingModes =
+                new Dictionary<string, TerrainImageConversionMode>(
+                    StringComparer.OrdinalIgnoreCase);
         private readonly List<BackendInvocation> _backendCandidates =
             new List<BackendInvocation>();
         private readonly object _outputLock = new object();
@@ -99,6 +109,8 @@ namespace TerrainLab
         private Process _process;
         private string _activeImagePath;
         private TerrainImageFingerprint _activeFingerprint;
+        private TerrainImageConversionMode _activeMode =
+            TerrainImageConversionMode.AutomaticClustering;
         private int _activeBackendIndex;
         private DateTime _nextScanUtc;
         private bool _initialized;
@@ -125,6 +137,8 @@ namespace TerrainLab
             : Path.GetFileName(_activeImagePath);
 
         public string BackendName { get; private set; }
+
+        public TerrainImageConversionMode ActiveMode => _activeMode;
 
         public string LastMessage { get; private set; }
 
@@ -233,6 +247,7 @@ namespace TerrainLab
                     _pending.Clear();
                     _pendingNames.Clear();
                     _pendingFingerprints.Clear();
+                    _pendingModes.Clear();
                 }
 
                 _nextScanUtc = DateTime.UtcNow;
@@ -298,10 +313,28 @@ namespace TerrainLab
 
         public bool TryQueueImageNow(string imagePath, out string error)
         {
+            return TryQueueImageNow(
+                imagePath,
+                TerrainImageConversionMode.ManualClassification,
+                out error);
+        }
+
+        public bool TryQueueImageNow(
+            string imagePath,
+            TerrainImageConversionMode mode,
+            out string error)
+        {
             error = null;
             try
             {
                 EnsureReady();
+                if (!Enum.IsDefined(typeof(TerrainImageConversionMode), mode))
+                {
+                    throw new ArgumentOutOfRangeException(
+                        nameof(mode),
+                        mode,
+                        "Unsupported image conversion mode.");
+                }
                 string fullPath = Path.GetFullPath(imagePath ?? string.Empty);
                 string parent = Path.GetDirectoryName(fullPath);
                 if (!string.Equals(
@@ -322,11 +355,18 @@ namespace TerrainLab
                 if (string.Equals(
                         fullPath,
                         _activeImagePath,
-                        StringComparison.OrdinalIgnoreCase) ||
-                    _pendingNames.Contains(name))
+                        StringComparison.OrdinalIgnoreCase))
                 {
                     LastError = null;
                     LastMessage = name + " is already queued.";
+                    return true;
+                }
+                if (_pendingNames.Contains(name))
+                {
+                    _pendingModes[name] = mode;
+                    LastError = null;
+                    LastMessage =
+                        GetModeLabel(mode) + " queued for " + name + ".";
                     return true;
                 }
 
@@ -344,9 +384,10 @@ namespace TerrainLab
                 _pending.Enqueue(fullPath);
                 _pendingNames.Add(name);
                 _pendingFingerprints[name] = fingerprint;
+                _pendingModes[name] = mode;
                 LastError = null;
                 LastMessage =
-                    "Manual classification queued for " + name + ".";
+                    GetModeLabel(mode) + " queued for " + name + ".";
                 SaveState();
                 return true;
             }
@@ -506,6 +547,8 @@ namespace TerrainLab
                     _pending.Enqueue(path);
                     _pendingNames.Add(name);
                     _pendingFingerprints[name] = fingerprint;
+                    _pendingModes[name] =
+                        TerrainImageConversionMode.AutomaticClustering;
                     _observed.Remove(name);
                     changed = true;
                 }
@@ -537,6 +580,10 @@ namespace TerrainLab
                     name,
                     out TerrainImageFingerprint queuedFingerprint);
                 _pendingFingerprints.Remove(name);
+                _pendingModes.TryGetValue(
+                    name,
+                    out TerrainImageConversionMode queuedMode);
+                _pendingModes.Remove(name);
                 TerrainImageFingerprint fingerprint = CaptureFingerprint(path);
                 if (fingerprint == null)
                 {
@@ -552,6 +599,7 @@ namespace TerrainLab
 
                 _activeImagePath = path;
                 _activeFingerprint = fingerprint;
+                _activeMode = queuedMode;
                 _activeBackendIndex = 0;
                 LastError = null;
                 if (TryStartAvailableBackend(out string error))
@@ -755,6 +803,7 @@ namespace TerrainLab
         {
             _activeImagePath = null;
             _activeFingerprint = null;
+            _activeMode = TerrainImageConversionMode.AutomaticClustering;
             _activeBackendIndex = 0;
         }
 
@@ -772,19 +821,47 @@ namespace TerrainLab
             arguments.Append(" --fit-budget --save-to-game --strict");
             arguments.Append(" --game-saves-dir ");
             arguments.Append(QuoteArgument(SavesDirectory));
-            string profilePath =
-                TerrainImageClassificationProfile.GetSidecarPath(
-                    _activeImagePath);
-            if (HasUsableClassificationProfile(profilePath))
+            if (_activeMode ==
+                TerrainImageConversionMode.ManualClassification)
             {
-                arguments.Append(" --classification-profile ");
-                arguments.Append(QuoteArgument(profilePath));
+                string profilePath =
+                    TerrainImageClassificationProfile.GetSidecarPath(
+                        _activeImagePath);
+                if (HasUsableClassificationProfile(profilePath))
+                {
+                    arguments.Append(" --classification-profile ");
+                    arguments.Append(QuoteArgument(profilePath));
+                }
+                else
+                {
+                    arguments.Append(" --no-classification-profile");
+                }
+                arguments.Append(" --no-clustering-profile");
             }
             else
             {
                 arguments.Append(" --no-classification-profile");
+                string clusteringPath =
+                    TerrainImageClusteringProfile.GetSidecarPath(
+                        _activeImagePath);
+                if (File.Exists(clusteringPath))
+                {
+                    arguments.Append(" --clustering-profile ");
+                    arguments.Append(QuoteArgument(clusteringPath));
+                }
+                else
+                {
+                    arguments.Append(" --no-clustering-profile");
+                }
             }
             return arguments.ToString();
+        }
+
+        private static string GetModeLabel(TerrainImageConversionMode mode)
+        {
+            return mode == TerrainImageConversionMode.ManualClassification
+                ? "Manual classification"
+                : "Automatic clustering";
         }
 
         private static bool HasUsableClassificationProfile(string path)

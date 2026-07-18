@@ -62,6 +62,11 @@ under `Code` when the game starts.
   and atomically publishes a complete new vanilla `saveN` slot. Its explicit
   input contract is `PNG`, `JPG/JPEG/JFIF`, `TIFF/TIF`, `WebP`, `BMP`, `GIF`,
   `TGA`, `DDS`, and `JP2`;
+- an automatic clustering workspace beside manual classification. It stores an
+  image-specific JSON profile, can exclude noisy background with an independent
+  area-of-interest polygon, and exposes five basic plus ten collapsible expert
+  controls for spline scale, clusters, cleanup, feature weighting, sample
+  budget, convergence, and reproducibility;
 - a manual source-raster canvas with zoom, pan, and explicit publish semantics
   for point, line, and QGIS-style polygon training geometry. Morphotype,
   biotope, Int16 height, and line width are selected only after geometry
@@ -81,8 +86,9 @@ under `Code` when the game starts.
   and erosion prerequisites before showing all stored derivatives, including
   filled elevation and categorical D8 direction;
 - a two-level adaptive GIS toolbar with red critical actions, gray chapter
-  selectors, contextual functional tools, balanced wrapping, colored semantic
-  separators, native WorldBox on/off lamps, repeat-click deselection,
+  selectors, contextual functional tools, balanced wrapping, neutral etched
+  section dividers, colored command outlines, native WorldBox on/off lamps,
+  repeat-click deselection,
   availability, progress, cancellation, localized tooltips for every command
   and numeric parameter, a three-level
   side-button cycle, and a separate internal settings window whose close button

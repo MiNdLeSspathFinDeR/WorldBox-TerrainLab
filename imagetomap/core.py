@@ -15,6 +15,7 @@ from .calibration import (
     apply_manual_classification,
     rasterize_map_boundary,
 )
+from .clustering import ClusteringProfile, rasterize_clustering_boundary
 from .consts import CHUNK_SIZE, MAP_TEMPLATE, MAX_MAP_CELLS, SAFE_TILES_TUPLE, TILES
 from .models import Map
 from .terrain import classify_adaptive_terrain
@@ -186,6 +187,7 @@ def build_map(
     name: str,
     elevation=None,
     classification_profile: Optional[ClassificationProfile] = None,
+    clustering_profile: Optional[ClusteringProfile] = None,
 ) -> Map:
     tiles = tuple(tiles)
     flipped_image = tile_image.transpose(Img.Transpose.FLIP_TOP_BOTTOM)
@@ -221,6 +223,11 @@ def build_map(
             if classification_profile is not None
             else None
         ),
+        clustering_profile=(
+            clustering_profile.to_json_dict()
+            if clustering_profile is not None
+            else None
+        ),
     )
 
 
@@ -236,6 +243,7 @@ def convert(
     terrain_smooth: int = 1,
     terrain_min_region: int = 32,
     classification_profile: Optional[ClassificationProfile] = None,
+    clustering_profile: Optional[ClusteringProfile] = None,
 ) -> Map:
     """Convert an image to a WorldBox map.
 
@@ -279,6 +287,11 @@ def convert(
         raise ValueError("terrain_smooth must be between 0 and 8")
     if terrain_min_region < 0 or terrain_min_region > 4096:
         raise ValueError("terrain_min_region must be between 0 and 4096")
+    if classification_profile is not None and clustering_profile is not None:
+        raise ValueError(
+            "manual classification and automatic clustering profiles "
+            "are mutually exclusive"
+        )
 
     if algorithm == "terrain":
         resized_image, (width, height) = resize_to_map(
@@ -287,15 +300,19 @@ def convert(
             height=height,
             resample=Img.Resampling.LANCZOS,
         )
-        boundary_mask = (
-            rasterize_map_boundary(
+        boundary_mask = None
+        if classification_profile is not None:
+            boundary_mask = rasterize_map_boundary(
                 classification_profile,
                 resized_image.width,
                 resized_image.height,
             )
-            if classification_profile is not None
-            else None
-        )
+        elif clustering_profile is not None:
+            boundary_mask = rasterize_clustering_boundary(
+                clustering_profile,
+                resized_image.width,
+                resized_image.height,
+            )
         tile_image = classify_adaptive_terrain(
             image=resized_image,
             tiles=tiles,
@@ -303,6 +320,11 @@ def convert(
             smooth_passes=terrain_smooth,
             min_land_region=terrain_min_region,
             valid_mask=boundary_mask,
+            clustering_settings=(
+                clustering_profile.to_terrain_settings()
+                if clustering_profile is not None
+                else None
+            ),
         )
         elevation = None
         if classification_profile is not None:
@@ -323,6 +345,7 @@ def convert(
             name=name,
             elevation=elevation,
             classification_profile=classification_profile,
+            clustering_profile=clustering_profile,
         )
 
     palette = make_palette(tiles=tiles)

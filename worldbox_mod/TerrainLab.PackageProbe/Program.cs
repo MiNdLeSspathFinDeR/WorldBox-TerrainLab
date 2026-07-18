@@ -68,6 +68,7 @@ internal static class Program
             ValidateMapBudget();
             ValidateImageWorkspaceProtocol(testRoot);
             ValidateImageClassificationProfile(testRoot);
+            ValidateImageClusteringProfile(testRoot);
             if (generatedDemPath != null)
             {
                 ValidateGeneratedDem(
@@ -911,6 +912,69 @@ internal static class Program
             restored.Samples.Count == sampleCount &&
             restored.MapBoundary != null,
             "Clearing polygons damaged points or the map boundary.");
+    }
+
+    private static void ValidateImageClusteringProfile(string testRoot)
+    {
+        string directory = Path.Combine(testRoot, "automatic-clustering");
+        Directory.CreateDirectory(directory);
+        string imagePath = Path.Combine(directory, "source.tif");
+        File.WriteAllBytes(imagePath, new byte[] { 5, 6, 7, 8 });
+
+        TerrainImageClusteringProfile profile =
+            TerrainImageClusteringProfile.Create(imagePath, 640, 360);
+        profile.Settings.Clusters = 17;
+        profile.Settings.SplineRadius = 3;
+        profile.Settings.SmoothPasses = 2;
+        profile.Settings.MinimumLandRegion = 48;
+        profile.Settings.WaterSensitivity = 1.15;
+        profile.Settings.ColorWeight = 1.25;
+        profile.Settings.LumaWeight = 0.9;
+        profile.Settings.SaturationWeight = 1.1;
+        profile.Settings.TextureWeight = 0.35;
+        profile.Settings.SlopeWeight = 1.2;
+        profile.Settings.SpatialWeight = 0.2;
+        profile.Settings.DetailWeight = 0.55;
+        profile.Settings.SampleLimit = 75000;
+        profile.Settings.KMeansIterations = 27;
+        profile.Settings.RandomSeed = 2026;
+        profile.SetMapBoundary(
+            new[]
+            {
+                new TerrainImageClassificationVertex(40, 30),
+                new TerrainImageClassificationVertex(600, 30),
+                new TerrainImageClassificationVertex(600, 330),
+                new TerrainImageClassificationVertex(40, 330)
+            });
+        profile.Save(imagePath);
+
+        TerrainImageClusteringProfile restored =
+            TerrainImageClusteringProfile.LoadOrCreate(
+                imagePath,
+                640,
+                360);
+        Assert(
+            restored.Settings.Clusters == 17 &&
+            restored.Settings.SplineRadius == 3 &&
+            restored.Settings.SmoothPasses == 2 &&
+            restored.Settings.MinimumLandRegion == 48 &&
+            Math.Abs(restored.Settings.WaterSensitivity - 1.15) < 0.0001 &&
+            Math.Abs(restored.Settings.ColorWeight - 1.25) < 0.0001 &&
+            Math.Abs(restored.Settings.LumaWeight - 0.9) < 0.0001 &&
+            Math.Abs(restored.Settings.SaturationWeight - 1.1) < 0.0001 &&
+            Math.Abs(restored.Settings.TextureWeight - 0.35) < 0.0001 &&
+            Math.Abs(restored.Settings.SlopeWeight - 1.2) < 0.0001 &&
+            Math.Abs(restored.Settings.SpatialWeight - 0.2) < 0.0001 &&
+            Math.Abs(restored.Settings.DetailWeight - 0.55) < 0.0001 &&
+            restored.Settings.SampleLimit == 75000 &&
+            restored.Settings.KMeansIterations == 27 &&
+            restored.Settings.RandomSeed == 2026 &&
+            restored.MapBoundary != null &&
+            restored.MapBoundary.Vertices.Count == 4,
+            "Automatic clustering profile did not round-trip.");
+        Assert(
+            File.Exists(TerrainImageClusteringProfile.GetSidecarPath(imagePath)),
+            "Automatic clustering sidecar was not written.");
     }
 
     private static void ValidateGeneratedDem(

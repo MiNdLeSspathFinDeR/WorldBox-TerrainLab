@@ -12,3 +12,4 @@ class Map:
     preview: Image
     elevation: Optional[Any] = None
     classification_profile: Optional[Dict[str, Any]] = None
+    clustering_profile: Optional[Dict[str, Any]] = None

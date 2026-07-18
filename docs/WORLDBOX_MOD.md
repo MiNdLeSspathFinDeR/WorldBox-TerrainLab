@@ -57,6 +57,16 @@ a square. The watched-folder contract is exactly `PNG`, `JPG/JPEG/JFIF`,
 `TIFF/TIF`, `WebP`, `BMP`, `GIF`, `TGA`, `DDS`, and `JP2`. SVG, PDF, PSD,
 archives, and every unlisted extension are ignored.
 
+Two adjacent Project commands interpret a selected workspace raster. Automatic
+clustering is the quick path: it has its own preview, explicit file
+confirmation, optional area-of-interest polygon, five basic controls, and ten
+collapsible expert controls. The boundary removes exterior noise from fitting
+and converts it to deep ocean. Its settings persist per image in
+`<image>.terrainlab-clustering.json`. Manual classification remains the
+deliberate point/line/polygon path with a separate
+`<image>.terrainlab-classification.json` profile. The converter never combines
+the two profiles in one run.
+
 The converter writes a non-`saveN` staging directory and publishes the finished
 map with one directory rename. A game slot therefore appears only after
 `map.wbox`, `map.meta`, both previews, and `map_stats.s3db` are complete. The

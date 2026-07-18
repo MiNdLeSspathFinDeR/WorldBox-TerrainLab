@@ -68,6 +68,11 @@ namespace TerrainLab
         private const string SideButtonKey = "terrain_lab_side_button";
         private const string IconResourceRoot = "terrainlab/icons/";
         private const float LiveModuleRefreshIntervalSeconds = 1f;
+        private const float ToolbarButtonSize = 24f;
+        private const float ToolbarRowGap = 6f;
+        private const float ToolbarHorizontalPadding = 8f;
+        private const float ToolbarVerticalPadding = 6f;
+        private const float ToolbarDividerThickness = 2f;
 
         private static readonly Color NeutralText = new Color(0.83f, 0.79f, 0.66f, 1f);
         private static readonly Color SuccessText = new Color(0.55f, 0.82f, 0.55f, 1f);
@@ -84,6 +89,10 @@ namespace TerrainLab
             new Color(1f, 0.27f, 0.2f, 1f);
         private static readonly Color SectionOutline =
             new Color(0.5f, 0.52f, 0.48f, 0.95f);
+        private static readonly Color ToolbarDividerShadow =
+            new Color(0.11f, 0.12f, 0.09f, 0.92f);
+        private static readonly Color ToolbarDividerHighlight =
+            new Color(0.46f, 0.49f, 0.4f, 0.58f);
         private static readonly Color[] ToolbarGroupColors =
         {
             new Color(0.88f, 0.68f, 0.27f, 0.95f),
@@ -117,6 +126,8 @@ namespace TerrainLab
             new List<ToolbarLayoutButton>();
         private readonly List<ToolbarLayoutSeparator> _toolbarLayoutSeparators =
             new List<ToolbarLayoutSeparator>();
+        private readonly List<RectTransform> _toolbarRowSeparators =
+            new List<RectTransform>();
         private readonly List<SimpleButton> _toolbarButtons =
             new List<SimpleButton>();
         private readonly Dictionary<SimpleButton, Image> _toolbarActivityLamps =
@@ -134,6 +145,7 @@ namespace TerrainLab
         private TerrainHydrologyOverlay _hydrologyOverlay;
         private TerrainErosionOverlay _erosionOverlay;
         private TerrainImageClassificationOverlay _classificationOverlay;
+        private TerrainImageClusteringOverlay _clusteringOverlay;
         private Transform _moduleContent;
         private Text _statusText;
         private Text _brushRadiusText;
@@ -248,6 +260,20 @@ namespace TerrainLab
                 HandleClassificationStatusChanged;
             _classificationOverlay.VisibilityChanged +=
                 HandleClassificationVisibilityChanged;
+            _clusteringOverlay =
+                GetComponent<TerrainImageClusteringOverlay>();
+            if (_clusteringOverlay == null)
+            {
+                _clusteringOverlay =
+                    gameObject.AddComponent<TerrainImageClusteringOverlay>();
+            }
+            _clusteringOverlay.Initialize(
+                TerrainLabRuntime.Instance?.ImageWorkspace,
+                _topToolbar.transform);
+            _clusteringOverlay.StatusChanged +=
+                HandleClusteringStatusChanged;
+            _clusteringOverlay.VisibilityChanged +=
+                HandleClusteringVisibilityChanged;
             CreateSideButton(declaration.GetIcon());
             CreateMapStatusBar();
             _editor.EditApplied += HandleElevationEditApplied;
@@ -288,7 +314,8 @@ namespace TerrainLab
                 _workspaceVisible,
                 _workspaceVisible &&
                 !analysisRunning &&
-                _classificationOverlay?.IsVisible != true);
+                _classificationOverlay?.IsVisible != true &&
+                _clusteringOverlay?.IsVisible != true);
 
             TryApplyBottomToolbarStyle();
             UpdateAdaptiveToolbarLayout(false);
@@ -451,7 +478,7 @@ namespace TerrainLab
             toolbarRect.anchorMax = new Vector2(0.5f, 1f);
             toolbarRect.pivot = new Vector2(0.5f, 1f);
             toolbarRect.anchoredPosition = Vector2.zero;
-            toolbarRect.sizeDelta = new Vector2(574f, 56f);
+            toolbarRect.sizeDelta = new Vector2(574f, 66f);
 
             GameObject backgroundObject = new GameObject(
                 "TerrainLabToolbarBackground",
@@ -633,6 +660,15 @@ namespace TerrainLab
                 ToggleImageWorkspaceWatcher,
                 "terrain_lab_action_toggle_image_watcher",
                 "terrain_lab_action_toggle_image_watcher_description");
+            _toolbarCommandButtons["image_auto_cluster"] =
+                CreateToolbarButton(
+                    row,
+                    "image_auto_cluster",
+                    "layer_group",
+                    "K",
+                    ToggleAutomaticImageClustering,
+                    "terrain_lab_action_automatic_clustering",
+                    "terrain_lab_action_automatic_clustering_description");
             _toolbarCommandButtons["image_manual_classify"] =
                 CreateToolbarButton(
                     row,
@@ -1487,6 +1523,9 @@ namespace TerrainLab
             SetToolbarCommandEnabled(
                 "image_manual_classify",
                 imageWorkspaceAvailable);
+            SetToolbarCommandEnabled(
+                "image_auto_cluster",
+                imageWorkspaceAvailable);
             SetToolbarCommandEnabled("export", hasState);
             SetToolbarCommandEnabled("validate", hasState);
             SetToolbarCommandEnabled("export_gis", hasState);
@@ -1554,6 +1593,10 @@ namespace TerrainLab
             SetToolbarActivity(
                 _toolbarCommandButtons["image_manual_classify"],
                 _classificationOverlay?.IsVisible == true,
+                ActivityGreen);
+            SetToolbarActivity(
+                _toolbarCommandButtons["image_auto_cluster"],
+                _clusteringOverlay?.IsVisible == true,
                 ActivityGreen);
 
             foreach (KeyValuePair<TerrainEditorTool, SimpleButton> pair in
@@ -2144,6 +2187,15 @@ namespace TerrainLab
                     watcherActionKey + "_description");
                 CreateActionButton(
                     _moduleContent,
+                    LM.Get("terrain_lab_action_automatic_clustering"),
+                    ToggleAutomaticImageClustering,
+                    194f,
+                    28f,
+                    "layer_group",
+                    "terrain_lab_action_automatic_clustering",
+                    "terrain_lab_action_automatic_clustering_description");
+                CreateActionButton(
+                    _moduleContent,
                     LM.Get("terrain_lab_action_manual_classification"),
                     ToggleManualImageClassification,
                     194f,
@@ -2151,6 +2203,20 @@ namespace TerrainLab
                     "layer_style",
                     "terrain_lab_action_manual_classification",
                     "terrain_lab_action_manual_classification_description");
+                if (_clusteringOverlay?.IsVisible == true)
+                {
+                    CreateInfoText(
+                        string.Format(
+                            LM.Get(
+                                "terrain_lab_cluster_active_format"),
+                            _clusteringOverlay.CurrentImageName,
+                            _clusteringOverlay.ClusterCount,
+                            _clusteringOverlay.HasBoundary
+                                ? LM.Get("terrain_lab_value_yes")
+                                : LM.Get("terrain_lab_value_no")),
+                        SuccessText,
+                        42f);
+                }
                 if (_classificationOverlay?.IsVisible == true)
                 {
                     CreateInfoText(
@@ -5283,7 +5349,28 @@ namespace TerrainLab
                 return;
             }
 
+            if (_classificationOverlay.IsVisible != true)
+            {
+                _clusteringOverlay?.Hide();
+            }
             _classificationOverlay.ToggleLatest();
+            UpdateToolbarState();
+        }
+
+        private void ToggleAutomaticImageClustering()
+        {
+            if (_clusteringOverlay == null)
+            {
+                SetError(LM.Get(
+                    "terrain_lab_cluster_unavailable"));
+                return;
+            }
+
+            if (_clusteringOverlay.IsVisible != true)
+            {
+                _classificationOverlay?.Hide();
+            }
+            _clusteringOverlay.ToggleLatest();
             UpdateToolbarState();
         }
 
@@ -5302,6 +5389,34 @@ namespace TerrainLab
         }
 
         private void HandleClassificationVisibilityChanged()
+        {
+            UpdateToolbarState();
+            if (_window != null &&
+                _window.gameObject.activeInHierarchy &&
+                string.Equals(
+                    _selectedModule,
+                    "project",
+                    StringComparison.Ordinal))
+            {
+                RebuildModuleContent();
+            }
+        }
+
+        private void HandleClusteringStatusChanged(
+            string message,
+            bool error)
+        {
+            if (error)
+            {
+                SetError(message);
+            }
+            else
+            {
+                SetStatus(message, false, true);
+            }
+        }
+
+        private void HandleClusteringVisibilityChanged()
         {
             UpdateToolbarState();
             if (_window != null &&
@@ -5553,6 +5668,7 @@ namespace TerrainLab
             if (!visible)
             {
                 _classificationOverlay?.Hide();
+                _clusteringOverlay?.Hide();
             }
             if (_topToolbar != null)
             {
@@ -5793,14 +5909,12 @@ namespace TerrainLab
             }
 
             _lastToolbarCanvasWidth = canvasWidth;
-            const float horizontalPadding = 6f;
-            const float topPadding = 4f;
-            const float rowHeight = 26f;
             const float minimumCellWidth = 28f;
-            const float bottomPadding = 4f;
 
             float panelWidth = canvasWidth;
-            float innerWidth = Mathf.Max(24f, panelWidth - horizontalPadding * 2f);
+            float innerWidth = Mathf.Max(
+                ToolbarButtonSize,
+                panelWidth - ToolbarHorizontalPadding * 2f);
             int capacity = Mathf.Max(1, Mathf.FloorToInt(innerWidth / minimumCellWidth));
             List<ToolbarLayoutButton> primaryItems =
                 new List<ToolbarLayoutButton>();
@@ -5842,10 +5956,15 @@ namespace TerrainLab
             int rowCount = rowCounts.Count;
 
             RectTransform toolbarRect = _topToolbar.GetComponent<RectTransform>();
-            float panelHeight = topPadding + rowCount * rowHeight + bottomPadding;
+            float contentHeight =
+                rowCount * ToolbarButtonSize +
+                Mathf.Max(0, rowCount - 1) * ToolbarRowGap;
+            float panelHeight =
+                ToolbarVerticalPadding + contentHeight + ToolbarVerticalPadding;
             toolbarRect.sizeDelta = new Vector2(panelWidth, panelHeight);
-            _toolbarContent.anchoredPosition = new Vector2(0f, -topPadding);
-            _toolbarContent.sizeDelta = new Vector2(0f, rowCount * rowHeight);
+            _toolbarContent.anchoredPosition =
+                new Vector2(0f, -ToolbarVerticalPadding);
+            _toolbarContent.sizeDelta = new Vector2(0f, contentHeight);
             if (_toolbarLeftRail != null)
             {
                 _toolbarLeftRail.rectTransform.sizeDelta =
@@ -5866,15 +5985,23 @@ namespace TerrainLab
                 for (int column = 0; column < buttonsInRow; column++)
                 {
                     ToolbarLayoutButton item = visibleItems[itemOffset++];
-                    float centerX = horizontalPadding + cellWidth * (column + 0.5f);
+                    float centerX =
+                        ToolbarHorizontalPadding +
+                        cellWidth * (column + 0.5f);
+                    float centerY =
+                        row * (ToolbarButtonSize + ToolbarRowGap) +
+                        ToolbarButtonSize * 0.5f;
                     item.Row = row;
                     item.CenterX = centerX;
                     item.Rect.anchoredPosition = new Vector2(
                         centerX,
-                        -(row * rowHeight + rowHeight * 0.5f));
-                    item.Rect.sizeDelta = new Vector2(24f, 24f);
+                        -centerY);
+                    item.Rect.sizeDelta =
+                        new Vector2(ToolbarButtonSize, ToolbarButtonSize);
                 }
             }
+
+            UpdateToolbarRowSeparators(rowCount);
 
             for (int separatorIndex = 0;
                  separatorIndex < _toolbarLayoutSeparators.Count;
@@ -5914,11 +6041,83 @@ namespace TerrainLab
                 separator.Rect.gameObject.SetActive(visible);
                 if (visible)
                 {
+                    float centerY =
+                        previous.Row * (ToolbarButtonSize + ToolbarRowGap) +
+                        ToolbarButtonSize * 0.5f;
                     separator.Rect.anchoredPosition = new Vector2(
                         (previous.CenterX + next.CenterX) * 0.5f,
-                        -(previous.Row * rowHeight + rowHeight * 0.5f));
+                        -centerY);
+                    separator.Rect.sizeDelta = new Vector2(
+                        ToolbarDividerThickness,
+                        ToolbarButtonSize + 2f);
                 }
             }
+        }
+
+        private void UpdateToolbarRowSeparators(int rowCount)
+        {
+            int required = Mathf.Max(0, rowCount - 1);
+            while (_toolbarRowSeparators.Count < required)
+            {
+                _toolbarRowSeparators.Add(CreateToolbarRowSeparator());
+            }
+
+            for (int index = 0; index < _toolbarRowSeparators.Count; index++)
+            {
+                RectTransform divider = _toolbarRowSeparators[index];
+                bool visible = index < required;
+                divider.gameObject.SetActive(visible);
+                if (!visible)
+                {
+                    continue;
+                }
+
+                int boundary = index + 1;
+                float centerY =
+                    boundary * ToolbarButtonSize +
+                    (boundary - 0.5f) * ToolbarRowGap;
+                divider.anchoredPosition = new Vector2(0f, -centerY);
+                divider.sizeDelta = new Vector2(
+                    -ToolbarHorizontalPadding * 2f,
+                    ToolbarDividerThickness);
+            }
+        }
+
+        private RectTransform CreateToolbarRowSeparator()
+        {
+            GameObject separator = new GameObject(
+                "TerrainLabToolbarRowDivider",
+                typeof(RectTransform),
+                typeof(Image));
+            separator.transform.SetParent(_toolbarContent, false);
+            RectTransform rect = separator.GetComponent<RectTransform>();
+            rect.anchorMin = new Vector2(0f, 1f);
+            rect.anchorMax = new Vector2(1f, 1f);
+            rect.pivot = new Vector2(0.5f, 0.5f);
+            rect.sizeDelta = new Vector2(0f, ToolbarDividerThickness);
+
+            Image shadow = separator.GetComponent<Image>();
+            shadow.color = ToolbarDividerShadow;
+            shadow.raycastTarget = false;
+
+            GameObject highlightObject = new GameObject(
+                "TerrainLabToolbarRowDividerHighlight",
+                typeof(RectTransform),
+                typeof(Image));
+            highlightObject.transform.SetParent(separator.transform, false);
+            RectTransform highlightRect =
+                highlightObject.GetComponent<RectTransform>();
+            highlightRect.anchorMin = new Vector2(0f, 0f);
+            highlightRect.anchorMax = new Vector2(1f, 0f);
+            highlightRect.pivot = new Vector2(0.5f, 0f);
+            highlightRect.anchoredPosition = Vector2.zero;
+            highlightRect.sizeDelta = new Vector2(0f, 1f);
+
+            Image highlight = highlightObject.GetComponent<Image>();
+            highlight.color = ToolbarDividerHighlight;
+            highlight.raycastTarget = false;
+            rect.SetAsFirstSibling();
+            return rect;
         }
 
         private static List<int> CalculateToolbarRowCounts(
@@ -6050,7 +6249,6 @@ namespace TerrainLab
         private void CreateToolbarSeparator(Transform parent)
         {
             _toolbarLayoutGroup++;
-            Color groupColor = GetToolbarGroupColor(_toolbarLayoutGroup);
             GameObject separator = new GameObject(
                 "TerrainLabToolbarSeparator",
                 typeof(RectTransform),
@@ -6060,24 +6258,26 @@ namespace TerrainLab
             rect.anchorMin = new Vector2(0f, 1f);
             rect.anchorMax = new Vector2(0f, 1f);
             rect.pivot = new Vector2(0.5f, 0.5f);
-            rect.sizeDelta = new Vector2(2f, 20f);
+            rect.sizeDelta = new Vector2(
+                ToolbarDividerThickness,
+                ToolbarButtonSize + 2f);
             Image image = separator.GetComponent<Image>();
-            image.color = groupColor;
+            image.color = ToolbarDividerShadow;
             image.raycastTarget = false;
 
             GameObject markerObject = new GameObject(
-                "TerrainLabToolbarGroupFlag",
+                "TerrainLabToolbarSeparatorHighlight",
                 typeof(RectTransform),
                 typeof(Image));
             markerObject.transform.SetParent(separator.transform, false);
             RectTransform markerRect = markerObject.GetComponent<RectTransform>();
-            markerRect.anchorMin = new Vector2(0.5f, 1f);
-            markerRect.anchorMax = new Vector2(0.5f, 1f);
-            markerRect.pivot = new Vector2(0f, 1f);
-            markerRect.anchoredPosition = new Vector2(-1f, 0f);
-            markerRect.sizeDelta = new Vector2(7f, 3f);
+            markerRect.anchorMin = new Vector2(1f, 0f);
+            markerRect.anchorMax = new Vector2(1f, 1f);
+            markerRect.pivot = new Vector2(1f, 0.5f);
+            markerRect.anchoredPosition = Vector2.zero;
+            markerRect.sizeDelta = new Vector2(1f, 0f);
             Image marker = markerObject.GetComponent<Image>();
-            marker.color = groupColor;
+            marker.color = ToolbarDividerHighlight;
             marker.raycastTarget = false;
             _toolbarLayoutSeparators.Add(new ToolbarLayoutSeparator
             {
@@ -6105,7 +6305,7 @@ namespace TerrainLab
                 action,
                 icon,
                 fallbackText,
-                new Vector2(24f, 24f),
+                new Vector2(ToolbarButtonSize, ToolbarButtonSize),
                 "tip",
                 new TooltipData
                 {
@@ -6135,7 +6335,8 @@ namespace TerrainLab
             buttonRect.anchorMin = new Vector2(0f, 1f);
             buttonRect.anchorMax = new Vector2(0f, 1f);
             buttonRect.pivot = new Vector2(0.5f, 0.5f);
-            buttonRect.sizeDelta = new Vector2(24f, 24f);
+            buttonRect.sizeDelta =
+                new Vector2(ToolbarButtonSize, ToolbarButtonSize);
 
             LayoutElement element = button.GetComponent<LayoutElement>();
             if (element == null)
@@ -6143,8 +6344,8 @@ namespace TerrainLab
                 element = button.gameObject.AddComponent<LayoutElement>();
             }
 
-            element.preferredWidth = 24f;
-            element.preferredHeight = 24f;
+            element.preferredWidth = ToolbarButtonSize;
+            element.preferredHeight = ToolbarButtonSize;
 
             if (icon != null)
             {
@@ -6724,6 +6925,13 @@ namespace TerrainLab
                     HandleClassificationStatusChanged;
                 _classificationOverlay.VisibilityChanged -=
                     HandleClassificationVisibilityChanged;
+            }
+            if (_clusteringOverlay != null)
+            {
+                _clusteringOverlay.StatusChanged -=
+                    HandleClusteringStatusChanged;
+                _clusteringOverlay.VisibilityChanged -=
+                    HandleClusteringVisibilityChanged;
             }
 
             if (_sideButton != null)

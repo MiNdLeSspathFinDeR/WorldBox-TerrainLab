@@ -25,6 +25,39 @@ inspected, replaced, or controlled independently.
    lava, grey goo, corruption, tumors, biomass, cyber tiles, and other disruptive
    materials are excluded unless the full palette is explicitly requested.
 
+## Implemented configurable automatic clustering
+
+Automatic clustering is a first-class image-import path beside manual
+classification. Each source may own an independent
+`<image>.terrainlab-clustering.json` profile. The profile is not read when a
+manual classification profile is active, so quick unsupervised conversion and
+deliberate supervised calibration cannot silently contaminate one another.
+
+The automatic workspace can digitize one non-self-intersecting map boundary.
+Only cells inside it contribute to adaptive percentiles, water detection,
+K-means sampling, and semantic cluster fitting. Every output cell outside it is
+written as deep ocean. This removes paper margins, legends, labels, and other
+background without teaching those colours to the classifier.
+
+The profile exposes 15 bounded and reproducible controls:
+
+| Group | Controls |
+| --- | --- |
+| Basic | cluster count, spline radius, map smoothing passes, minimum land region, water sensitivity |
+| Spectral | RGB colour, luminance, and saturation weights |
+| Structure | local texture, edge/slope, and spatial-coordinate weights |
+| Quality | original-detail blend, training sample limit, K-means iteration limit |
+| Reproducibility | deterministic random seed |
+
+Spline smoothing builds a multiscale feature raster before clustering. The
+detail blend can retain narrow source structure while the spline component
+suppresses print grain. Spatial weighting favours compact regions but remains
+optional because a high value can separate distant occurrences of the same
+class. Texture and edge weights are likewise opt-in expert choices for maps
+whose hatching or relief boundaries carry information. Nearest-centre distances
+use a bounded matrix calculation rather than allocating a
+pixel-by-cluster-by-feature tensor.
+
 ## Implemented manual calibration
 
 TerrainLab can display a workspace raster over the live map and store point,

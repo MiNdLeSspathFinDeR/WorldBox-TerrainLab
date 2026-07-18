@@ -92,8 +92,21 @@ it does not accept SVG, PDF, PSD, or archives. Drop one of those rasters there
 after enabling the watcher; each stable image becomes a new `saveN` slot while
 the open world remains untouched. The Project chapter's image-folder command
 only opens `ImageWorkspace` in the operating-system file browser; selecting a
-file there does not select it in WorldBox. The separate classification command
-opens a compact previous/next file selector. Choose the source raster and press
+file there does not select it in WorldBox.
+
+The same image-import group offers two independent paths. **Automatic
+clustering** is the fast path: confirm a source raster, optionally outline one
+area-of-interest boundary, tune five basic controls or reveal ten expert
+controls, then build the map. The boundary excludes legends, margins, and other
+background from cluster fitting and turns its exterior into deep ocean.
+Settings and the boundary persist per source in
+`<image>.terrainlab-clustering.json`. The 15 controls cover cluster count,
+multiscale spline radius, cleanup, water sensitivity, colour, luminance,
+saturation, texture, edge and spatial weights, retained detail, sample budget,
+K-means iterations, and deterministic seed.
+
+**Manual classification** opens a compact previous/next file selector for
+deliberate training. Choose the source raster and press
 **Open selected** before editing controls unlock. Choose Point, Line, or
 Polygon and digitize its geometry first. A point completes on click; a line or
 polygon completes by right-click, double-click, or **Finish geometry**.
@@ -389,4 +402,21 @@ imagetomap Workspace/ --watch --save-to-game
 Seconds between workspace scans in `--watch` mode. Default is `2.0`.
 ```sh
 imagetomap Workspace/ --watch --watch-interval 1
+```
+
+#### `--clustering-profile`
+Load an automatic-clustering profile containing all 15 settings and an optional
+area-of-interest boundary. When neither profile option is supplied,
+`<image>.terrainlab-clustering.json` is discovered automatically only if no
+manual profile is selected.
+```sh
+imagetomap image.tif --clustering-profile image.tif.terrainlab-clustering.json
+```
+
+#### `--classification-profile`
+Load a manual point/line/polygon classification and Int16 DEM profile. Manual
+classification and automatic clustering profiles are intentionally mutually
+exclusive.
+```sh
+imagetomap image.tif --classification-profile image.tif.terrainlab-classification.json
 ```

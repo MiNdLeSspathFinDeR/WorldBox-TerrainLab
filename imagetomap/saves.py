@@ -16,6 +16,7 @@ from .calibration import (
     GENERATED_PROFILE_FILE_NAME,
     write_int16_geotiff,
 )
+from .clustering import GENERATED_CLUSTERING_PROFILE_FILE_NAME
 from .models import Map
 
 SAVE_SLOT_RE = re.compile(r"save(\d+)$")
@@ -238,6 +239,16 @@ def write_map_folder(
         (output_path / GENERATED_PROFILE_FILE_NAME).write_text(
             json.dumps(
                 converted_map.classification_profile,
+                ensure_ascii=False,
+                indent=2,
+            )
+            + "\n",
+            encoding="utf-8",
+        )
+    if converted_map.clustering_profile is not None:
+        (output_path / GENERATED_CLUSTERING_PROFILE_FILE_NAME).write_text(
+            json.dumps(
+                converted_map.clustering_profile,
                 ensure_ascii=False,
                 indent=2,
             )

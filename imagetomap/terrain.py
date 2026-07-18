@@ -21,6 +21,25 @@ class TerrainState:
     water_threshold: float
 
 
+@dataclass(frozen=True)
+class TerrainClusteringSettings:
+    clusters: int = 14
+    spline_radius: int = 0
+    smooth_passes: int = 1
+    min_land_region: int = 32
+    water_sensitivity: float = 1.0
+    color_weight: float = 1.0
+    luma_weight: float = 1.0
+    saturation_weight: float = 1.0
+    texture_weight: float = 0.0
+    slope_weight: float = 1.0
+    spatial_weight: float = 0.0
+    detail_weight: float = 0.65
+    sample_limit: int = 60_000
+    kmeans_iterations: int = 18
+    random_seed: int = 1729
+
+
 def classify_adaptive_terrain(
     image: Image,
     tiles: Iterable[str],
@@ -28,6 +47,7 @@ def classify_adaptive_terrain(
     smooth_passes: int = 1,
     min_land_region: int = 32,
     valid_mask: Optional[np.ndarray] = None,
+    clustering_settings: Optional[TerrainClusteringSettings] = None,
 ) -> Image:
     """Classify a map image into playable WorldBox terrain tiles.
 
@@ -38,6 +58,12 @@ def classify_adaptive_terrain(
     tile_names = tuple(tile for tile in tiles if tile in TILES)
     if not tile_names:
         raise ValueError("No valid WorldBox tiles supplied")
+    settings = clustering_settings or TerrainClusteringSettings(
+        clusters=clusters,
+        smooth_passes=smooth_passes,
+        min_land_region=min_land_region,
+    )
+    validate_clustering_settings(settings)
 
     rgb = np.asarray(image.convert("RGB"), dtype=np.float32) / 255.0
     if valid_mask is None:
@@ -60,11 +86,16 @@ def classify_adaptive_terrain(
         rgb = rgb.copy()
         rgb[~analysis_mask] = fill
 
-    red = rgb[:, :, 0]
-    green = rgb[:, :, 1]
-    blue = rgb[:, :, 2]
+    feature_rgb = make_spline_feature_rgb(
+        rgb,
+        settings.spline_radius,
+        settings.detail_weight,
+    )
+    red = feature_rgb[:, :, 0]
+    green = feature_rgb[:, :, 1]
+    blue = feature_rgb[:, :, 2]
 
-    hue, saturation, value = rgb_to_hsv(rgb)
+    hue, saturation, value = rgb_to_hsv(feature_rgb)
     luma = (0.2126 * red) + (0.7152 * green) + (0.0722 * blue)
     dark_percentile = float(np.percentile(luma[analysis_mask], 0.5))
     void_threshold = min(max(dark_percentile * 1.25, 0.018), 0.06)
@@ -79,7 +110,11 @@ def classify_adaptive_terrain(
     slope_mid, slope_high = percentiles(slope[non_void], (50.0, 86.0))
 
     water_score = make_water_score(red, green, blue, hue, saturation, luma_norm)
-    water_threshold = adaptive_water_threshold(water_score, non_void)
+    water_threshold = max(
+        0.02,
+        adaptive_water_threshold(water_score, non_void)
+        / settings.water_sensitivity,
+    )
     state = TerrainState(
         luma_low=luma_low,
         luma_mid=luma_mid,
@@ -102,8 +137,11 @@ def classify_adaptive_terrain(
         )
     water_mask |= void_mask
     water_mask |= ~analysis_mask
-    if min_land_region > 1:
-        water_mask = fill_small_land_regions(water_mask, min_land_region)
+    if settings.min_land_region > 1:
+        water_mask = fill_small_land_regions(
+            water_mask,
+            settings.min_land_region,
+        )
 
     assign_water(indices, water_mask, void_mask, tile_names)
     land_mask = analysis_mask & ~water_mask
@@ -118,16 +156,83 @@ def classify_adaptive_terrain(
         red=red,
         green=green,
         blue=blue,
-        clusters=clusters,
+        settings=settings,
         state=state,
     )
 
-    if smooth_passes > 0:
-        indices = smooth_tiles(indices, water_mask, tile_names, passes=smooth_passes)
+    if settings.smooth_passes > 0:
+        indices = smooth_tiles(
+            indices,
+            water_mask,
+            tile_names,
+            passes=settings.smooth_passes,
+        )
     if valid_mask is not None:
         indices[~analysis_mask] = tile_index(tile_names, "deep_ocean")
 
     return make_index_image(indices, tile_names)
+
+
+def validate_clustering_settings(settings: TerrainClusteringSettings) -> None:
+    if settings.clusters < 4 or settings.clusters > 64:
+        raise ValueError("clustering clusters must be between 4 and 64")
+    if settings.spline_radius < 0 or settings.spline_radius > 12:
+        raise ValueError("clustering spline_radius must be between 0 and 12")
+    if settings.smooth_passes < 0 or settings.smooth_passes > 8:
+        raise ValueError("clustering smooth_passes must be between 0 and 8")
+    if settings.min_land_region < 0 or settings.min_land_region > 4096:
+        raise ValueError("clustering min_land_region must be between 0 and 4096")
+    if settings.sample_limit < 1000 or settings.sample_limit > 250_000:
+        raise ValueError("clustering sample_limit must be between 1000 and 250000")
+    if settings.kmeans_iterations < 1 or settings.kmeans_iterations > 100:
+        raise ValueError(
+            "clustering kmeans_iterations must be between 1 and 100"
+        )
+    if settings.random_seed < 0 or settings.random_seed > 2_147_483_647:
+        raise ValueError("clustering random_seed is outside supported range")
+    weighted = (
+        settings.color_weight,
+        settings.luma_weight,
+        settings.saturation_weight,
+        settings.texture_weight,
+        settings.slope_weight,
+        settings.spatial_weight,
+    )
+    if any(not np.isfinite(value) or value < 0.0 or value > 3.0 for value in weighted):
+        raise ValueError("clustering feature weights must be between 0 and 3")
+    if sum(weighted) <= 0.0:
+        raise ValueError("at least one clustering feature weight must be positive")
+    if (
+        not np.isfinite(settings.water_sensitivity)
+        or settings.water_sensitivity < 0.5
+        or settings.water_sensitivity > 2.0
+    ):
+        raise ValueError(
+            "clustering water_sensitivity must be between 0.5 and 2"
+        )
+    if (
+        not np.isfinite(settings.detail_weight)
+        or settings.detail_weight < 0.0
+        or settings.detail_weight > 1.0
+    ):
+        raise ValueError("clustering detail_weight must be between 0 and 1")
+
+
+def make_spline_feature_rgb(
+    rgb: np.ndarray,
+    radius: int,
+    detail_weight: float,
+) -> np.ndarray:
+    if radius <= 0:
+        return rgb
+    smoothed = np.stack(
+        tuple(smooth_float(rgb[:, :, channel], radius) for channel in range(3)),
+        axis=2,
+    )
+    detail = float(np.clip(detail_weight, 0.0, 1.0))
+    return (
+        smoothed * (1.0 - detail) + rgb * detail
+    ).astype(np.float32)
 
 
 def rgb_to_hsv(rgb: np.ndarray) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
@@ -318,7 +423,7 @@ def assign_land_clusters(
     red: np.ndarray,
     green: np.ndarray,
     blue: np.ndarray,
-    clusters: int,
+    settings: TerrainClusteringSettings,
     state: TerrainState,
 ) -> None:
     land_positions = np.flatnonzero(land_mask.ravel())
@@ -334,12 +439,24 @@ def assign_land_clusters(
         red,
         green,
         blue,
+        settings,
     )
     flat_features = features.reshape((-1, features.shape[-1]))
     land_features = flat_features[land_positions]
 
-    centers = fit_kmeans(land_features, max(4, clusters))
-    center_tiles = classify_centers(centers, tile_names, state)
+    centers = fit_kmeans(
+        land_features,
+        max(4, settings.clusters),
+        sample_limit=settings.sample_limit,
+        iterations=settings.kmeans_iterations,
+        random_seed=settings.random_seed,
+    )
+    center_tiles = classify_centers(
+        centers,
+        tile_names,
+        state,
+        settings,
+    )
 
     chunk_size = 250_000
     flat_indices = indices.ravel()
@@ -357,30 +474,46 @@ def make_features(
     red: np.ndarray,
     green: np.ndarray,
     blue: np.ndarray,
+    settings: TerrainClusteringSettings,
 ) -> np.ndarray:
     green_score = green - np.maximum(red, blue)
     red_score = red - np.maximum(green, blue * 0.75)
     coolness = (blue - red) + (0.35 * (green - red))
     hue_angle = hue * (2.0 * np.pi)
+    texture = local_roughness(luma_norm)
+    height, width = luma_norm.shape
+    x_axis = np.linspace(-0.5, 0.5, width, dtype=np.float32)
+    y_axis = np.linspace(-0.5, 0.5, height, dtype=np.float32)
+    spatial_x = np.broadcast_to(x_axis, (height, width))
+    spatial_y = np.broadcast_to(y_axis[:, None], (height, width))
 
     return np.stack(
         (
-            luma_norm * 1.45,
-            saturation * 0.85,
-            np.sin(hue_angle) * 0.35,
-            np.cos(hue_angle) * 0.35,
-            slope,
-            green_score * 1.25,
-            red_score * 1.10,
-            coolness * 1.20,
+            luma_norm * 1.45 * settings.luma_weight,
+            saturation * 0.85 * settings.saturation_weight,
+            np.sin(hue_angle) * 0.35 * settings.color_weight,
+            np.cos(hue_angle) * 0.35 * settings.color_weight,
+            slope * settings.slope_weight,
+            green_score * 1.25 * settings.color_weight,
+            red_score * 1.10 * settings.color_weight,
+            coolness * 1.20 * settings.color_weight,
+            texture * settings.texture_weight,
+            spatial_x * settings.spatial_weight,
+            spatial_y * settings.spatial_weight,
         ),
         axis=2,
     ).astype(np.float32)
 
 
-def fit_kmeans(features: np.ndarray, clusters: int) -> np.ndarray:
-    sample_size = min(features.shape[0], 60_000)
-    rng = np.random.default_rng(1729)
+def fit_kmeans(
+    features: np.ndarray,
+    clusters: int,
+    sample_limit: int = 60_000,
+    iterations: int = 18,
+    random_seed: int = 1729,
+) -> np.ndarray:
+    sample_size = min(features.shape[0], sample_limit)
+    rng = np.random.default_rng(random_seed)
     if features.shape[0] > sample_size:
         sample = features[rng.choice(features.shape[0], size=sample_size, replace=False)]
     else:
@@ -389,7 +522,7 @@ def fit_kmeans(features: np.ndarray, clusters: int) -> np.ndarray:
     unique_clusters = min(clusters, max(1, sample.shape[0]))
     centers = sample[rng.choice(sample.shape[0], size=unique_clusters, replace=False)].copy()
 
-    for _ in range(18):
+    for _ in range(iterations):
         labels = nearest_centers(sample, centers)
         next_centers = centers.copy()
         for label in range(unique_clusters):
@@ -404,7 +537,9 @@ def fit_kmeans(features: np.ndarray, clusters: int) -> np.ndarray:
 
 
 def nearest_centers(features: np.ndarray, centers: np.ndarray) -> np.ndarray:
-    distances = ((features[:, None, :] - centers[None, :, :]) ** 2).sum(axis=2)
+    feature_norms = np.sum(features * features, axis=1, keepdims=True)
+    center_norms = np.sum(centers * centers, axis=1, keepdims=True).T
+    distances = feature_norms + center_norms - (2.0 * features @ centers.T)
     return np.argmin(distances, axis=1)
 
 
@@ -412,16 +547,51 @@ def classify_centers(
     centers: np.ndarray,
     tile_names: Sequence[str],
     state: TerrainState,
+    settings: TerrainClusteringSettings,
 ) -> np.ndarray:
     result = np.empty(centers.shape[0], dtype=np.uint8)
     for index, center in enumerate(centers):
-        luma = float(center[0] / 1.45)
-        saturation = float(center[1] / 0.85)
-        slope = float(center[4])
-        green_score = float(center[5] / 1.25)
-        red_score = float(center[6] / 1.10)
-        coolness = float(center[7] / 1.20)
-        hue = float((np.arctan2(center[2] / 0.35, center[3] / 0.35) / (2.0 * np.pi)) % 1.0)
+        luma = unweight(center[0], 1.45, settings.luma_weight, 0.5)
+        saturation = unweight(
+            center[1],
+            0.85,
+            settings.saturation_weight,
+            state.sat_mid,
+        )
+        slope = unweight(center[4], 1.0, settings.slope_weight, 0.0)
+        green_score = unweight(
+            center[5],
+            1.25,
+            settings.color_weight,
+            0.0,
+        )
+        red_score = unweight(
+            center[6],
+            1.10,
+            settings.color_weight,
+            0.0,
+        )
+        coolness = unweight(
+            center[7],
+            1.20,
+            settings.color_weight,
+            0.0,
+        )
+        hue_sine = unweight(
+            center[2],
+            0.35,
+            settings.color_weight,
+            0.0,
+        )
+        hue_cosine = unweight(
+            center[3],
+            0.35,
+            settings.color_weight,
+            1.0,
+        )
+        hue = float(
+            (np.arctan2(hue_sine, hue_cosine) / (2.0 * np.pi)) % 1.0
+        )
 
         tile = classify_land_tile(
             luma=luma,
@@ -435,6 +605,16 @@ def classify_centers(
         )
         result[index] = tile_index(tile_names, tile, "soil_low")
     return result
+
+
+def unweight(
+    value: float,
+    scale: float,
+    weight: float,
+    fallback: float,
+) -> float:
+    divisor = scale * weight
+    return fallback if divisor <= 1e-8 else float(value / divisor)
 
 
 def classify_land_tile(

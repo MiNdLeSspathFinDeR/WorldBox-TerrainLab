@@ -2,6 +2,27 @@
 
 ## Unreleased
 
+## 1.12.0 - 2026-07-18
+
+- Matched the adaptive top toolbar more closely to WorldBox's lower power bar:
+  24-unit buttons now use a 6-unit row gap, 6-unit vertical frame padding, and
+  8-unit horizontal padding.
+- Replaced short colored group flags with neutral two-tone vertical dividers.
+  Added matching full-width etched dividers between adaptive toolbar rows so
+  hierarchy remains readable when a chapter wraps at a different UI scale.
+- Added automatic clustering beside manual classification in the Project
+  image-import group. Both workflows have independent toolbar commands,
+  full-screen raster workspaces, per-image profiles, and conversion modes.
+- Added an optional automatic-clustering area-of-interest polygon. Only its
+  interior is sampled; noisy legends and scan margins outside it become deep
+  ocean without influencing cluster centres.
+- Added five basic and ten collapsible expert clustering controls: cluster and
+  spline scales, cleanup, water sensitivity, feature weights, spatial
+  regularization, detail retention, sample budget, K-means iterations, and
+  deterministic seed. Every parameter has English and Russian hover guidance.
+- Reworked nearest-centre calculations to avoid the large
+  pixel-by-cluster-by-feature temporary array at expert cluster counts.
+
 ## 1.11.0 - 2026-07-18
 
 - Rebuilt manual classification around an explicit draft/publish workflow.
