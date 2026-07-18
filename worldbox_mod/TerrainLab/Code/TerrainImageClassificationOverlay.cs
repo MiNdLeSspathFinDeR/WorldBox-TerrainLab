@@ -25,7 +25,8 @@ namespace TerrainLab
     {
         Point,
         Polygon,
-        MapBoundary
+        MapBoundary,
+        DeletePolygon
     }
 
     internal sealed class TerrainImageCanvasInput : MonoBehaviour,
@@ -152,6 +153,8 @@ namespace TerrainLab
         private Button _pointModeButton;
         private Button _polygonModeButton;
         private Button _boundaryModeButton;
+        private Button _deletePolygonModeButton;
+        private Button _deleteAllPolygonsButton;
         private Button _finishPolygonButton;
         private Button _cancelPolygonButton;
         private TerrainImagePolygonGraphic _draftGraphic;
@@ -309,8 +312,36 @@ namespace TerrainLab
                 sourceY);
             try
             {
-                if (_drawMode !=
-                    TerrainImageClassificationDrawMode.Point)
+                if (_drawMode ==
+                    TerrainImageClassificationDrawMode.DeletePolygon)
+                {
+                    if (secondary)
+                    {
+                        return;
+                    }
+                    if (!_profile.RemoveRegionAt(sourceX, sourceY))
+                    {
+                        SetPanelStatus(
+                            LM.Get(
+                                "terrain_lab_manual_no_polygon_at_point"),
+                            false);
+                        return;
+                    }
+
+                    SaveProfile();
+                    RebuildAnnotations();
+                    UpdateLabels();
+                    SetPanelStatus(
+                        LM.Get(
+                            "terrain_lab_manual_polygon_removed_at_point"),
+                        false);
+                    return;
+                }
+
+                if (_drawMode ==
+                        TerrainImageClassificationDrawMode.Polygon ||
+                    _drawMode ==
+                        TerrainImageClassificationDrawMode.MapBoundary)
                 {
                     if (secondary)
                     {
@@ -591,6 +622,20 @@ namespace TerrainLab
             {
                 SetEditorControlsEnabled(true);
                 UpdateLabels();
+                return;
+            }
+
+            try
+            {
+                if (_profile != null &&
+                    !string.IsNullOrWhiteSpace(_imagePath))
+                {
+                    SaveProfile();
+                }
+            }
+            catch (Exception exception)
+            {
+                SetPanelStatus(exception.Message, true);
                 return;
             }
 
@@ -920,6 +965,30 @@ namespace TerrainLab
                     78f,
                     "terrain_lab_manual_mode_boundary"));
 
+            Transform polygonDeletion = CreateRow(content, 30f);
+            _deletePolygonModeButton = TrackEditorControl(
+                CreateButton(
+                    polygonDeletion,
+                    LM.Get(
+                        "terrain_lab_manual_mode_delete_polygon"),
+                    delegate
+                    {
+                        SetDrawMode(
+                            TerrainImageClassificationDrawMode
+                                .DeletePolygon);
+                    },
+                    118f,
+                    "terrain_lab_manual_mode_delete_polygon"));
+            _deleteAllPolygonsButton = TrackEditorControl(
+                CreateButton(
+                    polygonDeletion,
+                    LM.Get(
+                        "terrain_lab_manual_delete_all_polygons"),
+                    ClearPolygons,
+                    118f,
+                    "terrain_lab_manual_delete_all_polygons",
+                    true));
+
             CreateLabel(
                 content,
                 LM.Get("terrain_lab_manual_surface"),
@@ -976,8 +1045,16 @@ namespace TerrainLab
                 {
                     if (_profile != null)
                     {
-                        _profile.Settings.InterpolateElevationGlobally =
-                            enabled;
+                        try
+                        {
+                            _profile.Settings
+                                .InterpolateElevationGlobally = enabled;
+                            SaveProfile();
+                        }
+                        catch (Exception exception)
+                        {
+                            SetPanelStatus(exception.Message, true);
+                        }
                     }
                 });
 
@@ -1112,6 +1189,10 @@ namespace TerrainLab
                     statusKey =
                         "terrain_lab_manual_mode_boundary_active";
                     break;
+                case TerrainImageClassificationDrawMode.DeletePolygon:
+                    statusKey =
+                        "terrain_lab_manual_mode_delete_polygon_active";
+                    break;
                 default:
                     statusKey =
                         "terrain_lab_manual_mode_point_active";
@@ -1137,6 +1218,11 @@ namespace TerrainLab
                 _editorEnabled &&
                 _drawMode ==
                 TerrainImageClassificationDrawMode.MapBoundary);
+            SetModeButtonState(
+                _deletePolygonModeButton,
+                _editorEnabled &&
+                _drawMode ==
+                TerrainImageClassificationDrawMode.DeletePolygon);
             if (_pointModeButton != null)
             {
                 _pointModeButton.interactable = _editorEnabled;
@@ -1149,12 +1235,29 @@ namespace TerrainLab
             {
                 _boundaryModeButton.interactable = _editorEnabled;
             }
+            if (_deletePolygonModeButton != null)
+            {
+                _deletePolygonModeButton.interactable = _editorEnabled;
+            }
+            if (_deleteAllPolygonsButton != null)
+            {
+                _deleteAllPolygonsButton.interactable =
+                    _editorEnabled &&
+                    ((_profile?.Regions?.Count ?? 0) > 0 ||
+                     (_drawMode ==
+                          TerrainImageClassificationDrawMode.Polygon &&
+                      _draftVertices.Count > 0));
+            }
 
             bool boundaryMode =
                 _drawMode ==
                 TerrainImageClassificationDrawMode.MapBoundary;
             bool classificationControls =
-                _editorEnabled && !boundaryMode;
+                _editorEnabled &&
+                (_drawMode ==
+                     TerrainImageClassificationDrawMode.Point ||
+                 _drawMode ==
+                     TerrainImageClassificationDrawMode.Polygon);
             if (_surfaceDropdown != null)
             {
                 _surfaceDropdown.interactable = classificationControls;
@@ -1170,7 +1273,10 @@ namespace TerrainLab
 
             bool polygonMode =
                 _editorEnabled &&
-                _drawMode != TerrainImageClassificationDrawMode.Point;
+                (_drawMode ==
+                     TerrainImageClassificationDrawMode.Polygon ||
+                 _drawMode ==
+                     TerrainImageClassificationDrawMode.MapBoundary);
             if (_finishPolygonButton != null)
             {
                 _finishPolygonButton.interactable =
@@ -1478,6 +1584,47 @@ namespace TerrainLab
                 UpdateLabels();
                 SetPanelStatus(
                     LM.Get("terrain_lab_manual_sample_removed"),
+                    false);
+            }
+            catch (Exception exception)
+            {
+                SetPanelStatus(exception.Message, true);
+            }
+        }
+
+        private void ClearPolygons()
+        {
+            bool hasDraft =
+                _drawMode ==
+                    TerrainImageClassificationDrawMode.Polygon &&
+                _draftVertices.Count > 0;
+            int savedCount = _profile?.Regions?.Count ?? 0;
+            if (_profile == null || (savedCount == 0 && !hasDraft))
+            {
+                SetPanelStatus(
+                    LM.Get("terrain_lab_manual_no_polygons"),
+                    false);
+                return;
+            }
+
+            try
+            {
+                int removed = _profile.ClearRegions();
+                if (hasDraft)
+                {
+                    _draftVertices.Clear();
+                    _hoverVertex = null;
+                    _hasHoverVertex = false;
+                    RefreshDraftGraphic();
+                }
+                SaveProfile();
+                RebuildAnnotations();
+                UpdateLabels();
+                SetPanelStatus(
+                    string.Format(
+                        LM.Get(
+                            "terrain_lab_manual_polygons_cleared_format"),
+                        removed + (hasDraft ? 1 : 0)),
                     false);
             }
             catch (Exception exception)

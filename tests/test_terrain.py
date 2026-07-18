@@ -61,6 +61,8 @@ PARAMETER_TOOLTIP_KEYS = (
     "terrain_lab_manual_mode_point",
     "terrain_lab_manual_mode_polygon",
     "terrain_lab_manual_mode_boundary",
+    "terrain_lab_manual_mode_delete_polygon",
+    "terrain_lab_manual_delete_all_polygons",
     "terrain_lab_manual_finish_polygon",
     "terrain_lab_manual_cancel_polygon",
     "terrain_lab_manual_finish_boundary",
@@ -170,6 +172,15 @@ class TerrainConversionTests(unittest.TestCase):
             "_profile.IsInsideMapBoundary(sourceX, sourceY)",
             overlay_source,
         )
+        self.assertIn(
+            "TerrainImageClassificationDrawMode.DeletePolygon",
+            overlay_source,
+        )
+        self.assertIn("int removed = _profile.ClearRegions();", overlay_source)
+        self.assertIn(
+            "_profile.RemoveRegionAt(sourceX, sourceY)",
+            overlay_source,
+        )
 
         confirm_start = overlay_source.index(
             "private void ConfirmImageSelection()"
@@ -180,6 +191,19 @@ class TerrainConversionTests(unittest.TestCase):
         )
         confirm_source = overlay_source[confirm_start:confirm_end]
         self.assertIn("OpenImage(_pendingImageIndex);", confirm_source)
+
+        select_start = overlay_source.index(
+            "private void SelectPendingImage(int index)"
+        )
+        select_end = overlay_source.index(
+            "private void MovePendingImage(int direction)",
+            select_start,
+        )
+        select_source = overlay_source[select_start:select_end]
+        self.assertLess(
+            select_source.index("SaveProfile();"),
+            select_source.index("ResetLoadedImage();"),
+        )
 
     def test_geyser_patch_forwards_the_building_lifecycle(self) -> None:
         patch_source = (

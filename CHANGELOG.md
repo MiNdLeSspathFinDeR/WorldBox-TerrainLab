@@ -2,6 +2,21 @@
 
 ## Unreleased
 
+## 1.10.0 - 2026-07-18
+
+- Added an explicit Delete one mode for manual classification. A left-click
+  removes the topmost saved training polygon under the cursor and immediately
+  persists the change.
+- Added an immediate Delete all command for training polygons. It removes all
+  saved training regions and an unfinished training ring without confirmation,
+  while preserving point samples and the independent map boundary.
+- Profiles remain per source raster in
+  `<image>.terrainlab-classification.json`. Switching to another source now
+  also saves the current profile first. The global DEM interpolation toggle
+  persists immediately as well.
+- Added Russian/English guidance and package-probe coverage proving bulk
+  polygon removal cannot damage point samples or the map boundary.
+
 ## 1.9.2 - 2026-07-18
 
 - Fixed the manual-classifier vertical layout so Unity applies every declared

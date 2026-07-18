@@ -20,7 +20,7 @@ against screen edges and can be collapsed independently.
 
 ## Implementation status
 
-Version 1.9.2 implements the standalone side button, an adaptive top GIS
+Version 1.10.0 implements the standalone side button, an adaptive top GIS
 toolbar, and a stock WorldBox internal window. The toolbar copies the bottom
 WorldBox panel and button sprites, stretches to the logical canvas width, and
 balances commands across as few rows as the current UI scale permits. Its frame
@@ -84,6 +84,11 @@ The filename is not repeated in a popup or pending-status caption. Arrow
 changes only select a candidate; all classification controls remain disabled
 until that file has loaded. The watched-folder command remains a plain file
 browser shortcut and cannot return the Explorer selection to WorldBox.
+Classification profiles are stored per raster in a neighbouring JSON sidecar
+and are saved before switching files. A persistent Delete one mode removes the
+topmost training polygon under a left-click. Delete all removes every training
+polygon immediately, but deliberately preserves point samples and the map
+boundary.
 
 The Analysis chapter also exposes `Live DEM water` with WorldBox's native rain
 icon. It is a repeat-click toggle with a green native activity lamp; the lamp

@@ -107,6 +107,10 @@ optional boundary persist beside the source in
 `<image>.terrainlab-classification.json`; Build map reruns the adaptive
 colour/texture/spatial classifier. Polygon interiors are authoritative and
 provide bounded distributed training pixels without bloating the profile.
+Each raster has its own sidecar, and the current profile is saved before the
+file selector switches to another raster. Delete one removes the training
+polygon clicked on the canvas; Delete all immediately removes every training
+polygon while preserving point samples and the map boundary.
 The conversion publishes `terrainlab-elevation.tif` with the new save so
 TerrainLab can restore the interpolated Int16 DEM when that world is opened.
 Save opens a name form before writing the

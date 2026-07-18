@@ -564,6 +564,13 @@ namespace TerrainLab
             return false;
         }
 
+        public int ClearRegions()
+        {
+            int removed = Regions?.Count ?? 0;
+            Regions?.Clear();
+            return removed;
+        }
+
         public void Save(string imagePath)
         {
             Validate(Source?.Width ?? 0, Source?.Height ?? 0);

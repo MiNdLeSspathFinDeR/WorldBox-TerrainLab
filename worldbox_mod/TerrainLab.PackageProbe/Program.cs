@@ -862,6 +862,35 @@ internal static class Program
             restored.RemoveRegionAt(80, 80) &&
             restored.Regions.Count == 0,
             "Manual classification could not remove a polygon by location.");
+        restored.AddRegion(
+            new[]
+            {
+                new TerrainImageClassificationVertex(25, 25),
+                new TerrainImageClassificationVertex(70, 25),
+                new TerrainImageClassificationVertex(70, 70),
+                new TerrainImageClassificationVertex(25, 70)
+            },
+            "plain",
+            "grass",
+            120);
+        restored.AddRegion(
+            new[]
+            {
+                new TerrainImageClassificationVertex(220, 90),
+                new TerrainImageClassificationVertex(280, 90),
+                new TerrainImageClassificationVertex(280, 145),
+                new TerrainImageClassificationVertex(220, 145)
+            },
+            "rocks",
+            "none",
+            1800);
+        int sampleCount = restored.Samples.Count;
+        Assert(
+            restored.ClearRegions() == 2 &&
+            restored.Regions.Count == 0 &&
+            restored.Samples.Count == sampleCount &&
+            restored.MapBoundary != null,
+            "Clearing polygons damaged points or the map boundary.");
     }
 
     private static void ValidateGeneratedDem(
