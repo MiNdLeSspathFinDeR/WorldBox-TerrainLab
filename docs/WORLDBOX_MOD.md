@@ -57,16 +57,6 @@ a square. The watched-folder contract is exactly `PNG`, `JPG/JPEG/JFIF`,
 `TIFF/TIF`, `WebP`, `BMP`, `GIF`, `TGA`, `DDS`, and `JP2`. SVG, PDF, PSD,
 archives, and every unlisted extension are ignored.
 
-Two adjacent Project commands interpret a selected workspace raster. Automatic
-clustering is the quick path: it has its own preview, explicit file
-confirmation, optional area-of-interest polygon, five basic controls, and ten
-collapsible expert controls. The boundary removes exterior noise from fitting
-and converts it to deep ocean. Its settings persist per image in
-`<image>.terrainlab-clustering.json`. Manual classification remains the
-deliberate point/line/polygon path with a separate
-`<image>.terrainlab-classification.json` profile. The converter never combines
-the two profiles in one run.
-
 The converter writes a non-`saveN` staging directory and publishes the finished
 map with one directory rename. A game slot therefore appears only after
 `map.wbox`, `map.meta`, both previews, and `map_stats.s3db` are complete. The
@@ -191,6 +181,13 @@ river/waterbody class, moisture, erodibility, local slope, and local aspect
 above the world. Routing updates touched cells; the 30-second climate pass
 refreshes dynamic water layers because it may alter moisture, substrate, or DEM.
 
+An active layer also opens a left-side adaptive legend. Quantitative layers
+show the renderer's continuous vertical palette with localized minimum,
+maximum, zero, and units. Categorical morphotype/material classes use one
+clipped, framed row per class and repeat a matching live WorldBox terrain
+sprite; vector-like contours and D8 directions use line or color symbols.
+Changing toolbar chapters does not discard the legend or its layer.
+
 ### Erosion
 
 The 1.0 erosion baseline performs deterministic D8 downhill transfer plus
@@ -217,6 +214,10 @@ texture. While Inspector is active, the bottom strip reports coordinates and
 module-specific cell values.
 
 The map budget equals a `20 x 20` WorldBox-block baseline plus 15 percent.
+Manual classification and automatic clustering expose the final longer side
+directly in blocks. The shorter side follows the source raster aspect, and the
+same panel row shows both the selected dimensions and the maximum integer pair
+that remains below this budget.
 Aspect ratio is unrestricted. Over-budget worlds continue to use vanilla saves,
 but TerrainLab does not allocate GIS state for them.
 

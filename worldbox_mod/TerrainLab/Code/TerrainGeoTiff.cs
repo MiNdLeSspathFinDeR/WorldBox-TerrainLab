@@ -40,7 +40,8 @@ namespace TerrainLab
             string projectId,
             string layerId,
             double horizontalMetresPerCell =
-                TerrainSpatialScale.DefaultHorizontalMetresPerCell)
+                TerrainSpatialScale.DefaultHorizontalMetresPerCell,
+            TerrainRasterGeoreference georeference = null)
         {
             int count = checked(width * height);
             if (string.IsNullOrWhiteSpace(path))
@@ -65,6 +66,7 @@ namespace TerrainLab
                     "GeoTIFF cell size must be between 1 and 1000000 metres.");
             }
 
+            georeference?.Validate(width, height);
             ValidateArrayType(values, sampleKind);
             Directory.CreateDirectory(Path.GetDirectoryName(Path.GetFullPath(path)));
             int bytesPerSample = GetBytesPerSample(sampleKind);
@@ -78,23 +80,19 @@ namespace TerrainLab
                 stripByteCounts[strip] = checked((uint)(rows * width * bytesPerSample));
             }
 
-            byte[] geoAscii = Ascii("WorldBox Local ENGCRS|");
-            ushort[] geoKeys =
-            {
-                1, 1, 0, 3,
-                1024, 0, 1, 32767,
-                1025, 0, 1, 1,
-                1026, 34737, (ushort)(geoAscii.Length - 1), 0
-            };
             string description = JsonConvert.SerializeObject(new
             {
                 format = "terrainlab-geotiff",
-                schema_version = "1.1.0",
+                schema_version = "1.2.0",
                 project_id = projectId,
                 layer_id = layerId,
                 origin = "south-west",
                 file_row_order = "north-to-south",
-                horizontal_metres_per_cell = horizontalMetresPerCell
+                horizontal_metres_per_cell = horizontalMetresPerCell,
+                source_file_name = georeference?.SourceFileName,
+                source_epsg = georeference?.Epsg,
+                pixel_interpretation = georeference?.PixelInterpretation ??
+                    "area"
             }, Formatting.None);
 
             List<TiffEntry> entries = new List<TiffEntry>
@@ -114,21 +112,62 @@ namespace TerrainLab
                 TiffEntry.InlineShort(284, 1),
                 TiffEntry.InlineShort(296, 1),
                 TiffEntry.InlineShort(339, IsSigned(sampleKind) ? (ushort)2 : (ushort)1),
-                new TiffEntry(33550, TypeDouble, DoubleBytes(
+                new TiffEntry(42113, TypeAscii, Ascii(noData ?? string.Empty))
+            };
+            if (georeference == null)
+            {
+                byte[] geoAscii = Ascii("WorldBox Local ENGCRS|");
+                ushort[] geoKeys =
+                {
+                    1, 1, 0, 3,
+                    1024, 0, 1, 32767,
+                    1025, 0, 1, 1,
+                    1026, 34737, (ushort)(geoAscii.Length - 1), 0
+                };
+                entries.Add(new TiffEntry(33550, TypeDouble, DoubleBytes(
                     horizontalMetresPerCell,
                     horizontalMetresPerCell,
-                    0.0)),
-                new TiffEntry(33922, TypeDouble, DoubleBytes(
+                    0.0)));
+                entries.Add(new TiffEntry(33922, TypeDouble, DoubleBytes(
                     0.0,
                     0.0,
                     0.0,
                     0.0,
                     height * horizontalMetresPerCell,
-                    0.0)),
-                new TiffEntry(34735, TypeShort, UInt16Bytes(geoKeys)),
-                new TiffEntry(34737, TypeAscii, geoAscii),
-                new TiffEntry(42113, TypeAscii, Ascii(noData ?? string.Empty))
-            };
+                    0.0)));
+                entries.Add(new TiffEntry(
+                    34735,
+                    TypeShort,
+                    UInt16Bytes(geoKeys)));
+                entries.Add(new TiffEntry(34737, TypeAscii, geoAscii));
+            }
+            else
+            {
+                entries.Add(new TiffEntry(
+                    34264,
+                    TypeDouble,
+                    DoubleBytes(georeference.GetModelTransformation())));
+                entries.Add(new TiffEntry(
+                    34735,
+                    TypeShort,
+                    UInt16Bytes(georeference.GetGeoKeyDirectory())));
+                if (georeference.GeoDoubleParams?.Length > 0)
+                {
+                    entries.Add(new TiffEntry(
+                        34736,
+                        TypeDouble,
+                        DoubleBytes(georeference.GeoDoubleParams)));
+                }
+
+                if (!string.IsNullOrEmpty(georeference.GeoAsciiParams))
+                {
+                    entries.Add(new TiffEntry(
+                        34737,
+                        TypeAscii,
+                        Ascii(georeference.GeoAsciiParams)));
+                }
+            }
+
             entries.Sort((left, right) => left.Tag.CompareTo(right.Tag));
 
             uint extraOffset = checked((uint)(8 + 2 + entries.Count * 12 + 4));
@@ -199,7 +238,8 @@ namespace TerrainLab
                     path,
                     height,
                     projectId,
-                    horizontalMetresPerCell);
+                    horizontalMetresPerCell,
+                    georeference);
             }
             finally
             {
@@ -220,7 +260,8 @@ namespace TerrainLab
             string path,
             int expectedWidth,
             int expectedHeight,
-            double? expectedHorizontalMetresPerCell = null)
+            double? expectedHorizontalMetresPerCell = null,
+            TerrainRasterGeoreference expectedGeoreference = null)
         {
             if (string.IsNullOrWhiteSpace(path) || !File.Exists(path))
             {
@@ -240,6 +281,7 @@ namespace TerrainLab
                     nameof(expectedHorizontalMetresPerCell));
             }
 
+            expectedGeoreference?.Validate(expectedWidth, expectedHeight);
             using (FileStream stream = new FileStream(
                 path,
                 FileMode.Open,
@@ -314,6 +356,14 @@ namespace TerrainLab
                         throw new InvalidDataException(
                             "GeoTIFF metric cell size does not match the active project.");
                     }
+                }
+
+                if (expectedGeoreference != null)
+                {
+                    ValidateGeoreference(
+                        entries,
+                        stream,
+                        expectedGeoreference);
                 }
 
                 if (ReadSingleUInt(entries, stream, 258) != 16 ||
@@ -434,33 +484,55 @@ namespace TerrainLab
             string tiffPath,
             int height,
             string projectId,
-            double horizontalMetresPerCell)
+            double horizontalMetresPerCell,
+            TerrainRasterGeoreference georeference)
         {
             string stem = Path.Combine(
                 Path.GetDirectoryName(tiffPath),
                 Path.GetFileNameWithoutExtension(tiffPath));
+            double[] worldFile = georeference?.GetWorldFile() ?? new[]
+            {
+                horizontalMetresPerCell,
+                0d,
+                0d,
+                -horizontalMetresPerCell,
+                horizontalMetresPerCell * 0.5d,
+                (height - 0.5d) * horizontalMetresPerCell
+            };
             File.WriteAllText(
                 stem + ".tfw",
-                string.Join(Environment.NewLine, new[]
-                {
-                    FormatWorldFileNumber(horizontalMetresPerCell),
-                    "0.0",
-                    "0.0",
-                    FormatWorldFileNumber(-horizontalMetresPerCell),
-                    FormatWorldFileNumber(horizontalMetresPerCell * 0.5d),
-                    FormatWorldFileNumber(
-                        (height - 0.5d) * horizontalMetresPerCell)
-                }) + Environment.NewLine,
+                string.Join(
+                    Environment.NewLine,
+                    worldFile.Select(TerrainRasterGeoreference.FormatNumber)) +
+                Environment.NewLine,
                 new UTF8Encoding(false));
-            File.WriteAllText(
-                stem + ".prj",
-                GetCrsWkt(projectId) + Environment.NewLine,
-                new UTF8Encoding(false));
-        }
 
-        private static string FormatWorldFileNumber(double value)
-        {
-            return value.ToString("0.##########", CultureInfo.InvariantCulture);
+            string projection = georeference == null
+                ? GetCrsWkt(projectId)
+                : georeference.CrsWkt;
+            string projectionPath = stem + ".prj";
+            if (!string.IsNullOrWhiteSpace(projection))
+            {
+                File.WriteAllText(
+                    projectionPath,
+                    projection.TrimEnd() + Environment.NewLine,
+                    new UTF8Encoding(false));
+            }
+            else if (File.Exists(projectionPath))
+            {
+                File.Delete(projectionPath);
+            }
+
+            string georeferencePath =
+                TerrainRasterGeoreference.GetRasterSidecarPath(tiffPath);
+            if (georeference != null)
+            {
+                georeference.WriteRasterSidecar(tiffPath);
+            }
+            else if (File.Exists(georeferencePath))
+            {
+                File.Delete(georeferencePath);
+            }
         }
 
         internal static string GetCrsWkt(string projectId)
@@ -544,6 +616,327 @@ namespace TerrainLab
             }
 
             return result;
+        }
+
+        private static ushort[] TryReadUShortArray(
+            IDictionary<ushort, TiffReadEntry> entries,
+            Stream stream,
+            ushort tag)
+        {
+            if (!entries.TryGetValue(tag, out TiffReadEntry entry))
+            {
+                return Array.Empty<ushort>();
+            }
+
+            if (entry.Type != TypeShort || entry.Count > 4096)
+            {
+                throw new InvalidDataException(
+                    "TIFF unsigned-short array is inconsistent: " + tag);
+            }
+
+            byte[] bytes = ReadEntryBytes(entry, stream);
+            ushort[] result = new ushort[entry.Count];
+            Buffer.BlockCopy(bytes, 0, result, 0, bytes.Length);
+            return result;
+        }
+
+        private static void ValidateGeoreference(
+            IDictionary<ushort, TiffReadEntry> entries,
+            Stream stream,
+            TerrainRasterGeoreference expected)
+        {
+            ushort[] geoKeys = TryReadUShortArray(entries, stream, 34735);
+            string pixelInterpretation =
+                GetGeoKeyValue(geoKeys, 1025) == 2 ? "point" : "area";
+            if (!string.Equals(
+                pixelInterpretation,
+                expected.PixelInterpretation,
+                StringComparison.Ordinal))
+            {
+                throw new InvalidDataException(
+                    "GeoTIFF pixel-is-area/point semantics do not match the active project.");
+            }
+
+            if (expected.Epsg.HasValue &&
+                expected.Epsg.Value <= ushort.MaxValue)
+            {
+                int? actualEpsg =
+                    GetGeoKeyValue(geoKeys, 3072) ??
+                    GetGeoKeyValue(geoKeys, 2048);
+                if (!actualEpsg.HasValue ||
+                    actualEpsg.Value != expected.Epsg.Value)
+                {
+                    throw new InvalidDataException(
+                        "GeoTIFF horizontal CRS does not match the active project.");
+                }
+            }
+            else if (expected.GeoKeyDirectory?.Length > 0 &&
+                !geoKeys.SequenceEqual(expected.GeoKeyDirectory))
+            {
+                throw new InvalidDataException(
+                    "GeoTIFF user-defined CRS does not match the active project.");
+            }
+            else if (!expected.Epsg.HasValue ||
+                expected.Epsg.Value > ushort.MaxValue)
+            {
+                double[] actualDoubleParams =
+                    TryReadDoubleArray(entries, stream, 34736);
+                double[] expectedDoubleParams =
+                    expected.GeoDoubleParams ?? Array.Empty<double>();
+                if (actualDoubleParams.Length !=
+                    expectedDoubleParams.Length)
+                {
+                    throw new InvalidDataException(
+                        "GeoTIFF user-defined CRS parameters do not match the active project.");
+                }
+
+                for (int index = 0; index < actualDoubleParams.Length; index++)
+                {
+                    double tolerance = Math.Max(
+                        1e-12,
+                        Math.Abs(expectedDoubleParams[index]) * 1e-12);
+                    if (Math.Abs(
+                        actualDoubleParams[index] -
+                        expectedDoubleParams[index]) > tolerance)
+                    {
+                        throw new InvalidDataException(
+                            "GeoTIFF user-defined CRS parameters do not match the active project.");
+                    }
+                }
+
+                string actualAsciiParams =
+                    TryReadAscii(entries, stream, 34737);
+                if (!string.Equals(
+                    actualAsciiParams,
+                    (expected.GeoAsciiParams ?? string.Empty)
+                        .TrimEnd('\0'),
+                    StringComparison.Ordinal))
+                {
+                    throw new InvalidDataException(
+                        "GeoTIFF user-defined CRS citation does not match the active project.");
+                }
+            }
+
+            bool expectedProjected =
+                string.Equals(
+                    expected.CrsKind,
+                    "projected",
+                    StringComparison.Ordinal) ||
+                string.Equals(
+                    expected.CrsKind,
+                    "compound_projected",
+                    StringComparison.Ordinal);
+            bool expectedGeographic =
+                string.Equals(
+                    expected.CrsKind,
+                    "geographic",
+                    StringComparison.Ordinal) ||
+                string.Equals(
+                    expected.CrsKind,
+                    "compound_geographic",
+                    StringComparison.Ordinal);
+            int? modelType = GetGeoKeyValue(geoKeys, 1024);
+            int? expectedModelType = expectedProjected
+                ? 1
+                : expectedGeographic
+                    ? 2
+                    : (int?)null;
+            if (modelType.HasValue &&
+                expectedModelType.HasValue &&
+                modelType.Value != expectedModelType.Value)
+            {
+                throw new InvalidDataException(
+                    "GeoTIFF CRS model type does not match the active project.");
+            }
+
+            if (expected.VerticalEpsg.HasValue &&
+                expected.VerticalEpsg.Value <= ushort.MaxValue &&
+                GetGeoKeyValue(geoKeys, 4096) != expected.VerticalEpsg.Value)
+            {
+                throw new InvalidDataException(
+                    "GeoTIFF vertical CRS does not match the active project.");
+            }
+
+            double[] actual = ReadRasterTransform(
+                entries,
+                stream,
+                string.Equals(
+                    pixelInterpretation,
+                    "point",
+                    StringComparison.Ordinal));
+            for (int index = 0; index < 6; index++)
+            {
+                double expectedValue = expected.RasterToCrs[index];
+                double tolerance = Math.Max(
+                    1e-10,
+                    Math.Abs(expectedValue) * 1e-10);
+                if (Math.Abs(actual[index] - expectedValue) > tolerance)
+                {
+                    throw new InvalidDataException(
+                        "GeoTIFF affine transform does not match the active project.");
+                }
+            }
+        }
+
+        private static double[] ReadRasterTransform(
+            IDictionary<ushort, TiffReadEntry> entries,
+            Stream stream,
+            bool pixelIsPoint)
+        {
+            double[] transform;
+            if (entries.ContainsKey(34264))
+            {
+                double[] matrix = ReadDoubleArray(
+                    entries,
+                    stream,
+                    34264,
+                    16);
+                transform = new[]
+                {
+                    matrix[3],
+                    matrix[0],
+                    matrix[1],
+                    matrix[7],
+                    matrix[4],
+                    matrix[5]
+                };
+            }
+            else
+            {
+                double[] scale = ReadDoubleArray(
+                    entries,
+                    stream,
+                    33550,
+                    3);
+                if (!entries.TryGetValue(
+                    33922,
+                    out TiffReadEntry tiePointEntry) ||
+                    tiePointEntry.Type != TypeDouble ||
+                    tiePointEntry.Count < 6 ||
+                    tiePointEntry.Count > 4096)
+                {
+                    throw new InvalidDataException(
+                        "GeoTIFF model tie point is missing or inconsistent.");
+                }
+
+                byte[] tiePointBytes = ReadEntryBytes(tiePointEntry, stream);
+                double[] tiePoint = new double[6];
+                Buffer.BlockCopy(
+                    tiePointBytes,
+                    0,
+                    tiePoint,
+                    0,
+                    6 * sizeof(double));
+                transform = new[]
+                {
+                    tiePoint[3] - tiePoint[0] * scale[0],
+                    scale[0],
+                    0d,
+                    tiePoint[4] + tiePoint[1] * scale[1],
+                    0d,
+                    -scale[1]
+                };
+            }
+
+            if (pixelIsPoint)
+            {
+                transform[0] -= 0.5d * transform[1] +
+                    0.5d * transform[2];
+                transform[3] -= 0.5d * transform[4] +
+                    0.5d * transform[5];
+            }
+
+            if (transform.Any(value =>
+                    double.IsNaN(value) || double.IsInfinity(value)) ||
+                Math.Abs(
+                    transform[1] * transform[5] -
+                    transform[2] * transform[4]) <= 1e-18)
+            {
+                throw new InvalidDataException(
+                    "GeoTIFF affine transform is invalid.");
+            }
+
+            return transform;
+        }
+
+        private static double[] TryReadDoubleArray(
+            IDictionary<ushort, TiffReadEntry> entries,
+            Stream stream,
+            ushort tag)
+        {
+            if (!entries.TryGetValue(tag, out TiffReadEntry entry))
+            {
+                return Array.Empty<double>();
+            }
+
+            if (entry.Type != TypeDouble || entry.Count > 4096)
+            {
+                throw new InvalidDataException(
+                    "TIFF double array is inconsistent: " + tag);
+            }
+
+            byte[] bytes = ReadEntryBytes(entry, stream);
+            double[] result = new double[entry.Count];
+            Buffer.BlockCopy(bytes, 0, result, 0, bytes.Length);
+            if (result.Any(value =>
+                double.IsNaN(value) || double.IsInfinity(value)))
+            {
+                throw new InvalidDataException(
+                    "TIFF double array contains a non-finite value: " + tag);
+            }
+
+            return result;
+        }
+
+        private static string TryReadAscii(
+            IDictionary<ushort, TiffReadEntry> entries,
+            Stream stream,
+            ushort tag)
+        {
+            if (!entries.TryGetValue(tag, out TiffReadEntry entry))
+            {
+                return string.Empty;
+            }
+
+            if (entry.Count > 65536)
+            {
+                throw new InvalidDataException(
+                    "TIFF ASCII array is too large: " + tag);
+            }
+
+            return ReadAscii(entry, stream).TrimEnd('\0');
+        }
+
+        private static int? GetGeoKeyValue(
+            ushort[] directory,
+            ushort keyId)
+        {
+            if (directory == null || directory.Length < 4)
+            {
+                return null;
+            }
+
+            int count = directory[3];
+            if (directory.Length < 4 + count * 4)
+            {
+                return null;
+            }
+
+            for (int index = 0; index < count; index++)
+            {
+                int offset = 4 + index * 4;
+                if (directory[offset] == keyId &&
+                    directory[offset + 1] == 0 &&
+                    directory[offset + 2] == 1)
+                {
+                    int value = directory[offset + 3];
+                    return value == 0 || value == 32767
+                        ? (int?)null
+                        : value;
+                }
+            }
+
+            return null;
         }
 
         private static string ReadAscii(TiffReadEntry entry, Stream stream)
@@ -828,6 +1221,12 @@ namespace TerrainLab
         [JsonProperty("crs_wkt")]
         public string CrsWkt { get; set; }
 
+        [JsonProperty("local_crs_wkt")]
+        public string LocalCrsWkt { get; set; }
+
+        [JsonProperty("georeference", NullValueHandling = NullValueHandling.Ignore)]
+        public TerrainRasterGeoreference Georeference { get; set; }
+
         [JsonProperty("vertical_unit")]
         public string VerticalUnit { get; set; }
 
@@ -1000,7 +1399,7 @@ namespace TerrainLab
                 TerrainGisManifest manifest = new TerrainGisManifest
                 {
                     Format = "terrainlab-gis",
-                    SchemaVersion = "1.1.0",
+                    SchemaVersion = "1.2.0",
                     ProjectId = state.ProjectId,
                     SourceRevision = state.Revision,
                     SourceElevationSha256 = elevationHash,
@@ -1008,7 +1407,11 @@ namespace TerrainLab
                     Width = state.Width,
                     Height = state.Height,
                     HorizontalMetresPerCell = state.HorizontalMetresPerCell,
-                    CrsWkt = TerrainGeoTiff.GetCrsWkt(state.ProjectId),
+                    CrsWkt = state.Georeference != null
+                        ? state.Georeference.CrsWkt
+                        : TerrainGeoTiff.GetCrsWkt(state.ProjectId),
+                    LocalCrsWkt = TerrainGeoTiff.GetCrsWkt(state.ProjectId),
+                    Georeference = state.Georeference,
                     VerticalUnit = "metre",
                     SeaLevel = state.SeaLevel,
                     Layers = layers
@@ -1058,7 +1461,8 @@ namespace TerrainLab
                 noData,
                 state.ProjectId,
                 id,
-                state.HorizontalMetresPerCell);
+                state.HorizontalMetresPerCell,
+                state.Georeference);
             layers.Add(new TerrainGisLayerManifest
             {
                 Id = id,

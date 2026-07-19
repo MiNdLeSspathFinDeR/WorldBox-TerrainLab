@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.Diagnostics;
+using System.Globalization;
 using System.IO;
 using System.IO.Compression;
 using System.Linq;
@@ -82,6 +83,7 @@ internal static class Program
             ValidateEarthElevationModel();
             ValidateElevationPalette();
             ValidateDataOverlayPalettes();
+            ValidateLayerLegends();
             ValidateReliefAlgorithm();
             ValidateHydrologyAlgorithm();
             ValidateWaterDynamicsAlgorithm();
@@ -436,6 +438,77 @@ internal static class Program
             "D8 direction palette is incorrect.");
     }
 
+    private static void ValidateLayerLegends()
+    {
+        TerrainLayerLegendDescriptor elevation =
+            TerrainLayerLegendCatalog.CreateElevation(
+                TerrainElevationEncoding.Minimum,
+                TerrainElevationEncoding.Maximum,
+                0);
+        Assert(
+            elevation.Kind == TerrainLayerLegendKind.Continuous &&
+            elevation.Minimum == TerrainElevationEncoding.Minimum &&
+            elevation.Maximum == TerrainElevationEncoding.Maximum &&
+            elevation.UnitKey == "terrain_lab_legend_unit_metres",
+            "The DEM legend lost its fixed range or unit.");
+        Color32 low = elevation.Sample(0f);
+        Color32 high = elevation.Sample(1f);
+        Assert(
+            low.a > 0 && high.a > 0 &&
+            low.b > low.r && high.r > high.b,
+            "The DEM legend does not use the rendered elevation palette.");
+
+        const int width = 10;
+        byte[] landform = Enumerable.Range(1, width)
+            .Select(value => (byte)value)
+            .ToArray();
+        byte[] material = Enumerable.Range(0, width)
+            .Select(value => (byte)(value % 8 + 1))
+            .ToArray();
+        TerrainWorldState state = TerrainWorldState.CreateFromLayers(
+            "legend-probe",
+            DateTime.UtcNow,
+            width,
+            1,
+            0,
+            new short[width],
+            landform,
+            material);
+        TerrainLayerLegendDescriptor landforms =
+            TerrainLayerLegendCatalog.CreateData(
+                TerrainDataOverlayMode.Landform,
+                state);
+        TerrainLayerLegendDescriptor materials =
+            TerrainLayerLegendCatalog.CreateData(
+                TerrainDataOverlayMode.Material,
+                state);
+        TerrainLayerLegendDescriptor contours =
+            TerrainLayerLegendCatalog.CreateData(
+                TerrainDataOverlayMode.Contours,
+                state);
+        Assert(
+            landforms.Kind == TerrainLayerLegendKind.Categories &&
+            landforms.Entries.Count == 10 &&
+            materials.Entries.Count == 8 &&
+            contours.Entries.Count == 3 &&
+            contours.Entries.All(entry => entry.LineSymbol),
+            "Categorical legend classes are incomplete.");
+
+        TerrainWaterState water = state.EnsureWaterDynamics();
+        TerrainLayerLegendDescriptor moisture =
+            TerrainLayerLegendCatalog.CreateData(
+                TerrainDataOverlayMode.Moisture,
+                state);
+        Assert(
+            water != null &&
+            moisture.Kind == TerrainLayerLegendKind.Continuous &&
+            moisture.Minimum == 0d &&
+            moisture.Maximum == 100d &&
+            moisture.UnitKey == "terrain_lab_legend_unit_percent" &&
+            moisture.Sample(1f).a > 0,
+            "The water-diagnostics legend is incomplete.");
+    }
+
     private static void ValidateEarthElevationModel()
     {
         const int count = 1001;
@@ -446,15 +519,15 @@ internal static class Program
                 count))
             .ToArray();
         Assert(
-            Math.Abs(mountains[count / 2] - 5000) <= 5,
-            "Earth-like mountain median is not 5000 metres.");
+            Math.Abs(mountains[count / 2] - 4500) <= 5,
+            "Earth-like mountain median is not 4500 metres.");
         Assert(
             mountains.Count(value => value >= 7000) <= count / 20,
             "More than five percent of inferred mountains reach 7000 metres.");
         Assert(
             TerrainEarthElevationModel.GetElevation(
                 TerrainEarthElevationProfile.Mountain,
-                0.5d) == 5000 &&
+                0.5d) == 4500 &&
             TerrainEarthElevationModel.GetElevation(
                 TerrainEarthElevationProfile.Mountain,
                 0.95d) == 7000,
@@ -464,7 +537,7 @@ internal static class Program
                 TerrainEarthElevationProfile.Mountain,
                 0,
                 count,
-                count) == 5000,
+                count) == 4500,
             "A uniform mountain height was split into artificial noise.");
 
         short[] lowlands = Enumerable.Range(0, count)
@@ -722,6 +795,31 @@ internal static class Program
         Assert(
             !TerrainMapLimits.TryValidate(22 * block, 22 * block, out _),
             "An over-budget square map was accepted.");
+        Assert(
+            TerrainMapLimits.TryGetBlockDimensions(
+                2000,
+                1000,
+                20,
+                out int selectedWidth,
+                out int selectedHeight) &&
+            selectedWidth == 20 &&
+            selectedHeight == 10,
+            "Long-side map sizing did not preserve a 2:1 raster.");
+        Assert(
+            TerrainMapLimits.TryGetMaximumBlockDimensions(
+                2000,
+                1000,
+                out int maximumWidth,
+                out int maximumHeight) &&
+            maximumWidth == 30 &&
+            maximumHeight == 15 &&
+            !TerrainMapLimits.TryGetBlockDimensions(
+                2000,
+                1000,
+                31,
+                out _,
+                out _),
+            "Displayed 2:1 map maximum does not match the cell budget.");
     }
 
     private static void ValidateImageWorkspaceProtocol(string testRoot)
@@ -809,6 +907,7 @@ internal static class Program
                 imagePath,
                 320,
                 180);
+        profile.Settings.LongSideBlocks = 24;
         profile.AddOrReplaceSample(
             10,
             20,
@@ -883,6 +982,7 @@ internal static class Program
             restored.IsInsideMapBoundary(80, 80) &&
             !restored.IsInsideMapBoundary(5, 5) &&
             restored.HasUsableTraining &&
+            restored.Settings.LongSideBlocks == 24 &&
             restored.Settings.InterpolateElevationGlobally,
             "Manual classification profile did not round-trip.");
         Assert(
@@ -984,6 +1084,23 @@ internal static class Program
             restored.Samples.Count == sampleCount &&
             restored.MapBoundary != null,
             "Clearing polygons damaged points or the map boundary.");
+
+        string sidecar =
+            TerrainImageClassificationProfile.GetSidecarPath(imagePath);
+        JObject legacyPayload = JObject.Parse(File.ReadAllText(sidecar));
+        legacyPayload["schema_version"] = 2;
+        ((JObject)legacyPayload["settings"])?.Remove("long_side_blocks");
+        File.WriteAllText(sidecar, legacyPayload.ToString());
+        TerrainImageClassificationProfile migrated =
+            TerrainImageClassificationProfile.LoadOrCreate(
+                imagePath,
+                320,
+                180);
+        Assert(
+            migrated.SchemaVersion ==
+                TerrainImageClassificationProfile.CurrentSchemaVersion &&
+            migrated.Settings.LongSideBlocks == 20,
+            "Schema-2 manual profile did not receive the size default.");
     }
 
     private static void ValidateImageClusteringProfile(string testRoot)
@@ -995,6 +1112,7 @@ internal static class Program
 
         TerrainImageClusteringProfile profile =
             TerrainImageClusteringProfile.Create(imagePath, 640, 360);
+        profile.Settings.LongSideBlocks = 27;
         profile.Settings.Clusters = 17;
         profile.Settings.SplineRadius = 3;
         profile.Settings.SmoothPasses = 2;
@@ -1026,6 +1144,7 @@ internal static class Program
                 640,
                 360);
         Assert(
+            restored.Settings.LongSideBlocks == 27 &&
             restored.Settings.Clusters == 17 &&
             restored.Settings.SplineRadius == 3 &&
             restored.Settings.SmoothPasses == 2 &&
@@ -1047,6 +1166,23 @@ internal static class Program
         Assert(
             File.Exists(TerrainImageClusteringProfile.GetSidecarPath(imagePath)),
             "Automatic clustering sidecar was not written.");
+
+        string sidecar =
+            TerrainImageClusteringProfile.GetSidecarPath(imagePath);
+        JObject legacyPayload = JObject.Parse(File.ReadAllText(sidecar));
+        legacyPayload["schema_version"] = 2;
+        ((JObject)legacyPayload["settings"])?.Remove("long_side_blocks");
+        File.WriteAllText(sidecar, legacyPayload.ToString());
+        TerrainImageClusteringProfile migrated =
+            TerrainImageClusteringProfile.LoadOrCreate(
+                imagePath,
+                640,
+                360);
+        Assert(
+            migrated.SchemaVersion ==
+                TerrainImageClusteringProfile.CurrentSchemaVersion &&
+            migrated.Settings.LongSideBlocks == 20,
+            "Schema-2 clustering profile did not receive the size default.");
     }
 
     private static void ValidateGeneratedDem(
@@ -1259,7 +1395,8 @@ internal static class Program
             elevation,
             landform,
             material,
-            750d);
+            750d,
+            CreateTestGeoreference(width, height));
 
         SavedMap savedMap = (SavedMap)FormatterServices.GetUninitializedObject(typeof(SavedMap));
         savedMap.width = 1;
@@ -1337,16 +1474,18 @@ internal static class Program
             Math.Abs((double)gisManifest["horizontal_metres_per_cell"] -
                 state.HorizontalMetresPerCell) < 1e-9,
             "GIS export lost the horizontal cell scale.");
-        Assert(((string)gisManifest["crs_wkt"]).StartsWith("ENGCRS["),
-            "GIS manifest does not contain WKT2 ENGCRS.");
-        Assert(((string)gisManifest["crs_wkt"]).Contains(
-                "LENGTHUNIT[\"metre\",1]"),
-            "GIS manifest CRS does not use metres.");
+        Assert(
+            (int)gisManifest["georeference"]["epsg"] == 4326 &&
+            ((string)gisManifest["crs_wkt"]).StartsWith("GEOGCS[") &&
+            ((string)gisManifest["local_crs_wkt"]).StartsWith("ENGCRS["),
+            "GIS manifest lost its source or local coordinate reference system.");
         Assert(
             TerrainGeoTiff.ReadInt16(
                 Path.Combine(gisDirectory, "elevation.tif"),
                 width,
-                height).SequenceEqual(state.Elevation),
+                height,
+                null,
+                state.Georeference).SequenceEqual(state.Elevation),
             "Exported GIS elevation changed during round-trip.");
 
         string baseMap = Path.Combine(testRoot, "map.wbox");
@@ -1371,6 +1510,12 @@ internal static class Program
             Math.Abs(loaded.HorizontalMetresPerCell -
                 state.HorizontalMetresPerCell) < 1e-9,
             "WBXGEO horizontal cell scale changed during reload.");
+        Assert(
+            loaded.Georeference != null &&
+            loaded.Georeference.Epsg == 4326 &&
+            loaded.Georeference.RasterToCrs.SequenceEqual(
+                state.Georeference.RasterToCrs),
+            "WBXGEO source georeference changed during reload.");
         Assert(loaded.Hydrology != null, "Hydrology module did not survive package reload.");
         Assert(
             loaded.WaterDynamics != null &&
@@ -2715,6 +2860,88 @@ internal static class Program
                 "LENGTHUNIT[\"metre\",1]"),
             "GeoTIFF engineering CRS does not use metres.");
 
+        TerrainRasterGeoreference georeference =
+            CreateTestGeoreference(3, 2);
+        string referencedPath = Path.Combine(
+            directory,
+            "source-referenced.tif");
+        TerrainGeoTiff.Write(
+            referencedPath,
+            3,
+            2,
+            values,
+            TerrainTiffSampleKind.Int16,
+            "9999",
+            "geotiff-probe",
+            "core.elevation",
+            1000d,
+            georeference);
+        Assert(
+            TerrainGeoTiff.ReadInt16(
+                referencedPath,
+                3,
+                2,
+                null,
+                georeference).SequenceEqual(values),
+            "Source-referenced GeoTIFF changed values or affine metadata.");
+        HashSet<ushort> referencedTags = ReadTiffTags(referencedPath);
+        Assert(
+            referencedTags.Contains(34264) &&
+            !referencedTags.Contains(33550) &&
+            !referencedTags.Contains(33922),
+            "Source-referenced GeoTIFF does not use ModelTransformationTag.");
+        Assert(
+            File.Exists(
+                TerrainRasterGeoreference.GetRasterSidecarPath(
+                    referencedPath)) &&
+            File.ReadAllText(Path.ChangeExtension(referencedPath, ".prj"))
+                .StartsWith("GEOGCS["),
+            "Source CRS sidecars were not written.");
+        double[] referencedWorldFile = File.ReadAllLines(
+                Path.ChangeExtension(referencedPath, ".tfw"))
+            .Select(value => double.Parse(
+                value,
+                CultureInfo.InvariantCulture))
+            .ToArray();
+        Assert(
+            referencedWorldFile.Length == 6 &&
+            Math.Abs(referencedWorldFile[0] - 0.01d) < 1e-12 &&
+            Math.Abs(referencedWorldFile[1] - 0.001d) < 1e-12 &&
+            Math.Abs(referencedWorldFile[2] - 0.002d) < 1e-12 &&
+            Math.Abs(referencedWorldFile[3] + 0.01d) < 1e-12,
+            "Rotated source affine was not preserved in the world file.");
+        AssertThrows<InvalidDataException>(
+            () => TerrainGeoTiff.ReadInt16(
+                referencedPath,
+                3,
+                2,
+                null,
+                CreateTestGeoreference(3, 2, "area", 0.25d)),
+            "GeoTIFF with a shifted source affine was accepted.");
+
+        TerrainRasterGeoreference pointReference =
+            CreateTestGeoreference(3, 2, "point");
+        string pointPath = Path.Combine(directory, "pixel-point.tif");
+        TerrainGeoTiff.Write(
+            pointPath,
+            3,
+            2,
+            values,
+            TerrainTiffSampleKind.Int16,
+            "9999",
+            "geotiff-probe",
+            "core.elevation",
+            1000d,
+            pointReference);
+        Assert(
+            TerrainGeoTiff.ReadInt16(
+                pointPath,
+                3,
+                2,
+                null,
+                pointReference).SequenceEqual(values),
+            "PixelIsPoint half-pixel round-trip is incorrect.");
+
         short[] tall = Enumerable.Range(0, 600)
             .Select(value => (short)(value - 300))
             .ToArray();
@@ -2762,7 +2989,9 @@ internal static class Program
             0,
             elevation,
             Enumerable.Repeat((byte)TerrainLandform.Plain, count).ToArray(),
-            Enumerable.Repeat((byte)TerrainMaterial.Soil, count).ToArray());
+            Enumerable.Repeat((byte)TerrainMaterial.Soil, count).ToArray(),
+            TerrainSpatialScale.DefaultHorizontalMetresPerCell,
+            CreateTestGeoreference(width, height));
         string exchange = Path.Combine(testRoot, "sync-exchange");
         TerrainSyncResult prepared = TerrainFileSync.PrepareWorkspace(exchange, state);
         string workspace = prepared.WorkspaceDirectory;
@@ -2771,6 +3000,18 @@ internal static class Program
         Assert(File.Exists(Path.Combine(workspace, "baseline.json")) &&
                File.Exists(Path.Combine(workspace, "outgoing", "elevation.tif")),
             "Sync workspace is incomplete.");
+        Assert(
+            File.Exists(
+                TerrainRasterGeoreference.GetRasterSidecarPath(
+                    Path.Combine(
+                        workspace,
+                        "outgoing",
+                        "elevation.tif"))) &&
+            JObject.Parse(
+                File.ReadAllText(
+                    Path.Combine(workspace, "baseline.json")))
+                ["georeference"] != null,
+            "Sync workspace lost the source georeference.");
 
         short[] incoming = (short[])state.Elevation.Clone();
         incoming[1] += 7;
@@ -2844,7 +3085,8 @@ internal static class Program
             "9999",
             state.ProjectId,
             "core.elevation",
-            state.HorizontalMetresPerCell);
+            state.HorizontalMetresPerCell,
+            state.Georeference);
     }
 
     private static void ValidateFileSyncRollback(string testRoot)
@@ -2917,6 +3159,109 @@ internal static class Program
             reader.BaseStream.Position = firstStripOffset;
             return reader.ReadInt16();
         }
+    }
+
+    private static HashSet<ushort> ReadTiffTags(string path)
+    {
+        using (BinaryReader reader = new BinaryReader(File.OpenRead(path)))
+        {
+            Assert(
+                reader.ReadByte() == (byte)'I' &&
+                reader.ReadByte() == (byte)'I' &&
+                reader.ReadUInt16() == 42,
+                "Probe expected a little-endian TIFF.");
+            reader.BaseStream.Position = reader.ReadUInt32();
+            ushort count = reader.ReadUInt16();
+            HashSet<ushort> tags = new HashSet<ushort>();
+            for (int index = 0; index < count; index++)
+            {
+                tags.Add(reader.ReadUInt16());
+                reader.BaseStream.Position += 10;
+            }
+
+            return tags;
+        }
+    }
+
+    private static TerrainRasterGeoreference CreateTestGeoreference(
+        int width,
+        int height,
+        string pixelInterpretation = "area",
+        double originOffset = 0d)
+    {
+        double[] rasterToCrs =
+        {
+            30d + originOffset,
+            0.01d,
+            0.002d,
+            60d,
+            0.001d,
+            -0.01d
+        };
+        double[] worldBoxCellToCrs =
+        {
+            rasterToCrs[0] + rasterToCrs[2] * height,
+            rasterToCrs[1],
+            -rasterToCrs[2],
+            rasterToCrs[3] + rasterToCrs[5] * height,
+            rasterToCrs[4],
+            -rasterToCrs[5]
+        };
+        double[] worldBoxMetreToCrs =
+        {
+            worldBoxCellToCrs[0],
+            worldBoxCellToCrs[1] /
+                TerrainRasterGeoreference.WorldBoxMetresPerCell,
+            worldBoxCellToCrs[2] /
+                TerrainRasterGeoreference.WorldBoxMetresPerCell,
+            worldBoxCellToCrs[3],
+            worldBoxCellToCrs[4] /
+                TerrainRasterGeoreference.WorldBoxMetresPerCell,
+            worldBoxCellToCrs[5] /
+                TerrainRasterGeoreference.WorldBoxMetresPerCell
+        };
+        ushort rasterType = string.Equals(
+            pixelInterpretation,
+            "point",
+            StringComparison.Ordinal)
+            ? (ushort)2
+            : (ushort)1;
+        const string wkt =
+            "GEOGCS[\"WGS 84\",DATUM[\"WGS_1984\"," +
+            "SPHEROID[\"WGS 84\",6378137,298.257223563]]," +
+            "PRIMEM[\"Greenwich\",0]," +
+            "UNIT[\"degree\",0.0174532925199433]," +
+            "AUTHORITY[\"EPSG\",\"4326\"]]";
+        return new TerrainRasterGeoreference
+        {
+            SourceFileName = "source.tif",
+            SourceWidth = width,
+            SourceHeight = height,
+            RasterWidth = width,
+            RasterHeight = height,
+            SourceRasterToCrs = (double[])rasterToCrs.Clone(),
+            RasterToCrs = rasterToCrs,
+            WorldBoxCellToCrs = worldBoxCellToCrs,
+            WorldBoxMetreToCrs = worldBoxMetreToCrs,
+            WorldBoxMetresPerCellValue =
+                TerrainRasterGeoreference.WorldBoxMetresPerCell,
+            CrsWkt = wkt,
+            CrsProjJson =
+                "{\"type\":\"GeographicCRS\",\"name\":\"WGS 84\"}",
+            Epsg = 4326,
+            CrsKind = "geographic",
+            PixelInterpretation = pixelInterpretation,
+            GeoKeyDirectory = new ushort[]
+            {
+                1, 1, 0, 3,
+                1024, 0, 1, 2,
+                1025, 0, 1, rasterType,
+                2048, 0, 1, 4326
+            },
+            Wgs84Wkt = wkt,
+            Wgs84ProjJson =
+                "{\"type\":\"GeographicCRS\",\"name\":\"WGS 84\"}"
+        };
     }
 
     private static int FindAscii(byte[] bytes, string value)

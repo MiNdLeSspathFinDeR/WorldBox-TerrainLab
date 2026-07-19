@@ -1,4 +1,4 @@
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 import json
 import math
 from pathlib import Path
@@ -10,7 +10,18 @@ from PIL import Image as Img
 from PIL import ImageDraw
 from PIL.Image import Image
 
-from .consts import ELEVATION_MAXIMUM, ELEVATION_MINIMUM, ELEVATION_NODATA
+from .consts import (
+    CHUNK_SIZE,
+    ELEVATION_MAXIMUM,
+    ELEVATION_MINIMUM,
+    ELEVATION_NODATA,
+    MAX_MAP_CELLS,
+)
+from .georeference import (
+    RasterGeoreference,
+    build_geo_key_directory,
+    write_raster_georeference_sidecars,
+)
 from .terrain import (
     gradient_magnitude,
     living_soil_index,
@@ -60,6 +71,22 @@ BIOTOPE_IDS = (
     "permafrost",
     "swamp",
     "enchanted",
+    "lemon",
+    "crystal",
+    "corrupted",
+    "infernal",
+    "candy",
+    "mushroom",
+    "wasteland",
+    "birch",
+    "maple",
+    "rocklands",
+    "garlic",
+    "flower",
+    "celestial",
+    "clover",
+    "singularity",
+    "paradox",
 )
 
 _SURFACE_TILE = {
@@ -84,6 +111,22 @@ _BIOTOPE_SUFFIX = {
     "permafrost": "permafrost",
     "swamp": "swamp",
     "enchanted": "enchanted",
+    "lemon": "lemon",
+    "crystal": "crystal",
+    "corrupted": "corrupted",
+    "infernal": "infernal",
+    "candy": "candy",
+    "mushroom": "mushroom",
+    "wasteland": "wasteland",
+    "birch": "birch",
+    "maple": "maple",
+    "rocklands": "rocklands",
+    "garlic": "garlic",
+    "flower": "flower",
+    "celestial": "celestial",
+    "clover": "clover",
+    "singularity": "singularity",
+    "paradox": "paradox",
 }
 
 
@@ -102,6 +145,19 @@ class ClassificationRegion:
     surface: str
     biotope: str
     elevation: int
+    vertex_elevations: Tuple[int, ...] = ()
+
+    def __post_init__(self) -> None:
+        if not self.vertex_elevations:
+            object.__setattr__(
+                self,
+                "vertex_elevations",
+                (self.elevation,) * len(self.vertices),
+            )
+        elif len(self.vertex_elevations) != len(self.vertices):
+            raise ValueError(
+                "region vertex elevations must match its vertices"
+            )
 
 
 @dataclass(frozen=True)
@@ -111,6 +167,19 @@ class ClassificationLine:
     biotope: str
     elevation: int
     width_cells: int = 1
+    vertex_elevations: Tuple[int, ...] = ()
+
+    def __post_init__(self) -> None:
+        if not self.vertex_elevations:
+            object.__setattr__(
+                self,
+                "vertex_elevations",
+                (self.elevation,) * len(self.vertices),
+            )
+        elif len(self.vertex_elevations) != len(self.vertices):
+            raise ValueError(
+                "line vertex elevations must match its vertices"
+            )
 
 
 @dataclass(frozen=True)
@@ -119,6 +188,7 @@ class ClassificationProfile:
     source_width: int
     source_height: int
     samples: Tuple[ClassificationSample, ...]
+    long_side_blocks: int = 20
     color_weight: float = 0.55
     texture_weight: float = 0.20
     spatial_weight: float = 0.25
@@ -136,13 +206,14 @@ class ClassificationProfile:
 
     def to_json_dict(self) -> Dict[str, Any]:
         payload = {
-            "schema_version": 1,
+            "schema_version": 3,
             "source": {
                 "file_name": self.source_file_name,
                 "width": self.source_width,
                 "height": self.source_height,
             },
             "settings": {
+                "long_side_blocks": self.long_side_blocks,
                 "color_weight": self.color_weight,
                 "texture_weight": self.texture_weight,
                 "spatial_weight": self.spatial_weight,
@@ -167,8 +238,16 @@ class ClassificationProfile:
             "regions": [
                 {
                     "vertices": [
-                        {"x": vertex[0], "y": vertex[1]}
-                        for vertex in region.vertices
+                        {
+                            "x": vertex[0],
+                            "y": vertex[1],
+                            "elevation": (
+                                region.vertex_elevations[index]
+                                if index < len(region.vertex_elevations)
+                                else region.elevation
+                            ),
+                        }
+                        for index, vertex in enumerate(region.vertices)
                     ],
                     "surface": region.surface,
                     "biotope": region.biotope,
@@ -179,8 +258,16 @@ class ClassificationProfile:
             "lines": [
                 {
                     "vertices": [
-                        {"x": vertex[0], "y": vertex[1]}
-                        for vertex in line.vertices
+                        {
+                            "x": vertex[0],
+                            "y": vertex[1],
+                            "elevation": (
+                                line.vertex_elevations[index]
+                                if index < len(line.vertex_elevations)
+                                else line.elevation
+                            ),
+                        }
+                        for index, vertex in enumerate(line.vertices)
                     ],
                     "surface": line.surface,
                     "biotope": line.biotope,
@@ -203,6 +290,83 @@ class ClassificationProfile:
         return payload
 
 
+def classification_processing_extent(
+    profile: ClassificationProfile,
+) -> Tuple[int, int, int, int]:
+    """Return the inclusive-boundary crop as a PIL-style source box."""
+    if not profile.map_boundary:
+        return (0, 0, profile.source_width, profile.source_height)
+    x_values = [vertex[0] for vertex in profile.map_boundary]
+    y_values = [vertex[1] for vertex in profile.map_boundary]
+    left = max(0, min(x_values))
+    top = max(0, min(y_values))
+    right = min(profile.source_width, max(x_values) + 1)
+    bottom = min(profile.source_height, max(y_values) + 1)
+    if right <= left or bottom <= top:
+        raise ValueError("classification map boundary has an empty extent")
+    return (left, top, right, bottom)
+
+
+def crop_classification_profile(
+    profile: ClassificationProfile,
+    extent: Tuple[int, int, int, int],
+) -> ClassificationProfile:
+    """Shift a source-space profile into a cropped processing extent."""
+    left, top, right, bottom = extent
+    width = right - left
+    height = bottom - top
+    if (
+        left < 0
+        or top < 0
+        or right > profile.source_width
+        or bottom > profile.source_height
+        or width <= 0
+        or height <= 0
+    ):
+        raise ValueError("classification crop is outside the source image")
+
+    def contains(point: Tuple[int, int]) -> bool:
+        return (
+            left <= point[0] < right
+            and top <= point[1] < bottom
+        )
+
+    def shift(point: Tuple[int, int]) -> Tuple[int, int]:
+        return point[0] - left, point[1] - top
+
+    samples = tuple(
+        replace(sample, x=sample.x - left, y=sample.y - top)
+        for sample in profile.samples
+        if contains((sample.x, sample.y))
+    )
+    regions = tuple(
+        replace(
+            region,
+            vertices=tuple(shift(vertex) for vertex in region.vertices),
+        )
+        for region in profile.regions
+        if all(contains(vertex) for vertex in region.vertices)
+    )
+    lines = tuple(
+        replace(
+            line,
+            vertices=tuple(shift(vertex) for vertex in line.vertices),
+        )
+        for line in profile.lines
+        if all(contains(vertex) for vertex in line.vertices)
+    )
+    boundary = tuple(shift(vertex) for vertex in profile.map_boundary)
+    return replace(
+        profile,
+        source_width=width,
+        source_height=height,
+        samples=samples,
+        regions=regions,
+        lines=lines,
+        map_boundary=boundary,
+    )
+
+
 def classification_profile_path(image_path: Path) -> Path:
     return image_path.with_name(image_path.name + CLASSIFICATION_PROFILE_SUFFIX)
 
@@ -218,8 +382,14 @@ def load_classification_profile(
         raise ValueError("classification profile exceeds 4 MiB")
 
     payload = json.loads(path.read_text(encoding="utf-8-sig"))
-    if not isinstance(payload, dict) or payload.get("schema_version") != 1:
-        raise ValueError("classification profile schema_version must be 1")
+    if not isinstance(payload, dict) or payload.get("schema_version") not in {
+        1,
+        2,
+        3,
+    }:
+        raise ValueError(
+            "classification profile schema_version must be 1, 2, or 3"
+        )
 
     source = _mapping(payload.get("source"), "source")
     source_file_name = str(source.get("file_name") or "").strip()
@@ -304,6 +474,7 @@ def load_classification_profile(
             )
 
         vertices = []
+        vertex_elevations = []
         for vertex_index, raw_vertex in enumerate(raw_vertices):
             vertex_data = _mapping(
                 raw_vertex,
@@ -360,12 +531,33 @@ def load_classification_profile(
                 f"regions[{index}].biotope must be one of "
                 f"{', '.join(BIOTOPE_IDS)}"
             )
+        for vertex_index, raw_vertex in enumerate(raw_vertices[: len(vertices)]):
+            vertex_data = _mapping(
+                raw_vertex,
+                f"regions[{index}].vertices[{vertex_index}]",
+            )
+            vertex_elevation = _integer(
+                vertex_data.get("elevation", elevation),
+                f"regions[{index}].vertices[{vertex_index}].elevation",
+                ELEVATION_MINIMUM,
+                ELEVATION_NODATA,
+            )
+            if (
+                vertex_elevation == ELEVATION_NODATA
+                or vertex_elevation > ELEVATION_MAXIMUM
+            ):
+                raise ValueError(
+                    f"regions[{index}].vertices[{vertex_index}].elevation "
+                    f"must be {ELEVATION_MINIMUM}..{ELEVATION_MAXIMUM}"
+                )
+            vertex_elevations.append(vertex_elevation)
         regions.append(
             ClassificationRegion(
                 vertices=tuple(vertices),
                 surface=surface,
                 biotope=biotope,
                 elevation=elevation,
+                vertex_elevations=tuple(vertex_elevations),
             )
         )
 
@@ -390,6 +582,7 @@ def load_classification_profile(
             )
 
         vertices = []
+        vertex_elevations = []
         for vertex_index, raw_vertex in enumerate(raw_vertices):
             vertex_data = _mapping(
                 raw_vertex,
@@ -450,6 +643,26 @@ def load_classification_profile(
             1,
             MAXIMUM_LINE_WIDTH_CELLS,
         )
+        for vertex_index, raw_vertex in enumerate(raw_vertices[: len(vertices)]):
+            vertex_data = _mapping(
+                raw_vertex,
+                f"lines[{index}].vertices[{vertex_index}]",
+            )
+            vertex_elevation = _integer(
+                vertex_data.get("elevation", elevation),
+                f"lines[{index}].vertices[{vertex_index}].elevation",
+                ELEVATION_MINIMUM,
+                ELEVATION_NODATA,
+            )
+            if (
+                vertex_elevation == ELEVATION_NODATA
+                or vertex_elevation > ELEVATION_MAXIMUM
+            ):
+                raise ValueError(
+                    f"lines[{index}].vertices[{vertex_index}].elevation "
+                    f"must be {ELEVATION_MINIMUM}..{ELEVATION_MAXIMUM}"
+                )
+            vertex_elevations.append(vertex_elevation)
         lines.append(
             ClassificationLine(
                 vertices=tuple(vertices),
@@ -457,6 +670,7 @@ def load_classification_profile(
                 biotope=biotope,
                 elevation=elevation,
                 width_cells=width_cells,
+                vertex_elevations=tuple(vertex_elevations),
             )
         )
 
@@ -511,10 +725,10 @@ def load_classification_profile(
         outside_surface = str(
             boundary_data.get("outside_surface") or "deep_ocean"
         ).strip().lower()
-        if outside_surface not in SURFACE_IDS:
+        if outside_surface not in SURFACE_IDS and outside_surface != "auto":
             raise ValueError(
                 "map_boundary.outside_surface must be one of "
-                f"{', '.join(SURFACE_IDS)}"
+                f"auto, {', '.join(SURFACE_IDS)}"
             )
         outside_biotope = str(
             boundary_data.get("outside_biotope") or "none"
@@ -572,6 +786,12 @@ def load_classification_profile(
         samples=tuple(samples),
         regions=tuple(regions),
         lines=tuple(lines),
+        long_side_blocks=_integer(
+            settings.get("long_side_blocks", 20),
+            "settings.long_side_blocks",
+            1,
+            MAX_MAP_CELLS // (CHUNK_SIZE * CHUNK_SIZE),
+        ),
         color_weight=weights[0],
         texture_weight=weights[1],
         spatial_weight=weights[2],
@@ -823,21 +1043,47 @@ def apply_manual_classification(
 
     if profile.map_boundary:
         outside = ~flat_active
-        outside_lookup = np.asarray(
-            [
-                _resolve_tile_index(
-                    profile.outside_surface,
-                    profile.outside_biotope,
-                    automatic_index,
-                    tile_names,
-                )
-                for automatic_index in range(len(tile_names))
-            ],
-            dtype=np.uint8,
+        _fill_unknown_surface_indices(
+            flat_result,
+            assigned_surface,
+            flat_active,
+            tile_names,
         )
-        flat_result[outside] = outside_lookup[flat_automatic[outside]]
-        assigned_surface[outside] = SURFACE_IDS.index(
-            profile.outside_surface
+        if profile.outside_surface == "auto":
+            owner_y, owner_x = _nearest_source_indices(active_mask)
+            result_grid = flat_result.reshape((height, width))
+            surface_grid = assigned_surface.reshape((height, width))
+            result_grid[outside.reshape((height, width))] = result_grid[
+                owner_y[outside.reshape((height, width))],
+                owner_x[outside.reshape((height, width))],
+            ]
+            surface_grid[outside.reshape((height, width))] = surface_grid[
+                owner_y[outside.reshape((height, width))],
+                owner_x[outside.reshape((height, width))],
+            ]
+        else:
+            outside_lookup = np.asarray(
+                [
+                    _resolve_tile_index(
+                        profile.outside_surface,
+                        profile.outside_biotope,
+                        automatic_index,
+                        tile_names,
+                    )
+                    for automatic_index in range(len(tile_names))
+                ],
+                dtype=np.uint8,
+            )
+            flat_result[outside] = outside_lookup[flat_automatic[outside]]
+            assigned_surface[outside] = SURFACE_IDS.index(
+                profile.outside_surface
+            )
+    else:
+        _fill_unknown_surface_indices(
+            flat_result,
+            assigned_surface,
+            flat_active,
+            tile_names,
         )
 
     result = make_index_image(flat_result.reshape((height, width)), tile_names)
@@ -845,17 +1091,18 @@ def apply_manual_classification(
         width,
         height,
         profile,
-        effective_samples,
         assigned_surface.reshape((height, width)),
-        region_labels,
-        line_labels,
         active_samples,
         active_mask,
     )
     return result, elevation
 
 
-def write_int16_geotiff(path: Path, values: np.ndarray) -> None:
+def write_int16_geotiff(
+    path: Path,
+    values: np.ndarray,
+    georeference: Optional[RasterGeoreference] = None,
+) -> None:
     """Write a compact, uncompressed signed Int16 GeoTIFF."""
     array = np.asarray(values)
     if array.ndim != 2:
@@ -886,18 +1133,106 @@ def write_int16_geotiff(path: Path, values: np.ndarray) -> None:
         _tiff_longs(279, strip_byte_counts),
         _tiff_short(284, 1),
         _tiff_short(339, 2),
-        _tiff_doubles(33550, (1000.0, 1000.0, 0.0)),
-        _tiff_doubles(
-            33922,
-            (0.0, 0.0, 0.0, 0.0, height * 1000.0, 0.0),
-        ),
-        _tiff_shorts(
-            34735,
-            (1, 1, 0, 2, 1024, 0, 1, 32767, 1025, 0, 1, 1),
-        ),
-        _tiff_ascii(34737, "WorldBox Local ENGCRS|"),
         _tiff_ascii(42113, str(ELEVATION_NODATA)),
     ]
+    if georeference is None:
+        entries.extend(
+            (
+                _tiff_doubles(33550, (1000.0, 1000.0, 0.0)),
+                _tiff_doubles(
+                    33922,
+                    (0.0, 0.0, 0.0, 0.0, height * 1000.0, 0.0),
+                ),
+                _tiff_shorts(
+                    34735,
+                    (1, 1, 0, 2, 1024, 0, 1, 32767, 1025, 0, 1, 1),
+                ),
+                _tiff_ascii(34737, "WorldBox Local ENGCRS|"),
+            )
+        )
+    else:
+        georeference.validate((width, height))
+        transform = georeference.raster_to_crs
+        origin_x = transform[0]
+        origin_y = transform[3]
+        if georeference.pixel_interpretation == "point":
+            origin_x += 0.5 * transform[1] + 0.5 * transform[2]
+            origin_y += 0.5 * transform[4] + 0.5 * transform[5]
+        entries.append(
+            _tiff_doubles(
+                34264,
+                (
+                    transform[1],
+                    transform[2],
+                    0.0,
+                    origin_x,
+                    transform[4],
+                    transform[5],
+                    0.0,
+                    origin_y,
+                    0.0,
+                    0.0,
+                    1.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    1.0,
+                ),
+            )
+        )
+        geo_keys = georeference.geo_key_directory
+        if not geo_keys and georeference.epsg is not None:
+            geo_keys = build_geo_key_directory(
+                georeference.epsg,
+                georeference.crs_kind,
+                georeference.pixel_interpretation,
+                georeference.vertical_epsg,
+            )
+        if not geo_keys:
+            raster_type = (
+                2 if georeference.pixel_interpretation == "point" else 1
+            )
+            geo_keys = (
+                1,
+                1,
+                0,
+                2,
+                1024,
+                0,
+                1,
+                32767,
+                1025,
+                0,
+                1,
+                raster_type,
+            )
+        entries.append(_tiff_shorts(34735, geo_keys))
+        if georeference.geo_double_params:
+            entries.append(
+                _tiff_doubles(34736, georeference.geo_double_params)
+            )
+        if georeference.geo_ascii_params:
+            entries.append(
+                _tiff_ascii(34737, georeference.geo_ascii_params)
+            )
+        entries.append(
+            _tiff_ascii(
+                270,
+                json.dumps(
+                    {
+                        "format": "terrainlab-geotiff",
+                        "schema_version": "1.2.0",
+                        "source_file_name": georeference.source_file_name,
+                        "epsg": georeference.epsg,
+                        "pixel_interpretation": (
+                            georeference.pixel_interpretation
+                        ),
+                    },
+                    separators=(",", ":"),
+                ),
+            )
+        )
     entries.sort(key=lambda item: item[0])
 
     ifd_size = 2 + len(entries) * 12 + 4
@@ -941,6 +1276,8 @@ def write_int16_geotiff(path: Path, values: np.ndarray) -> None:
             stream.write(data)
         stream.seek(pixel_offset)
         stream.write(np.asarray(array, dtype="<i2").tobytes(order="C"))
+    if georeference is not None:
+        write_raster_georeference_sidecars(path, georeference)
 
 
 def _make_calibration_features(
@@ -1337,35 +1674,58 @@ def _interpolate_elevation(
     width: int,
     height: int,
     profile: ClassificationProfile,
-    effective_samples: Sequence[ClassificationSample],
     assigned_surface: np.ndarray,
-    region_labels: np.ndarray,
-    line_labels: np.ndarray,
     active_samples: Sequence[ClassificationSample],
     active_mask: np.ndarray,
 ) -> np.ndarray:
+    elevation_controls = _make_elevation_controls(profile, active_samples)
+    if not elevation_controls:
+        raise ValueError("classification profile has no elevation controls")
+
     maximum_dimension = 512
     scale = min(1.0, maximum_dimension / max(width, height))
     coarse_width = max(1, int(round(width * scale)))
     coarse_height = max(1, int(round(height * scale)))
-    sample_positions, _indices = _sample_target_positions(
+    sample_positions, control_indices = _sample_target_positions(
         profile,
         coarse_width,
         coarse_height,
-        effective_samples,
+        elevation_controls,
     )
     sample_elevations = np.asarray(
-        [sample.elevation for sample in effective_samples],
+        [sample.elevation for sample in elevation_controls],
         dtype=np.float32,
     )
+    coarse_active = _resize_boolean_mask(
+        active_mask,
+        coarse_width,
+        coarse_height,
+    )
+    keep = coarse_active.reshape(-1)[control_indices]
+    if np.any(keep):
+        sample_positions = sample_positions[keep]
+        sample_elevations = sample_elevations[keep]
+    if sample_elevations.size == 0:
+        raise ValueError("elevation controls fall outside the map extent")
+
+    maximum_controls = 1024
+    if sample_elevations.size > maximum_controls:
+        selected = np.linspace(
+            0,
+            sample_elevations.size - 1,
+            maximum_controls,
+            dtype=np.int64,
+        )
+        sample_positions = sample_positions[selected]
+        sample_elevations = sample_elevations[selected]
 
     total = coarse_width * coarse_height
     interpolated = np.empty(total, dtype=np.float32)
     chunk_size = max(
-        512,
-        min(32768, 1_500_000 // max(1, len(effective_samples))),
+        256,
+        min(16384, 1_500_000 // max(1, len(sample_elevations))),
     )
-    nearest_count = min(8, len(effective_samples))
+    nearest_count = min(8, len(sample_elevations))
     for start in range(0, total, chunk_size):
         end = min(total, start + chunk_size)
         positions = np.arange(start, end, dtype=np.int64)
@@ -1380,7 +1740,7 @@ def _interpolate_elevation(
         )
         delta = normalized[:, None, :] - sample_positions[None, :, :]
         distance_squared = np.sum(delta * delta, axis=2)
-        if nearest_count < len(effective_samples):
+        if nearest_count < len(sample_elevations):
             nearest = np.argpartition(
                 distance_squared,
                 nearest_count - 1,
@@ -1417,31 +1777,173 @@ def _interpolate_elevation(
     if profile.elevation_smoothing > 0:
         full = smooth_float(full, profile.elevation_smoothing)
 
-    nodata_mask = np.zeros(full.shape, dtype=bool)
-    if not profile.interpolate_elevation_globally:
-        nodata_mask = assigned_surface < 0
+    seed = _stable_relief_seed(profile, elevation_controls)
+    full += _quasi_isotropic_relief(
+        height,
+        width,
+        seed,
+        amplitude_scale=1.0,
+    )
 
-    for region_index, region in enumerate(profile.regions):
-        mask = region_labels == region_index
-        if np.any(mask):
-            full[mask] = region.elevation
-
-    for line_index, line in enumerate(profile.lines):
-        mask = line_labels == line_index
-        if np.any(mask):
-            full[mask] = line.elevation
-
-    sample_positions_full, sample_indices = _sample_target_positions(
+    _positions_full, sample_indices = _sample_target_positions(
         profile,
         width,
         height,
-        active_samples,
+        elevation_controls,
     )
-    del sample_positions_full
-    for sample, target_index in zip(active_samples, sample_indices):
+    del _positions_full
+    for sample, target_index in zip(elevation_controls, sample_indices):
         y, x = divmod(int(target_index), width)
-        full[y, x] = sample.elevation
+        if active_mask[y, x]:
+            full[y, x] = sample.elevation
 
+    if profile.map_boundary and profile.outside_surface != "auto":
+        outside_relief = _quasi_isotropic_relief(
+            height,
+            width,
+            seed + 104729,
+            amplitude_scale=0.82,
+        )
+        full[~active_mask] = (
+            float(profile.outside_elevation) + outside_relief[~active_mask]
+        )
+
+    _apply_surface_elevation_limits(full, assigned_surface)
+    slope_caps = _surface_slope_caps(
+        assigned_surface,
+        seed + 32452843,
+    )
+    full = _limit_elevation_rise(
+        full,
+        maximum_cardinal_rise=slope_caps,
+        maximum_diagonal_rise=slope_caps * np.float32(math.sqrt(2.0)),
+        passes=12,
+    )
+    _apply_surface_elevation_limits(full, assigned_surface)
+
+    nodata_mask = np.zeros(full.shape, dtype=bool)
+    full = np.clip(full, ELEVATION_MINIMUM, ELEVATION_MAXIMUM)
+    result = np.rint(full).astype(np.int16)
+    result[(result == ELEVATION_NODATA) & ~nodata_mask] = ELEVATION_MAXIMUM
+    result[nodata_mask] = ELEVATION_NODATA
+    return result
+
+
+def _make_elevation_controls(
+    profile: ClassificationProfile,
+    active_samples: Sequence[ClassificationSample],
+) -> Tuple[ClassificationSample, ...]:
+    grouped: Dict[Tuple[int, int], list[int]] = {}
+
+    def add(x: int, y: int, elevation: int) -> None:
+        grouped.setdefault((x, y), []).append(int(elevation))
+
+    for sample in active_samples:
+        add(sample.x, sample.y, sample.elevation)
+    for region in profile.regions:
+        elevations = (
+            region.vertex_elevations
+            if len(region.vertex_elevations) == len(region.vertices)
+            else (region.elevation,) * len(region.vertices)
+        )
+        for vertex, elevation in zip(region.vertices, elevations):
+            add(vertex[0], vertex[1], elevation)
+    for line in profile.lines:
+        elevations = (
+            line.vertex_elevations
+            if len(line.vertex_elevations) == len(line.vertices)
+            else (line.elevation,) * len(line.vertices)
+        )
+        for vertex, elevation in zip(line.vertices, elevations):
+            add(vertex[0], vertex[1], elevation)
+
+    return tuple(
+        ClassificationSample(
+            x=x,
+            y=y,
+            surface="plain",
+            biotope="none",
+            elevation=int(round(sum(values) / len(values))),
+        )
+        for (x, y), values in grouped.items()
+    )
+
+
+def _resize_boolean_mask(
+    mask: np.ndarray,
+    width: int,
+    height: int,
+) -> np.ndarray:
+    image = Img.fromarray(np.asarray(mask, dtype=np.uint8) * 255, mode="L")
+    try:
+        resized = image.resize((width, height), resample=Img.Resampling.NEAREST)
+        try:
+            return np.asarray(resized, dtype=np.uint8).copy() > 0
+        finally:
+            resized.close()
+    finally:
+        image.close()
+
+
+def _stable_relief_seed(
+    profile: ClassificationProfile,
+    controls: Sequence[ClassificationSample],
+) -> int:
+    value = (
+        profile.source_width * 73856093
+        ^ profile.source_height * 19349663
+    )
+    for index, control in enumerate(controls):
+        value ^= (
+            (index + 1) * 83492791
+            ^ control.x * 73856093
+            ^ control.y * 19349663
+            ^ (control.elevation + 20000) * 2654435761
+        )
+    return value & 0x7FFFFFFF
+
+
+def _quasi_isotropic_relief(
+    height: int,
+    width: int,
+    seed: int,
+    amplitude_scale: float,
+) -> np.ndarray:
+    y, x = np.indices((height, width), dtype=np.float32)
+    rng = np.random.default_rng(seed)
+    relief = np.zeros((height, width), dtype=np.float32)
+    components = (
+        (520.0, 64.0),
+        (210.0, 31.0),
+        (82.0, 15.0),
+    )
+    for amplitude, wavelength in components:
+        angle = float(rng.uniform(0.0, np.pi))
+        phase = float(rng.uniform(0.0, 2.0 * np.pi))
+        cross_phase = float(rng.uniform(0.0, 2.0 * np.pi))
+        axis = np.cos(angle) * x + np.sin(angle) * y
+        cross = -np.sin(angle) * x + np.cos(angle) * y
+        relief += (
+            amplitude
+            * amplitude_scale
+            * np.sin((2.0 * np.pi * axis / wavelength) + phase)
+            * (
+                0.72
+                + 0.28
+                * np.cos(
+                    (2.0 * np.pi * cross / (wavelength * 1.37))
+                    + cross_phase
+                )
+            )
+        )
+    relief -= float(np.median(relief))
+    return relief
+
+
+def _apply_surface_elevation_limits(
+    full: np.ndarray,
+    assigned_surface: np.ndarray,
+) -> None:
     for surface_index, surface in enumerate(SURFACE_IDS):
         mask = assigned_surface == surface_index
         if not np.any(mask):
@@ -1453,14 +1955,215 @@ def _interpolate_elevation(
         elif surface == "shallow_water":
             full[mask] = np.clip(full[mask], -5.0, -1.0)
 
-    if profile.map_boundary:
-        full[~active_mask] = profile.outside_elevation
-        nodata_mask[~active_mask] = False
 
-    full = np.clip(full, ELEVATION_MINIMUM, ELEVATION_MAXIMUM)
-    result = np.rint(full).astype(np.int16)
-    result[(result == ELEVATION_NODATA) & ~nodata_mask] = ELEVATION_MAXIMUM
-    result[nodata_mask] = ELEVATION_NODATA
+def _fill_unknown_surface_indices(
+    flat_tiles: np.ndarray,
+    assigned_surface: np.ndarray,
+    active: np.ndarray,
+    tile_names: Sequence[str],
+) -> None:
+    unresolved = active & (assigned_surface < 0)
+    if not np.any(unresolved):
+        return
+    for tile_index, tile_name in enumerate(tile_names):
+        surface = _surface_for_tile_name(tile_name)
+        mask = unresolved & (flat_tiles == tile_index)
+        if np.any(mask):
+            assigned_surface[mask] = SURFACE_IDS.index(surface)
+    assigned_surface[active & (assigned_surface < 0)] = SURFACE_IDS.index(
+        "plain"
+    )
+
+
+def _surface_for_tile_name(tile_name: str) -> str:
+    base = str(tile_name).split(":", 1)[0]
+    return {
+        "deep_ocean": "deep_ocean",
+        "close_ocean": "shelf",
+        "shallow_waters": "shallow_water",
+        "sand": "sand",
+        "soil_low": "plain",
+        "soil_high": "upland",
+        "hills": "hills",
+        "mountains": "rocks",
+    }.get(base, "plain")
+
+
+def _nearest_source_indices(
+    source_mask: np.ndarray,
+) -> Tuple[np.ndarray, np.ndarray]:
+    """Approximate a nearest-cell Voronoi field with jump flooding."""
+    mask = np.asarray(source_mask, dtype=bool)
+    if mask.ndim != 2 or not np.any(mask):
+        raise ValueError("nearest-class propagation needs a source cell")
+    height, width = mask.shape
+    grid_y, grid_x = np.indices((height, width), dtype=np.int32)
+    owner_y = np.where(mask, grid_y, -1).astype(np.int32)
+    owner_x = np.where(mask, grid_x, -1).astype(np.int32)
+
+    step = 1
+    while step < max(width, height):
+        step <<= 1
+    step >>= 1
+    while step >= 1:
+        for delta_y, delta_x in (
+            (-step, -step),
+            (-step, 0),
+            (-step, step),
+            (0, -step),
+            (0, step),
+            (step, -step),
+            (step, 0),
+            (step, step),
+        ):
+            target_y = (
+                slice(-delta_y, height)
+                if delta_y < 0
+                else slice(0, height - delta_y)
+            )
+            source_y = (
+                slice(0, height + delta_y)
+                if delta_y < 0
+                else slice(delta_y, height)
+            )
+            target_x = (
+                slice(-delta_x, width)
+                if delta_x < 0
+                else slice(0, width - delta_x)
+            )
+            source_x = (
+                slice(0, width + delta_x)
+                if delta_x < 0
+                else slice(delta_x, width)
+            )
+
+            candidate_y = owner_y[source_y, source_x].copy()
+            candidate_x = owner_x[source_y, source_x].copy()
+            valid = candidate_y >= 0
+            if not np.any(valid):
+                continue
+            current_y = owner_y[target_y, target_x]
+            current_x = owner_x[target_y, target_x]
+            target_grid_y = grid_y[target_y, target_x]
+            target_grid_x = grid_x[target_y, target_x]
+            candidate_distance = (
+                (candidate_y.astype(np.int64) - target_grid_y) ** 2
+                + (candidate_x.astype(np.int64) - target_grid_x) ** 2
+            )
+            current_valid = current_y >= 0
+            current_distance = (
+                (current_y.astype(np.int64) - target_grid_y) ** 2
+                + (current_x.astype(np.int64) - target_grid_x) ** 2
+            )
+            update = valid & (
+                ~current_valid | (candidate_distance < current_distance)
+            )
+            current_y[update] = candidate_y[update]
+            current_x[update] = candidate_x[update]
+        step >>= 1
+
+    missing = owner_y < 0
+    if np.any(missing):
+        fallback_y, fallback_x = np.argwhere(mask)[0]
+        owner_y[missing] = int(fallback_y)
+        owner_x[missing] = int(fallback_x)
+    return owner_y, owner_x
+
+
+def _surface_slope_caps(
+    assigned_surface: np.ndarray,
+    seed: int,
+) -> np.ndarray:
+    """Build deterministic per-cell rise caps with rare steep terrain."""
+    shape = assigned_surface.shape
+    caps = np.full(
+        shape,
+        math.tan(math.radians(20.0)) * 1000.0,
+        dtype=np.float32,
+    )
+    variation = np.abs(
+        _quasi_isotropic_relief(
+            shape[0],
+            shape[1],
+            seed,
+            amplitude_scale=1.0,
+        )
+    )
+    lower = float(np.percentile(variation, 82.0))
+    upper = float(np.percentile(variation, 99.5))
+    tail = np.clip(
+        (variation - lower) / max(1.0, upper - lower),
+        0.0,
+        1.0,
+    )
+
+    hills = assigned_surface == SURFACE_IDS.index("hills")
+    rocks = assigned_surface == SURFACE_IDS.index("rocks")
+    summits = assigned_surface == SURFACE_IDS.index("summit")
+    if np.any(hills):
+        degrees = 20.0 + 30.0 * np.power(tail[hills], 2.6)
+        caps[hills] = np.tan(np.radians(degrees)) * 1000.0
+    if np.any(rocks):
+        degrees = 20.0 + 64.0 * np.power(tail[rocks], 3.5)
+        caps[rocks] = np.tan(np.radians(degrees)) * 1000.0
+    if np.any(summits):
+        degrees = 20.0 + 68.0 * np.power(tail[summits], 4.0)
+        caps[summits] = np.tan(np.radians(degrees)) * 1000.0
+    return caps
+
+
+def _limit_elevation_rise(
+    values: np.ndarray,
+    maximum_cardinal_rise,
+    maximum_diagonal_rise,
+    passes: int,
+) -> np.ndarray:
+    result = np.asarray(values, dtype=np.float32).copy()
+    cardinal = np.broadcast_to(
+        np.asarray(maximum_cardinal_rise, dtype=np.float32),
+        result.shape,
+    )
+    diagonal = np.broadcast_to(
+        np.asarray(maximum_diagonal_rise, dtype=np.float32),
+        result.shape,
+    )
+    for _ in range(max(1, passes)):
+        horizontal = np.maximum(cardinal[:, 1:], cardinal[:, :-1])
+        result[:, 1:] = np.minimum(
+            result[:, 1:],
+            result[:, :-1] + horizontal,
+        )
+        result[:, :-1] = np.minimum(
+            result[:, :-1],
+            result[:, 1:] + horizontal,
+        )
+        vertical = np.maximum(cardinal[1:, :], cardinal[:-1, :])
+        result[1:, :] = np.minimum(
+            result[1:, :],
+            result[:-1, :] + vertical,
+        )
+        result[:-1, :] = np.minimum(
+            result[:-1, :],
+            result[1:, :] + vertical,
+        )
+        down_right = np.maximum(diagonal[1:, 1:], diagonal[:-1, :-1])
+        result[1:, 1:] = np.minimum(
+            result[1:, 1:],
+            result[:-1, :-1] + down_right,
+        )
+        result[:-1, :-1] = np.minimum(
+            result[:-1, :-1],
+            result[1:, 1:] + down_right,
+        )
+        down_left = np.maximum(diagonal[1:, :-1], diagonal[:-1, 1:])
+        result[1:, :-1] = np.minimum(
+            result[1:, :-1],
+            result[:-1, 1:] + down_left,
+        )
+        result[:-1, 1:] = np.minimum(
+            result[:-1, 1:],
+            result[1:, :-1] + down_left,
+        )
     return result
 
 
@@ -1641,7 +2344,7 @@ def _align4(value: int) -> int:
 
 
 def _tiff_ascii(tag: int, value: str) -> Tuple[int, int, int, bytes]:
-    data = value.encode("ascii") + b"\0"
+    data = value.encode("ascii", errors="replace") + b"\0"
     return tag, 2, len(data), data
 
 

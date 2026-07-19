@@ -1,4 +1,4 @@
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 import json
 import math
 from pathlib import Path
@@ -8,6 +8,8 @@ import numpy as np
 from PIL import Image as Img
 from PIL import ImageDraw
 
+from .calibration import BIOTOPE_IDS, SURFACE_IDS
+from .consts import CHUNK_SIZE, MAX_MAP_CELLS
 from .terrain import TerrainClusteringSettings
 
 
@@ -15,6 +17,9 @@ CLUSTERING_PROFILE_SUFFIX = ".terrainlab-clustering.json"
 GENERATED_CLUSTERING_PROFILE_FILE_NAME = "terrainlab-clustering.json"
 MAXIMUM_CLUSTERING_PROFILE_BYTES = 1024 * 1024
 MAXIMUM_BOUNDARY_VERTICES = 256
+DEFAULT_CLUSTERING_BIOTOPES = tuple(
+    biotope for biotope in BIOTOPE_IDS if biotope not in {"auto", "none"}
+)
 
 
 @dataclass(frozen=True)
@@ -22,6 +27,7 @@ class ClusteringProfile:
     source_file_name: str
     source_width: int
     source_height: int
+    long_side_blocks: int = 20
     clusters: int = 14
     spline_radius: int = 0
     smooth_passes: int = 1
@@ -38,16 +44,19 @@ class ClusteringProfile:
     kmeans_iterations: int = 18
     random_seed: int = 1729
     map_boundary: Tuple[Tuple[int, int], ...] = ()
+    allowed_surfaces: Tuple[str, ...] = SURFACE_IDS
+    allowed_biotopes: Tuple[str, ...] = DEFAULT_CLUSTERING_BIOTOPES
 
     def to_json_dict(self) -> Dict[str, Any]:
         payload: Dict[str, Any] = {
-            "schema_version": 1,
+            "schema_version": 3,
             "source": {
                 "file_name": self.source_file_name,
                 "width": self.source_width,
                 "height": self.source_height,
             },
             "settings": {
+                "long_side_blocks": self.long_side_blocks,
                 "clusters": self.clusters,
                 "spline_radius": self.spline_radius,
                 "smooth_passes": self.smooth_passes,
@@ -63,6 +72,10 @@ class ClusteringProfile:
                 "sample_limit": self.sample_limit,
                 "kmeans_iterations": self.kmeans_iterations,
                 "random_seed": self.random_seed,
+            },
+            "composition": {
+                "allowed_surfaces": list(self.allowed_surfaces),
+                "allowed_biotopes": list(self.allowed_biotopes),
             },
         }
         if self.map_boundary:
@@ -91,7 +104,54 @@ class ClusteringProfile:
             sample_limit=self.sample_limit,
             kmeans_iterations=self.kmeans_iterations,
             random_seed=self.random_seed,
+            allowed_surfaces=self.allowed_surfaces,
+            allowed_biotopes=self.allowed_biotopes,
         )
+
+
+def clustering_processing_extent(
+    profile: ClusteringProfile,
+) -> Tuple[int, int, int, int]:
+    """Return the published clustering boundary as a PIL crop box."""
+    if not profile.map_boundary:
+        return (0, 0, profile.source_width, profile.source_height)
+    x_values = [vertex[0] for vertex in profile.map_boundary]
+    y_values = [vertex[1] for vertex in profile.map_boundary]
+    left = max(0, min(x_values))
+    top = max(0, min(y_values))
+    right = min(profile.source_width, max(x_values) + 1)
+    bottom = min(profile.source_height, max(y_values) + 1)
+    if right <= left or bottom <= top:
+        raise ValueError("clustering map boundary has an empty extent")
+    return (left, top, right, bottom)
+
+
+def crop_clustering_profile(
+    profile: ClusteringProfile,
+    extent: Tuple[int, int, int, int],
+) -> ClusteringProfile:
+    """Shift a clustering profile into its cropped processing extent."""
+    left, top, right, bottom = extent
+    width = right - left
+    height = bottom - top
+    if (
+        left < 0
+        or top < 0
+        or right > profile.source_width
+        or bottom > profile.source_height
+        or width <= 0
+        or height <= 0
+    ):
+        raise ValueError("clustering crop is outside the source image")
+    return replace(
+        profile,
+        source_width=width,
+        source_height=height,
+        map_boundary=tuple(
+            (vertex[0] - left, vertex[1] - top)
+            for vertex in profile.map_boundary
+        ),
+    )
 
 
 def clustering_profile_path(image_path: Path) -> Path:
@@ -109,8 +169,14 @@ def load_clustering_profile(
         raise ValueError("clustering profile exceeds 1 MiB")
 
     payload = json.loads(path.read_text(encoding="utf-8-sig"))
-    if not isinstance(payload, dict) or payload.get("schema_version") != 1:
-        raise ValueError("clustering profile schema_version must be 1")
+    if not isinstance(payload, dict) or payload.get("schema_version") not in {
+        1,
+        2,
+        3,
+    }:
+        raise ValueError(
+            "clustering profile schema_version must be 1, 2, or 3"
+        )
 
     source = _mapping(payload.get("source"), "source")
     source_file_name = str(source.get("file_name") or "").strip()
@@ -129,6 +195,25 @@ def load_clustering_profile(
         )
 
     settings = _mapping(payload.get("settings", {}), "settings")
+    composition_value = payload.get("composition")
+    composition = (
+        {}
+        if composition_value is None
+        else _mapping(composition_value, "composition")
+    )
+    allowed_surfaces = _identifier_list(
+        composition.get("allowed_surfaces", SURFACE_IDS),
+        "composition.allowed_surfaces",
+        SURFACE_IDS,
+    )
+    allowed_biotopes = _identifier_list(
+        composition.get(
+            "allowed_biotopes",
+            DEFAULT_CLUSTERING_BIOTOPES,
+        ),
+        "composition.allowed_biotopes",
+        DEFAULT_CLUSTERING_BIOTOPES,
+    )
     boundary = _load_boundary(
         payload.get("map_boundary"),
         source_width,
@@ -138,6 +223,12 @@ def load_clustering_profile(
         source_file_name=source_file_name,
         source_width=source_width,
         source_height=source_height,
+        long_side_blocks=_integer(
+            settings.get("long_side_blocks", 20),
+            "long_side_blocks",
+            1,
+            MAX_MAP_CELLS // (CHUNK_SIZE * CHUNK_SIZE),
+        ),
         clusters=_integer(settings.get("clusters", 14), "clusters", 4, 64),
         spline_radius=_integer(
             settings.get("spline_radius", 0),
@@ -224,6 +315,8 @@ def load_clustering_profile(
             2_147_483_647,
         ),
         map_boundary=boundary,
+        allowed_surfaces=allowed_surfaces,
+        allowed_biotopes=allowed_biotopes,
     )
     _validate_weights(profile)
     return profile
@@ -404,6 +497,24 @@ def _mapping(value: Any, name: str) -> Mapping[str, Any]:
     if not isinstance(value, dict):
         raise ValueError(f"{name} must be a JSON object")
     return value
+
+
+def _identifier_list(
+    value: Any,
+    name: str,
+    allowed: Sequence[str],
+) -> Tuple[str, ...]:
+    if not isinstance(value, (list, tuple)) or not value:
+        raise ValueError(f"{name} must be a non-empty JSON array")
+    identifiers = tuple(str(item).strip().lower() for item in value)
+    if len(set(identifiers)) != len(identifiers):
+        raise ValueError(f"{name} contains duplicate values")
+    unknown = tuple(item for item in identifiers if item not in allowed)
+    if unknown:
+        raise ValueError(
+            f"{name} contains unsupported values: {', '.join(unknown)}"
+        )
+    return identifiers
 
 
 def _integer(value: Any, name: str, minimum: int, maximum: int) -> int:

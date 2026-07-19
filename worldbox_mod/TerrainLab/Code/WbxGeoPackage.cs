@@ -60,6 +60,9 @@ namespace TerrainLab
         [JsonProperty("vertical_reference")]
         public WbxGeoVerticalReference VerticalReference { get; set; }
 
+        [JsonProperty("georeference", NullValueHandling = NullValueHandling.Ignore)]
+        public TerrainRasterGeoreference Georeference { get; set; }
+
         [JsonProperty("layers")]
         public List<WbxGeoLayerDescriptor> Layers { get; set; } =
             new List<WbxGeoLayerDescriptor>();
@@ -409,7 +412,8 @@ namespace TerrainLab
                         elevation,
                         landform,
                         material,
-                        GetHorizontalMetresPerCell(manifest));
+                        GetHorizontalMetresPerCell(manifest),
+                        manifest.Georeference);
 
                     ReadRegisteredModules(archive, manifest, moduleRegistry, state);
                     return true;
@@ -516,6 +520,7 @@ namespace TerrainLab
                     StorageType = "int16",
                     NoData = TerrainElevationEncoding.NoData
                 },
+                Georeference = state.Georeference,
                 Layers = new List<WbxGeoLayerDescriptor>
                 {
                     CreateLayer(
@@ -622,6 +627,9 @@ namespace TerrainLab
             }
 
             GetHorizontalMetresPerCell(manifest);
+            manifest.Georeference?.Validate(
+                manifest.Canvas.WidthCells,
+                manifest.Canvas.HeightCells);
 
             List<TerrainModuleDescriptor> modules = manifest.Modules ??
                 new List<TerrainModuleDescriptor>();

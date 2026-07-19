@@ -171,39 +171,20 @@ namespace TerrainLab
                         return new Color32(0, 0, 0, 0);
                     }
 
-                    float streamStrength = LogRatio(
+                    return GetStreamColor(
                         result.FlowAccumulation[index],
                         result.Statistics.MaximumAccumulation);
-                    return Lerp(
-                        new Color32(70, 210, 255, 175),
-                        new Color32(15, 85, 235, 235),
-                        streamStrength);
 
                 case TerrainHydrologyOverlayMode.Accumulation:
-                    float accumulation = LogRatio(
+                    return GetAccumulationColor(
                         result.FlowAccumulation[index],
                         result.Statistics.MaximumAccumulation);
-                    return accumulation < 0.08f
-                        ? new Color32(0, 0, 0, 0)
-                        : Lerp(
-                            new Color32(100, 220, 195, 35),
-                            new Color32(25, 75, 230, 190),
-                            accumulation);
 
                 case TerrainHydrologyOverlayMode.FillDepth:
                     int depth = (int)result.FilledElevation[index] - state.Elevation[index];
-                    if (depth <= 0)
-                    {
-                        return new Color32(0, 0, 0, 0);
-                    }
-
-                    float fill = result.Statistics.MaximumFillDepth <= 0
-                        ? 0f
-                        : Mathf.Clamp01(depth / (float)result.Statistics.MaximumFillDepth);
-                    return Lerp(
-                        new Color32(255, 220, 70, 115),
-                        new Color32(225, 55, 45, 215),
-                        fill);
+                    return GetFillDepthColor(
+                        depth,
+                        result.Statistics.MaximumFillDepth);
 
                 case TerrainHydrologyOverlayMode.FilledElevation:
                     return TerrainElevationOverlay.GetColor(
@@ -216,20 +197,7 @@ namespace TerrainLab
                     return GetFlowDirectionColor(result.FlowDirection[index]);
 
                 case TerrainHydrologyOverlayMode.Watersheds:
-                    uint watershed = result.Watershed[index];
-                    if (watershed == 0)
-                    {
-                        return new Color32(0, 0, 0, 0);
-                    }
-
-                    uint hash = watershed * 2654435761u;
-                    Color watershedColor = Color.HSVToRGB(
-                        (hash & 0xffffu) / 65535f,
-                        0.58f,
-                        0.95f,
-                        false);
-                    watershedColor.a = 0.42f;
-                    return watershedColor;
+                    return GetWatershedColor(result.Watershed[index]);
 
                 case TerrainHydrologyOverlayMode.StreamOrder:
                     byte order = result.StreamOrder[index];
@@ -239,22 +207,153 @@ namespace TerrainLab
                         return new Color32(0, 0, 0, 0);
                     }
 
-                    float orderRatio = result.Statistics.MaximumStreamOrder <= 1
-                        ? 0f
-                        : (order - 1f) / (result.Statistics.MaximumStreamOrder - 1f);
-                    return orderRatio < 0.5f
-                        ? Lerp(
-                            new Color32(80, 225, 245, 175),
-                            new Color32(45, 105, 235, 225),
-                            orderRatio * 2f)
-                        : Lerp(
-                            new Color32(45, 105, 235, 225),
-                            new Color32(225, 65, 180, 245),
-                            (orderRatio - 0.5f) * 2f);
+                    return GetStreamOrderColor(
+                        order,
+                        result.Statistics.MaximumStreamOrder);
 
                 default:
                     return new Color32(0, 0, 0, 0);
             }
+        }
+
+        public static Color32 GetLegendColor(
+            TerrainHydrologyOverlayMode mode,
+            float normalized,
+            TerrainWorldState state,
+            TerrainHydrologyResult result)
+        {
+            if (state == null || result?.Statistics == null)
+            {
+                return new Color32(0, 0, 0, 0);
+            }
+
+            normalized = Mathf.Clamp01(normalized);
+            TerrainHydrologyStatistics statistics = result.Statistics;
+            switch (mode)
+            {
+                case TerrainHydrologyOverlayMode.Streams:
+                    uint streamMinimum = (uint)Math.Max(
+                        1,
+                        result.StreamThreshold);
+                    uint streamMaximum = Math.Max(
+                        streamMinimum,
+                        statistics.MaximumAccumulation);
+                    uint streamValue = (uint)Mathf.RoundToInt(Mathf.Lerp(
+                        streamMinimum,
+                        streamMaximum,
+                        normalized));
+                    return GetStreamColor(streamValue, streamMaximum);
+                case TerrainHydrologyOverlayMode.Accumulation:
+                    uint accumulationMaximum = Math.Max(
+                        1u,
+                        statistics.MaximumAccumulation);
+                    return GetAccumulationColor(
+                        (uint)Mathf.RoundToInt(
+                            accumulationMaximum * normalized),
+                        accumulationMaximum);
+                case TerrainHydrologyOverlayMode.FillDepth:
+                    int fillMaximum = Math.Max(
+                        1,
+                        statistics.MaximumFillDepth);
+                    return GetFillDepthColor(
+                        Mathf.RoundToInt(fillMaximum * normalized),
+                        fillMaximum);
+                case TerrainHydrologyOverlayMode.FilledElevation:
+                    short elevation = (short)Mathf.RoundToInt(Mathf.Lerp(
+                        TerrainElevationEncoding.Minimum,
+                        TerrainElevationEncoding.Maximum,
+                        normalized));
+                    return TerrainElevationOverlay.GetColor(
+                        elevation,
+                        state.SeaLevel,
+                        TerrainElevationEncoding.Minimum,
+                        TerrainElevationEncoding.Maximum);
+                case TerrainHydrologyOverlayMode.StreamOrder:
+                    byte maximumOrder = Math.Max(
+                        (byte)1,
+                        statistics.MaximumStreamOrder);
+                    byte order = (byte)Mathf.RoundToInt(Mathf.Lerp(
+                        1f,
+                        maximumOrder,
+                        normalized));
+                    return GetStreamOrderColor(order, maximumOrder);
+                default:
+                    return new Color32(0, 0, 0, 0);
+            }
+        }
+
+        public static Color32 GetStreamColor(uint value, uint maximum)
+        {
+            float streamStrength = LogRatio(value, maximum);
+            return Lerp(
+                new Color32(70, 210, 255, 175),
+                new Color32(15, 85, 235, 235),
+                streamStrength);
+        }
+
+        public static Color32 GetAccumulationColor(uint value, uint maximum)
+        {
+            float accumulation = LogRatio(value, maximum);
+            return accumulation < 0.08f
+                ? new Color32(0, 0, 0, 0)
+                : Lerp(
+                    new Color32(100, 220, 195, 35),
+                    new Color32(25, 75, 230, 190),
+                    accumulation);
+        }
+
+        public static Color32 GetFillDepthColor(int depth, int maximumDepth)
+        {
+            if (depth <= 0)
+            {
+                return new Color32(0, 0, 0, 0);
+            }
+
+            float fill = maximumDepth <= 0
+                ? 0f
+                : Mathf.Clamp01(depth / (float)maximumDepth);
+            return Lerp(
+                new Color32(255, 220, 70, 115),
+                new Color32(225, 55, 45, 215),
+                fill);
+        }
+
+        public static Color32 GetWatershedColor(uint watershed)
+        {
+            if (watershed == 0)
+            {
+                return new Color32(0, 0, 0, 0);
+            }
+
+            uint hash = watershed * 2654435761u;
+            Color watershedColor = Color.HSVToRGB(
+                (hash & 0xffffu) / 65535f,
+                0.58f,
+                0.95f,
+                false);
+            watershedColor.a = 0.42f;
+            return watershedColor;
+        }
+
+        public static Color32 GetStreamOrderColor(byte order, byte maximumOrder)
+        {
+            if (order == 0 || order == byte.MaxValue)
+            {
+                return new Color32(0, 0, 0, 0);
+            }
+
+            float orderRatio = maximumOrder <= 1
+                ? 0f
+                : (order - 1f) / (maximumOrder - 1f);
+            return orderRatio < 0.5f
+                ? Lerp(
+                    new Color32(80, 225, 245, 175),
+                    new Color32(45, 105, 235, 225),
+                    orderRatio * 2f)
+                : Lerp(
+                    new Color32(45, 105, 235, 225),
+                    new Color32(225, 65, 180, 245),
+                    (orderRatio - 0.5f) * 2f);
         }
 
         public static Color32 GetFlowDirectionColor(byte value)

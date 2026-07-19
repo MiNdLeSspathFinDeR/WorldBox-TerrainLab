@@ -2,6 +2,114 @@
 
 ## Unreleased
 
+## 1.18.0 - 2026-07-19
+
+- Replaced automatic-clustering text toggles with separate game-style
+  Morphotype and Biotope icon palettes. Native WorldBox activity lamps show
+  selection state, while deterministic sprite fallbacks keep paradox,
+  wasteland, and singularity visible across game asset revisions.
+- Prepended the manual classifier's two-row native biotope strip with paired
+  water and plain-through-summit morphotype shortcuts. They update the same
+  surface attribute as the detailed selector and remain horizontally
+  scrollable on narrow canvases.
+- Made the 40-source-pixel digitizing magnet optional in practice: a nearby
+  existing vertex snaps, while an isolated point, line, or polygon vertex keeps
+  its exact clicked position.
+- Added morphotype-dependent DEM slope envelopes. Ordinary terrain remains
+  capped at 20 degrees, hills receive only a rare tail to 50 degrees, and rock
+  or summit extremes may approach 84-88 degrees without shifting the median.
+- Added Auto outside-extent classification. It propagates the nearest interior
+  surface and biotope with a deterministic Voronoi-like fill while preserving
+  continuous interpolated relief.
+- Published image boundaries now define the processing crop, output aspect,
+  maximum admissible map dimensions, and conversion raster. Source
+  georeferencing is translated to the crop before output resampling, so
+  exported GeoTIFF layers return to the selected source footprint in QGIS.
+- Mirrored the supplied legend top cap around the panel's lower edge for the
+  lower end, keeping it outside the content instead of over the legend rows.
+  Editable classification/clustering values are yellow, with localized
+  descriptions for the new composition and Auto controls.
+
+## 1.17.0 - 2026-07-19
+
+- Added an explicit output-map size control to both manual classification and
+  automatic clustering. The player sets the exact WorldBox-block count on the
+  raster's longer side; the shorter side is calculated from the source aspect.
+- Both workspaces display the selected `width x height` and the largest
+  aspect-derived dimensions available before the shared `1,884,160`-cell
+  threshold. Invalid values are highlighted and cannot be saved or queued.
+- Upgraded both image-profile schemas to version 3 with
+  `settings.long_side_blocks`. Version 1 and 2 sidecars migrate to the
+  20-block default, while explicit command-line dimensions still take
+  precedence over the profile.
+
+## 1.16.1 - 2026-07-19
+
+- Replaced the legend's near-black inner backing with the same muted
+  gray-green used by TerrainLab and WorldBox panels. Scale, categorical
+  sprites, labels, and supplied decorative frames remain unchanged.
+
+## 1.16.0 - 2026-07-19
+
+- Replaced the manual object's biotope dropdown with a compact two-row palette
+  over the source raster. It uses live WorldBox biome-surface sprites for all
+  23 normal seed biomes and disables itself for morphotypes that cannot host
+  vegetation.
+- Added persistent delete-one mode, bottom-canvas source coordinates, flexible
+  panel rows with inset actions, a red publish command, and 40-source-pixel
+  snapping to existing vector and boundary vertices.
+- Upgraded classification profiles to schema 2 with elevation stored at every
+  vector vertex. Legacy profiles migrate automatically. Coincident controls are
+  averaged, polygon interiors are no longer flattened, and deterministic
+  multiscale interpolation creates low-relief terrestrial variation while
+  limiting neighboring slopes to 20 degrees.
+- Added a collapsible class-composition editor to automatic clustering. Safe
+  morphotypes and all normal seed biomes can be toggled independently, and
+  excluded outcomes are remapped to the nearest allowed class.
+- Shifted the inferred mountain median from `5000 m` to `4500 m`; summit cells
+  start at `7000 m` and retain the five-percent extreme budget.
+
+## 1.15.1 - 2026-07-19
+
+- Replaced the temporary stock legend caps and swatch borders with the supplied
+  transparent pixel-art frame assets. The long frame now encloses continuous
+  quantitative ramps, while the short frame encloses categorical samples.
+- The supplied ornate ends are pre-rotated as dedicated top and bottom sprites,
+  so they point away from the map without the gray rectangular protrusions
+  produced by the stock-panel fallback.
+
+## 1.15.0 - 2026-07-19
+
+- Added a left-side legend for every active TerrainLab map overlay. The legend
+  remains visible when toolbar chapters change and hides with the GIS workspace
+  or the layer itself.
+- Quantitative rasters use the exact renderer palette in a continuous vertical
+  ramp with localized minimum, maximum, zero, and unit labels. Dynamic relief,
+  hydrology, and erosion limits come from the current analysis result.
+- Categorical layers use one framed row per semantic class. Landform, material,
+  river, and waterbody swatches repeat the matching live WorldBox tile sprite
+  inside a clipped stock-game frame; contours and D8 directions use appropriate
+  line and color symbols.
+- The legend frame reuses the native lower-toolbar background and button
+  sprites, with its decorative end pieces rotated upward and downward and a
+  scrollable adaptive layout for short canvases.
+
+## 1.14.0 - 2026-07-19
+
+- Added lossless source-raster georeference capture during image conversion:
+  WKT, PROJJSON, horizontal/vertical EPSG metadata, all six affine
+  coefficients, GeoKeys, and PixelIsArea/PixelIsPoint semantics.
+- Added explicit resized-raster, WorldBox-cell, WorldBox-metre, and EPSG:4326
+  control-grid mappings in `terrainlab-georeference.json`. The mapping travels
+  with generated saves, WBXGEO packages, GIS manifests, and file-sync
+  baselines.
+- Every core and derived GIS GeoTIFF now returns to the source CRS and affine,
+  including rotated rasters. ModelTransformationTag, `.tfw`, `.prj`, and a
+  per-raster georeference sidecar are emitted; projects without source
+  georeferencing retain the local WorldBox `ENGCRS` fallback.
+- File sync now rejects incoming DEMs whose CRS, affine transform, or
+  PixelIsArea/PixelIsPoint mode no longer matches the active project.
+
 ## 1.13.0 - 2026-07-18
 
 - Removed bare `soil_low` and `soil_high` outcomes from automatic clustering.

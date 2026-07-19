@@ -9,6 +9,7 @@ namespace TerrainLab
     {
         private readonly List<TerrainImageClassificationVertex> _vertices =
             new List<TerrainImageClassificationVertex>();
+        private readonly List<Color> _vertexColors = new List<Color>();
 
         private int _sourceWidth = 1;
         private int _sourceHeight = 1;
@@ -37,9 +38,11 @@ namespace TerrainLab
             bool showVertices,
             float inverseZoom,
             float closedFillAlpha = 0.22f,
-            float lineThickness = 2.2f)
+            float lineThickness = 2.2f,
+            IEnumerable<Color> vertexColors = null)
         {
             _vertices.Clear();
+            _vertexColors.Clear();
             if (vertices != null)
             {
                 foreach (TerrainImageClassificationVertex vertex in vertices)
@@ -49,6 +52,10 @@ namespace TerrainLab
                         _vertices.Add(vertex);
                     }
                 }
+            }
+            if (vertexColors != null)
+            {
+                _vertexColors.AddRange(vertexColors);
             }
 
             _sourceWidth = Math.Max(1, sourceWidth);
@@ -132,9 +139,12 @@ namespace TerrainLab
             if (_showVertices)
             {
                 float radius = 3.6f * _inverseZoom;
-                foreach (Vector2 point in points)
+                for (int index = 0; index < points.Count; index++)
                 {
-                    AddDiamond(helper, point, radius, _vertexColor);
+                    Color color = index < _vertexColors.Count
+                        ? _vertexColors[index]
+                        : _vertexColor;
+                    AddDiamond(helper, points[index], radius, color);
                 }
             }
         }

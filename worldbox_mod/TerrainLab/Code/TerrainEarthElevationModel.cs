@@ -57,7 +57,7 @@ namespace TerrainLab
                     elevation = Interpolate(
                         q,
                         0d, 2200d,
-                        0.5d, 5000d,
+                        0.5d, 4500d,
                         ExtremeQuantile, 7000d,
                         1d, 9000d);
                     break;

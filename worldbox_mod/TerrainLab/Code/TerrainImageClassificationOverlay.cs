@@ -111,6 +111,7 @@ namespace TerrainLab
     {
         private const float MinimumZoom = 1f;
         private const float MaximumZoom = 12f;
+        private const int VertexSnapRadiusSourcePixels = 40;
 
         private readonly List<GameObject> _markers = new List<GameObject>();
         private readonly List<TerrainImagePolygonGraphic> _regionGraphics =
@@ -119,6 +120,14 @@ namespace TerrainLab
             new List<TerrainImageClassificationVertex>();
         private readonly List<Selectable> _editorControls =
             new List<Selectable>();
+        private readonly Dictionary<string, Button> _biotopeButtons =
+            new Dictionary<string, Button>(StringComparer.Ordinal);
+        private readonly Dictionary<string, Image> _biotopeSelectionLamps =
+            new Dictionary<string, Image>(StringComparer.Ordinal);
+        private readonly Dictionary<string, Button> _quickSurfaceButtons =
+            new Dictionary<string, Button>(StringComparer.Ordinal);
+        private readonly Dictionary<string, Image> _quickSurfaceSelectionLamps =
+            new Dictionary<string, Image>(StringComparer.Ordinal);
         private readonly DefaultControls.Resources _defaultResources =
             new DefaultControls.Resources();
 
@@ -132,15 +141,16 @@ namespace TerrainLab
         private Text _fileLabel;
         private Text _sampleLabel;
         private Text _coordinateLabel;
+        private Text _mapSizeLabel;
         private Text _panelStatus;
         private Dropdown _surfaceDropdown;
-        private Dropdown _biotopeDropdown;
+        private InputField _longSideInput;
         private InputField _elevationInput;
         private InputField _lineWidthInput;
         private Dropdown _outsideSurfaceDropdown;
         private Dropdown _outsideBiotopeDropdown;
         private InputField _outsideElevationInput;
-        private Toggle _globalDemToggle;
+        private GameObject _biotopePalette;
         private Button _previousImageButton;
         private Button _nextImageButton;
         private Button _openSelectedButton;
@@ -173,6 +183,7 @@ namespace TerrainLab
         private bool _syncingOutsideControls;
         private bool _editorEnabled;
         private bool _initialized;
+        private string _selectedBiotopeId;
 
         public event Action<string, bool> StatusChanged;
 
@@ -330,7 +341,6 @@ namespace TerrainLab
 
                     SaveProfile();
                     RebuildAnnotations();
-                    _drawMode = TerrainImageClassificationDrawMode.None;
                     UpdateLabels();
                     SetPanelStatus(
                         LM.Get(
@@ -395,6 +405,10 @@ namespace TerrainLab
                         true);
                     return;
                 }
+                TerrainImageClassificationVertex snappedPoint =
+                    ResolveDraftVertex(sourceX, sourceY);
+                sourceX = snappedPoint.X;
+                sourceY = snappedPoint.Y;
                 if (!_profile.IsInsideMapBoundary(sourceX, sourceY))
                 {
                     SetPanelStatus(
@@ -447,6 +461,10 @@ namespace TerrainLab
             {
                 return;
             }
+            TerrainImageClassificationVertex snapped =
+                ResolveDraftVertex(sourceX, sourceY);
+            sourceX = snapped.X;
+            sourceY = snapped.Y;
             if (_hasHoverVertex &&
                 _hoverVertex.X == sourceX &&
                 _hoverVertex.Y == sourceY)
@@ -565,8 +583,11 @@ namespace TerrainLab
                 _draftGeometryComplete = false;
                 _hoverVertex = null;
                 _hasHoverVertex = false;
-                _globalDemToggle.SetIsOnWithoutNotify(
-                    _profile.Settings.InterpolateElevationGlobally);
+                _profile.Settings.InterpolateElevationGlobally = true;
+                _longSideInput.SetTextWithoutNotify(
+                    _profile.Settings.LongSideBlocks.ToString(
+                        CultureInfo.InvariantCulture));
+                UpdateMapSizePreview();
                 _zoom = 1f;
                 _imageRect.localScale = Vector3.one;
                 _imageRect.anchoredPosition = Vector2.zero;
@@ -729,6 +750,10 @@ namespace TerrainLab
             {
                 _coordinateLabel.text = "X -  Y -";
             }
+            if (_mapSizeLabel != null)
+            {
+                _mapSizeLabel.text = string.Empty;
+            }
             SetEditorControlsEnabled(false);
         }
 
@@ -838,6 +863,8 @@ namespace TerrainLab
             _markerRoot.offsetMin = Vector2.zero;
             _markerRoot.offsetMax = Vector2.zero;
 
+            CreateBiotopePalette(_viewport);
+            _coordinateLabel = CreateCoordinateOverlay(_viewport);
             CreatePanel(_root.transform);
             _root.SetActive(false);
         }
@@ -891,7 +918,7 @@ namespace TerrainLab
 
             VerticalLayoutGroup layout =
                 contentObject.GetComponent<VerticalLayoutGroup>();
-            layout.padding = new RectOffset(9, 9, 8, 8);
+            layout.padding = new RectOffset(14, 14, 8, 12);
             layout.spacing = 5f;
             layout.childAlignment = TextAnchor.UpperCenter;
             layout.childControlWidth = true;
@@ -951,6 +978,57 @@ namespace TerrainLab
                     },
                     252f,
                     "terrain_lab_manual_fit"));
+
+            CreateLabel(
+                content,
+                LM.Get("terrain_lab_output_size_heading"),
+                11,
+                FontStyle.Bold,
+                18f,
+                new UnityColor(0.83f, 0.79f, 0.66f, 1f));
+            Transform mapSizeRow = CreateRow(content, 34f);
+            Text mapSizeCaption = CreateLabel(
+                mapSizeRow,
+                LM.Get("terrain_lab_output_long_side"),
+                9,
+                FontStyle.Normal,
+                34f,
+                UnityColor.white);
+            mapSizeCaption.alignment = TextAnchor.MiddleLeft;
+            LayoutElement mapSizeCaptionElement =
+                mapSizeCaption.GetComponent<LayoutElement>();
+            mapSizeCaptionElement.preferredWidth = 92f;
+            mapSizeCaptionElement.flexibleWidth = 1f;
+            _longSideInput = TrackEditorControl(
+                CreateInputField(
+                    mapSizeRow,
+                    "20",
+                    "terrain_lab_output_long_side"));
+            LayoutElement mapSizeInputElement =
+                _longSideInput.GetComponent<LayoutElement>();
+            mapSizeInputElement.preferredWidth = 44f;
+            mapSizeInputElement.flexibleWidth = 0f;
+            _longSideInput.characterLimit = 3;
+            _longSideInput.onValueChanged.AddListener(
+                delegate { UpdateMapSizePreview(); });
+            _mapSizeLabel = CreateLabel(
+                mapSizeRow,
+                string.Empty,
+                8,
+                FontStyle.Normal,
+                34f,
+                new UnityColor(0.72f, 0.84f, 0.94f, 1f));
+            _mapSizeLabel.alignment = TextAnchor.MiddleLeft;
+            _mapSizeLabel.resizeTextForBestFit = true;
+            _mapSizeLabel.resizeTextMinSize = 6;
+            _mapSizeLabel.resizeTextMaxSize = 8;
+            LayoutElement mapSizeLabelElement =
+                _mapSizeLabel.GetComponent<LayoutElement>();
+            mapSizeLabelElement.preferredWidth = 104f;
+            mapSizeLabelElement.flexibleWidth = 1f;
+            ConfigureTooltip(
+                _mapSizeLabel.gameObject,
+                "terrain_lab_output_long_side");
 
             CreateLabel(
                 content,
@@ -1037,31 +1115,6 @@ namespace TerrainLab
                     "terrain_lab_manual_surface"));
             _surfaceDropdown.onValueChanged.AddListener(
                 HandleSurfaceChanged);
-
-            CreateLabel(
-                content,
-                LM.Get("terrain_lab_manual_biotope"),
-                10,
-                FontStyle.Bold,
-                16f,
-                new UnityColor(0.83f, 0.79f, 0.66f, 1f));
-            _biotopeDropdown = TrackEditorControl(
-                CreateDropdown(
-                    content,
-                    new[]
-                    {
-                        LM.Get("terrain_lab_manual_not_selected")
-                    }.Concat(
-                        TerrainImageClassificationCatalog.SelectableBiotopes
-                            .Select(option =>
-                                LM.Get(option.LocalizationKey))),
-                    "terrain_lab_manual_biotope"));
-            _biotopeDropdown.onValueChanged.AddListener(
-                delegate
-                {
-                    RefreshDraftGraphic();
-                    UpdateModeButtons();
-                });
 
             CreateLabel(
                 content,
@@ -1161,7 +1214,7 @@ namespace TerrainLab
             _outsideSurfaceDropdown = TrackEditorControl(
                 CreateDropdown(
                     content,
-                    TerrainImageClassificationCatalog.Surfaces
+                    TerrainImageClassificationCatalog.OutsideSurfaces
                         .Select(option => LM.Get(option.LocalizationKey)),
                     "terrain_lab_manual_outside_surface"));
             _outsideSurfaceDropdown.onValueChanged.AddListener(
@@ -1176,7 +1229,7 @@ namespace TerrainLab
             _outsideBiotopeDropdown = TrackEditorControl(
                 CreateDropdown(
                     content,
-                    TerrainImageClassificationCatalog.SelectableBiotopes
+                    TerrainImageClassificationCatalog.OutsideBiotopes
                         .Select(option => LM.Get(option.LocalizationKey)),
                     "terrain_lab_manual_outside_biotope"));
             _outsideBiotopeDropdown.onValueChanged.AddListener(
@@ -1214,30 +1267,6 @@ namespace TerrainLab
                     "terrain_lab_manual_delete_all_polygons",
                     true));
 
-            _globalDemToggle = TrackEditorControl(
-                CreateToggle(
-                    content,
-                    LM.Get("terrain_lab_manual_global_dem"),
-                    true,
-                    "terrain_lab_manual_global_dem"));
-            _globalDemToggle.onValueChanged.AddListener(
-                delegate(bool enabled)
-                {
-                    if (_profile != null)
-                    {
-                        try
-                        {
-                            _profile.Settings
-                                .InterpolateElevationGlobally = enabled;
-                            SaveProfile();
-                        }
-                        catch (Exception exception)
-                        {
-                            SetPanelStatus(exception.Message, true);
-                        }
-                    }
-                });
-
             _sampleLabel = CreateLabel(
                 content,
                 string.Empty,
@@ -1245,13 +1274,6 @@ namespace TerrainLab
                 FontStyle.Normal,
                 36f,
                 UnityColor.white);
-            _coordinateLabel = CreateLabel(
-                content,
-                "X -  Y -",
-                11,
-                FontStyle.Normal,
-                20f,
-                new UnityColor(0.72f, 0.84f, 0.94f, 1f));
             _panelStatus = CreateLabel(
                 content,
                 string.Empty,
@@ -1316,6 +1338,8 @@ namespace TerrainLab
                 TerrainImageClassificationCatalog.Surfaces.Count)
             {
                 _elevationInput.SetTextWithoutNotify(string.Empty);
+                _selectedBiotopeId = null;
+                UpdateBiotopePalette();
                 RefreshDraftGraphic();
                 UpdateModeButtons();
                 return;
@@ -1326,6 +1350,8 @@ namespace TerrainLab
             _elevationInput.SetTextWithoutNotify(
                 option.DefaultElevation.ToString(
                     CultureInfo.InvariantCulture));
+            _selectedBiotopeId = null;
+            UpdateBiotopePalette();
             RefreshDraftGraphic();
             UpdateModeButtons();
         }
@@ -1334,8 +1360,8 @@ namespace TerrainLab
         {
             _surfaceDropdown?.SetValueWithoutNotify(0);
             _surfaceDropdown?.RefreshShownValue();
-            _biotopeDropdown?.SetValueWithoutNotify(0);
-            _biotopeDropdown?.RefreshShownValue();
+            _selectedBiotopeId = null;
+            UpdateBiotopePalette();
             _elevationInput?.SetTextWithoutNotify(string.Empty);
             _lineWidthInput?.SetTextWithoutNotify(string.Empty);
             RefreshDraftGraphic();
@@ -1360,7 +1386,7 @@ namespace TerrainLab
                     _profile?.MapBoundary?.OutsideBiotope ?? "none";
                 int surfaceIndex = Math.Max(
                     0,
-                    TerrainImageClassificationCatalog.Surfaces
+                    TerrainImageClassificationCatalog.OutsideSurfaces
                         .ToList()
                         .FindIndex(option =>
                             string.Equals(
@@ -1369,7 +1395,7 @@ namespace TerrainLab
                                 StringComparison.Ordinal)));
                 int biotopeIndex = Math.Max(
                     0,
-                    TerrainImageClassificationCatalog.SelectableBiotopes
+                    TerrainImageClassificationCatalog.OutsideBiotopes
                         .ToList()
                         .FindIndex(option =>
                             string.Equals(
@@ -1399,16 +1425,32 @@ namespace TerrainLab
             if (_syncingOutsideControls ||
                 _outsideElevationInput == null ||
                 index < 0 ||
-                index >= TerrainImageClassificationCatalog.Surfaces.Count)
+                index >=
+                TerrainImageClassificationCatalog.OutsideSurfaces.Count)
             {
                 return;
             }
 
             TerrainImageClassOption option =
-                TerrainImageClassificationCatalog.Surfaces[index];
+                TerrainImageClassificationCatalog.OutsideSurfaces[index];
             _outsideElevationInput.SetTextWithoutNotify(
                 option.DefaultElevation.ToString(
                     CultureInfo.InvariantCulture));
+            if (!option.SupportsBiotope &&
+                _outsideBiotopeDropdown != null)
+            {
+                int noneIndex =
+                    TerrainImageClassificationCatalog.OutsideBiotopes
+                        .ToList()
+                        .FindIndex(item =>
+                            string.Equals(
+                                item.Id,
+                                "none",
+                                StringComparison.Ordinal));
+                _outsideBiotopeDropdown.SetValueWithoutNotify(
+                    Math.Max(0, noneIndex));
+                _outsideBiotopeDropdown.RefreshShownValue();
+            }
             SaveOutsideMapAreaFromControls();
         }
 
@@ -1424,10 +1466,10 @@ namespace TerrainLab
             }
             if (_outsideSurfaceDropdown.value < 0 ||
                 _outsideSurfaceDropdown.value >=
-                TerrainImageClassificationCatalog.Surfaces.Count ||
+                TerrainImageClassificationCatalog.OutsideSurfaces.Count ||
                 _outsideBiotopeDropdown.value < 0 ||
                 _outsideBiotopeDropdown.value >=
-                TerrainImageClassificationCatalog.SelectableBiotopes.Count ||
+                TerrainImageClassificationCatalog.OutsideBiotopes.Count ||
                 !short.TryParse(
                     _outsideElevationInput.text,
                     NumberStyles.Integer,
@@ -1445,10 +1487,10 @@ namespace TerrainLab
             try
             {
                 TerrainImageClassOption surface =
-                    TerrainImageClassificationCatalog.Surfaces[
+                    TerrainImageClassificationCatalog.OutsideSurfaces[
                         _outsideSurfaceDropdown.value];
                 TerrainImageBiotopeOption biotope =
-                    TerrainImageClassificationCatalog.SelectableBiotopes[
+                    TerrainImageClassificationCatalog.OutsideBiotopes[
                         _outsideBiotopeDropdown.value];
                 _profile.SetOutsideMapArea(
                     surface.Id,
@@ -1614,10 +1656,7 @@ namespace TerrainLab
             {
                 _surfaceDropdown.interactable = classificationControls;
             }
-            if (_biotopeDropdown != null)
-            {
-                _biotopeDropdown.interactable = classificationControls;
-            }
+            UpdateBiotopePalette(classificationControls);
             if (_elevationInput != null)
             {
                 _elevationInput.interactable = classificationControls;
@@ -1691,25 +1730,40 @@ namespace TerrainLab
             }
             if (_outsideBiotopeDropdown != null)
             {
-                _outsideBiotopeDropdown.interactable = outsideEnabled;
+                bool supportsBiotope =
+                    _outsideSurfaceDropdown != null &&
+                    _outsideSurfaceDropdown.value >= 0 &&
+                    _outsideSurfaceDropdown.value <
+                    TerrainImageClassificationCatalog.OutsideSurfaces.Count &&
+                    TerrainImageClassificationCatalog.OutsideSurfaces[
+                        _outsideSurfaceDropdown.value].SupportsBiotope;
+                _outsideBiotopeDropdown.interactable =
+                    outsideEnabled && supportsBiotope;
             }
             if (_outsideElevationInput != null)
             {
-                _outsideElevationInput.interactable = outsideEnabled;
+                bool automatic =
+                    _outsideSurfaceDropdown != null &&
+                    _outsideSurfaceDropdown.value >= 0 &&
+                    _outsideSurfaceDropdown.value <
+                    TerrainImageClassificationCatalog.OutsideSurfaces.Count &&
+                    string.Equals(
+                        TerrainImageClassificationCatalog.OutsideSurfaces[
+                            _outsideSurfaceDropdown.value].Id,
+                        "auto",
+                        StringComparison.Ordinal);
+                _outsideElevationInput.interactable =
+                    outsideEnabled && !automatic;
             }
         }
 
         private bool HasValidFeatureSelection()
         {
             if (_surfaceDropdown == null ||
-                _biotopeDropdown == null ||
                 _elevationInput == null ||
                 _surfaceDropdown.value <= 0 ||
                 _surfaceDropdown.value >
                 TerrainImageClassificationCatalog.Surfaces.Count ||
-                _biotopeDropdown.value <= 0 ||
-                _biotopeDropdown.value >
-                TerrainImageClassificationCatalog.SelectableBiotopes.Count ||
                 !short.TryParse(
                     _elevationInput.text,
                     NumberStyles.Integer,
@@ -1717,6 +1771,15 @@ namespace TerrainLab
                     out short elevation) ||
                 !TerrainElevationEncoding.IsDataValue(elevation) ||
                 elevation == TerrainElevationEncoding.NoData)
+            {
+                return false;
+            }
+
+            TerrainImageClassOption surface =
+                TerrainImageClassificationCatalog.Surfaces[
+                    _surfaceDropdown.value - 1];
+            if (surface.SupportsBiotope &&
+                string.IsNullOrWhiteSpace(_selectedBiotopeId))
             {
                 return false;
             }
@@ -1759,6 +1822,10 @@ namespace TerrainLab
 
         private void AddPolygonVertex(int sourceX, int sourceY)
         {
+            TerrainImageClassificationVertex snapped =
+                ResolveDraftVertex(sourceX, sourceY);
+            sourceX = snapped.X;
+            sourceY = snapped.Y;
             if (_drawMode !=
                     TerrainImageClassificationDrawMode.MapBoundary &&
                 !_profile.IsInsideMapBoundary(sourceX, sourceY))
@@ -1834,6 +1901,99 @@ namespace TerrainLab
                 false);
         }
 
+        private TerrainImageClassificationVertex ResolveDraftVertex(
+            int sourceX,
+            int sourceY)
+        {
+            return TrySnapToExistingVertex(
+                    sourceX,
+                    sourceY,
+                    out TerrainImageClassificationVertex snapped)
+                ? snapped
+                : new TerrainImageClassificationVertex(sourceX, sourceY);
+        }
+
+        private bool TrySnapToExistingVertex(
+            int sourceX,
+            int sourceY,
+            out TerrainImageClassificationVertex snapped)
+        {
+            TerrainImageClassificationVertex nearest = null;
+            long nearestSquared =
+                (long)VertexSnapRadiusSourcePixels *
+                VertexSnapRadiusSourcePixels + 1L;
+
+            void Consider(TerrainImageClassificationVertex vertex)
+            {
+                if (vertex == null)
+                {
+                    return;
+                }
+                long dx = vertex.X - sourceX;
+                long dy = vertex.Y - sourceY;
+                long squared = dx * dx + dy * dy;
+                if (squared >= nearestSquared)
+                {
+                    return;
+                }
+                nearestSquared = squared;
+                nearest = vertex;
+            }
+
+            foreach (TerrainImageClassificationRegion region in
+                     _profile?.Regions ??
+                     Enumerable.Empty<TerrainImageClassificationRegion>())
+            {
+                foreach (TerrainImageClassificationVertex vertex in
+                         region?.Vertices ??
+                         Enumerable.Empty<TerrainImageClassificationVertex>())
+                {
+                    Consider(vertex);
+                }
+            }
+            foreach (TerrainImageClassificationLine line in
+                     _profile?.Lines ??
+                     Enumerable.Empty<TerrainImageClassificationLine>())
+            {
+                foreach (TerrainImageClassificationVertex vertex in
+                         line?.Vertices ??
+                         Enumerable.Empty<TerrainImageClassificationVertex>())
+                {
+                    Consider(vertex);
+                }
+            }
+            foreach (TerrainImageClassificationVertex vertex in
+                     _profile?.MapBoundary?.Vertices ??
+                     Enumerable.Empty<TerrainImageClassificationVertex>())
+            {
+                Consider(vertex);
+            }
+            foreach (TerrainImageClassificationSample sample in
+                     _profile?.Samples ??
+                     Enumerable.Empty<TerrainImageClassificationSample>())
+            {
+                if (sample != null)
+                {
+                    Consider(
+                        new TerrainImageClassificationVertex(
+                            sample.X,
+                            sample.Y,
+                            sample.Elevation));
+                }
+            }
+
+            if (nearest == null)
+            {
+                snapped = null;
+                return false;
+            }
+            snapped = new TerrainImageClassificationVertex(
+                nearest.X,
+                nearest.Y,
+                nearest.Elevation);
+            return true;
+        }
+
         private void FinishPolygon()
         {
             if (_drawMode ==
@@ -1896,6 +2056,7 @@ namespace TerrainLab
                     SyncOutsideControlsFromProfile();
                     RebuildAnnotations();
                     UpdateLabels();
+                    UpdateMapSizePreview();
                     SetPanelStatus(
                         LM.Get(
                             "terrain_lab_manual_boundary_saved"),
@@ -2078,6 +2239,7 @@ namespace TerrainLab
                 SyncOutsideControlsFromProfile();
                 RebuildAnnotations();
                 UpdateLabels();
+                UpdateMapSizePreview();
                 SetPanelStatus(
                     LM.Get("terrain_lab_manual_boundary_removed"),
                     false);
@@ -2333,9 +2495,108 @@ namespace TerrainLab
                     "No source image is open.");
             }
 
-            _profile.Settings.InterpolateElevationGlobally =
-                _globalDemToggle.isOn;
+            _profile.Settings.InterpolateElevationGlobally = true;
+            _profile.Settings.LongSideBlocks = ReadLongSideBlocks();
             _profile.Save(_imagePath);
+        }
+
+        private int ReadLongSideBlocks()
+        {
+            GetOutputAspectDimensions(
+                out int aspectWidth,
+                out int aspectHeight);
+            if (_longSideInput == null ||
+                !int.TryParse(
+                    _longSideInput.text,
+                    NumberStyles.Integer,
+                    CultureInfo.InvariantCulture,
+                    out int value) ||
+                !TerrainMapLimits.TryGetBlockDimensions(
+                    aspectWidth,
+                    aspectHeight,
+                    value,
+                    out _,
+                    out _))
+            {
+                throw new InvalidDataException(
+                    LM.Get("terrain_lab_output_size_error"));
+            }
+            return value;
+        }
+
+        private void UpdateMapSizePreview()
+        {
+            if (_mapSizeLabel == null)
+            {
+                return;
+            }
+            GetOutputAspectDimensions(
+                out int aspectWidth,
+                out int aspectHeight);
+            if (!TerrainMapLimits.TryGetMaximumBlockDimensions(
+                    aspectWidth,
+                    aspectHeight,
+                    out int maximumWidth,
+                    out int maximumHeight))
+            {
+                _mapSizeLabel.text = string.Empty;
+                return;
+            }
+
+            int width = 0;
+            int height = 0;
+            bool valid =
+                _longSideInput != null &&
+                int.TryParse(
+                    _longSideInput.text,
+                    NumberStyles.Integer,
+                    CultureInfo.InvariantCulture,
+                    out int longSide) &&
+                TerrainMapLimits.TryGetBlockDimensions(
+                    aspectWidth,
+                    aspectHeight,
+                    longSide,
+                    out width,
+                    out height);
+            string sizeText = valid
+                ? string.Format(
+                    CultureInfo.InvariantCulture,
+                    LM.Get("terrain_lab_output_size_preview_format"),
+                    width,
+                    height,
+                    maximumWidth,
+                    maximumHeight)
+                : string.Format(
+                    CultureInfo.InvariantCulture,
+                    LM.Get("terrain_lab_output_size_maximum_format"),
+                    maximumWidth,
+                    maximumHeight);
+            _mapSizeLabel.text =
+                sizeText + "  " +
+                string.Format(
+                    CultureInfo.InvariantCulture,
+                    LM.Get(
+                        _profile?.MapBoundary == null
+                            ? "terrain_lab_output_size_scope_source_format"
+                            : "terrain_lab_output_size_scope_extent_format"),
+                    aspectWidth,
+                    aspectHeight);
+            _mapSizeLabel.color = valid
+                ? new UnityColor(0.72f, 0.84f, 0.94f, 1f)
+                : new UnityColor(0.95f, 0.52f, 0.46f, 1f);
+        }
+
+        private void GetOutputAspectDimensions(
+            out int width,
+            out int height)
+        {
+            if (_profile != null)
+            {
+                _profile.GetOutputAspectDimensions(out width, out height);
+                return;
+            }
+            width = Math.Max(1, _sourceWidth);
+            height = Math.Max(1, _sourceHeight);
         }
 
         private bool TryReadSelection(
@@ -2347,17 +2608,12 @@ namespace TerrainLab
             biotope = null;
             elevation = 0;
             if (_surfaceDropdown == null ||
-                _biotopeDropdown == null ||
                 _surfaceDropdown.value <= 0 ||
                 _surfaceDropdown.value >
                 TerrainImageClassificationCatalog.Surfaces.Count ||
-                _biotopeDropdown.value <= 0 ||
-                _biotopeDropdown.value >
-                TerrainImageClassificationCatalog.SelectableBiotopes.Count ||
                 !TryReadElevation(out elevation))
             {
-                if (_surfaceDropdown?.value <= 0 ||
-                    _biotopeDropdown?.value <= 0)
+                if (_surfaceDropdown?.value <= 0)
                 {
                     SetPanelStatus(
                         LM.Get(
@@ -2368,8 +2624,17 @@ namespace TerrainLab
             }
             surface = TerrainImageClassificationCatalog.Surfaces[
                 _surfaceDropdown.value - 1];
-            biotope = TerrainImageClassificationCatalog.SelectableBiotopes[
-                _biotopeDropdown.value - 1];
+            biotope = surface.SupportsBiotope
+                ? TerrainImageClassificationCatalog.FindBiotope(
+                    _selectedBiotopeId)
+                : TerrainImageClassificationCatalog.FindBiotope("none");
+            if (biotope == null)
+            {
+                SetPanelStatus(
+                    LM.Get("terrain_lab_manual_select_all_attributes"),
+                    true);
+                return false;
+            }
             return true;
         }
 
@@ -2624,6 +2889,11 @@ namespace TerrainLab
             float closedFillAlpha = 0.22f,
             float lineThickness = 2.2f)
         {
+            List<TerrainImageClassificationVertex> vertexList =
+                vertices?
+                    .Where(vertex => vertex != null)
+                    .ToList() ??
+                new List<TerrainImageClassificationVertex>();
             GameObject polygonObject = new GameObject(
                 objectName,
                 typeof(RectTransform),
@@ -2638,7 +2908,7 @@ namespace TerrainLab
             TerrainImagePolygonGraphic graphic =
                 polygonObject.GetComponent<TerrainImagePolygonGraphic>();
             graphic.Configure(
-                vertices,
+                vertexList,
                 _sourceWidth,
                 _sourceHeight,
                 surface,
@@ -2650,7 +2920,12 @@ namespace TerrainLab
                 showVertices,
                 1f / Mathf.Max(_zoom, 0.01f),
                 closedFillAlpha,
-                lineThickness);
+                lineThickness,
+                vertexList.Select(vertex =>
+                    GetElevationVertexColor(
+                        vertex.Elevation ??
+                        elevation ??
+                        (short)0)));
             return graphic;
         }
 
@@ -2887,6 +3162,355 @@ namespace TerrainLab
                 1f);
         }
 
+        private void CreateBiotopePalette(Transform parent)
+        {
+            _biotopePalette = new GameObject(
+                "TerrainLabClassificationBiotopePalette",
+                typeof(RectTransform),
+                typeof(Image),
+                typeof(RectMask2D),
+                typeof(ScrollRect));
+            _biotopePalette.transform.SetParent(parent, false);
+            RectTransform paletteRect =
+                _biotopePalette.GetComponent<RectTransform>();
+            paletteRect.anchorMin = new Vector2(0f, 1f);
+            paletteRect.anchorMax = new Vector2(1f, 1f);
+            paletteRect.pivot = new Vector2(0.5f, 1f);
+            paletteRect.offsetMin = new Vector2(12f, -72f);
+            paletteRect.offsetMax = new Vector2(-12f, -8f);
+            Image background = _biotopePalette.GetComponent<Image>();
+            Image nativePanel = ToolbarButtons.instance?.main_background;
+            background.sprite = nativePanel?.sprite ??
+                                SpriteTextureLoader.getSprite(
+                                    "ui/special/darkInputFieldEmpty");
+            background.type = Image.Type.Sliced;
+            background.material = nativePanel?.material;
+            background.color = nativePanel != null
+                ? nativePanel.color
+                : new UnityColor(0.20f, 0.22f, 0.18f, 0.98f);
+
+            GameObject contentObject = new GameObject(
+                "TerrainLabClassificationBiotopePaletteContent",
+                typeof(RectTransform),
+                typeof(GridLayoutGroup));
+            contentObject.transform.SetParent(_biotopePalette.transform, false);
+            RectTransform contentRect =
+                contentObject.GetComponent<RectTransform>();
+            int rows = 2;
+            int choiceCount =
+                TerrainImageClassificationCatalog.QuickPaletteSurfaces.Count +
+                TerrainImageClassificationCatalog.SelectableBiotopes.Count;
+            int columns = Mathf.CeilToInt(
+                choiceCount / (float)rows);
+            contentRect.anchorMin = new Vector2(0f, 0.5f);
+            contentRect.anchorMax = new Vector2(0f, 0.5f);
+            contentRect.pivot = new Vector2(0f, 0.5f);
+            contentRect.sizeDelta =
+                new Vector2(columns * 34f + 8f, 64f);
+            GridLayoutGroup grid =
+                contentObject.GetComponent<GridLayoutGroup>();
+            grid.padding = new RectOffset(4, 4, 3, 3);
+            grid.cellSize = new Vector2(28f, 28f);
+            grid.spacing = new Vector2(6f, 2f);
+            grid.startAxis = GridLayoutGroup.Axis.Vertical;
+            grid.startCorner = GridLayoutGroup.Corner.UpperLeft;
+            grid.constraint = GridLayoutGroup.Constraint.FixedRowCount;
+            grid.constraintCount = rows;
+
+            ScrollRect scroll =
+                _biotopePalette.GetComponent<ScrollRect>();
+            scroll.content = contentRect;
+            scroll.viewport = paletteRect;
+            scroll.horizontal = true;
+            scroll.vertical = false;
+            scroll.movementType = ScrollRect.MovementType.Clamped;
+            scroll.scrollSensitivity = 18f;
+
+            foreach (TerrainImageClassOption option in
+                     TerrainImageClassificationCatalog.QuickPaletteSurfaces)
+            {
+                string id = option.Id;
+                int dropdownIndex = FindSurfaceDropdownIndex(id);
+                Button button = CreateClassificationPaletteButton(
+                    contentObject.transform,
+                    "TerrainLabQuickSurface_" + id,
+                    "SurfaceMorphotype",
+                    TerrainImageUiVisuals.GetSurfaceSprite(id),
+                    option.LocalizationKey,
+                    delegate
+                    {
+                        if (_surfaceDropdown == null ||
+                            dropdownIndex <= 0 ||
+                            _surfaceDropdown.value == dropdownIndex)
+                        {
+                            return;
+                        }
+
+                        _surfaceDropdown.SetValueWithoutNotify(dropdownIndex);
+                        _surfaceDropdown.RefreshShownValue();
+                        HandleSurfaceChanged(dropdownIndex);
+                    },
+                    out Image lamp);
+                _quickSurfaceButtons[id] = button;
+                _quickSurfaceSelectionLamps[id] = lamp;
+            }
+
+            foreach (TerrainImageBiotopeOption option in
+                     TerrainImageClassificationCatalog.SelectableBiotopes)
+            {
+                string id = option.Id;
+                Button button = CreateClassificationPaletteButton(
+                    contentObject.transform,
+                    "TerrainLabBiotope_" + id,
+                    "BiomeSurface",
+                    FindBiotopeSurfaceSprite(id),
+                    option.LocalizationKey,
+                    delegate
+                    {
+                        _selectedBiotopeId = id;
+                        UpdateBiotopePalette();
+                        RefreshDraftGraphic();
+                        UpdateModeButtons();
+                    },
+                    out Image lamp);
+                _biotopeButtons[id] = button;
+                _biotopeSelectionLamps[id] = lamp;
+            }
+            _biotopePalette.SetActive(false);
+        }
+
+        private Button CreateClassificationPaletteButton(
+            Transform parent,
+            string objectName,
+            string iconName,
+            Sprite sprite,
+            string localizationKey,
+            Action onClick,
+            out Image lamp)
+        {
+            GameObject buttonObject =
+                DefaultControls.CreateButton(_defaultResources);
+            buttonObject.name = objectName;
+            buttonObject.transform.SetParent(parent, false);
+            Text label = buttonObject.GetComponentInChildren<Text>();
+            if (label != null)
+            {
+                label.enabled = false;
+            }
+
+            Image buttonImage = buttonObject.GetComponent<Image>();
+            buttonImage.sprite = ToolbarButtons.getSpriteButtonNormal();
+            buttonImage.type = Image.Type.Sliced;
+            buttonImage.color =
+                new UnityColor(0.31f, 0.33f, 0.28f, 1f);
+            Button button = buttonObject.GetComponent<Button>();
+            button.onClick.AddListener(
+                delegate
+                {
+                    onClick?.Invoke();
+                });
+
+            GameObject iconObject = new GameObject(
+                iconName,
+                typeof(RectTransform),
+                typeof(Image));
+            iconObject.transform.SetParent(buttonObject.transform, false);
+            RectTransform iconRect =
+                iconObject.GetComponent<RectTransform>();
+            iconRect.anchorMin = Vector2.zero;
+            iconRect.anchorMax = Vector2.one;
+            iconRect.offsetMin = new Vector2(3f, 3f);
+            iconRect.offsetMax = new Vector2(-3f, -3f);
+            Image icon = iconObject.GetComponent<Image>();
+            icon.sprite = sprite;
+            icon.preserveAspect = false;
+            icon.raycastTarget = false;
+
+            GameObject lampObject = new GameObject(
+                "TerrainLabPaletteSelectionLamp",
+                typeof(RectTransform),
+                typeof(Image));
+            lampObject.transform.SetParent(buttonObject.transform, false);
+            RectTransform lampRect =
+                lampObject.GetComponent<RectTransform>();
+            lampRect.anchorMin = new Vector2(0.5f, 1f);
+            lampRect.anchorMax = new Vector2(0.5f, 1f);
+            lampRect.pivot = new Vector2(0.5f, 0.5f);
+            lampRect.anchoredPosition = new Vector2(0f, 1f);
+            lampRect.sizeDelta = new Vector2(6f, 6f);
+            lamp = lampObject.GetComponent<Image>();
+            lamp.sprite = TerrainImageUiVisuals.GetActivitySprite(true);
+            lamp.preserveAspect = true;
+            lamp.raycastTarget = false;
+            lampObject.SetActive(false);
+            ConfigureTooltip(buttonObject, localizationKey);
+            return button;
+        }
+
+        private static int FindSurfaceDropdownIndex(string surfaceId)
+        {
+            for (int index = 0;
+                 index < TerrainImageClassificationCatalog.Surfaces.Count;
+                 index++)
+            {
+                if (string.Equals(
+                        TerrainImageClassificationCatalog.Surfaces[index].Id,
+                        surfaceId,
+                        StringComparison.Ordinal))
+                {
+                    return index + 1;
+                }
+            }
+            return 0;
+        }
+
+        private static Sprite FindBiotopeSurfaceSprite(string biotopeId)
+        {
+            return TerrainImageUiVisuals.GetBiotopeSprite(biotopeId);
+        }
+
+        private void UpdateBiotopePalette(bool controlsEnabled = true)
+        {
+            if (_biotopePalette == null)
+            {
+                return;
+            }
+
+            bool hasSurface =
+                _surfaceDropdown != null &&
+                _surfaceDropdown.value > 0 &&
+                _surfaceDropdown.value <=
+                TerrainImageClassificationCatalog.Surfaces.Count;
+            TerrainImageClassOption surface = hasSurface
+                ? TerrainImageClassificationCatalog.Surfaces[
+                    _surfaceDropdown.value - 1]
+                : null;
+            bool supportsBiotope =
+                surface != null && surface.SupportsBiotope;
+            if (!supportsBiotope)
+            {
+                _selectedBiotopeId = null;
+            }
+
+            _biotopePalette.SetActive(_editorEnabled && _profile != null);
+            bool surfaceInteractive =
+                controlsEnabled &&
+                _editorEnabled &&
+                _draftGeometryComplete;
+            string selectedSurfaceId = surface?.Id;
+            foreach (KeyValuePair<string, Button> pair in
+                     _quickSurfaceButtons)
+            {
+                Button button = pair.Value;
+                if (button == null)
+                {
+                    continue;
+                }
+
+                button.interactable = surfaceInteractive;
+                bool selected = string.Equals(
+                    pair.Key,
+                    selectedSurfaceId,
+                    StringComparison.Ordinal);
+                Image image = button.GetComponent<Image>();
+                if (image != null)
+                {
+                    image.color = selected
+                        ? new UnityColor(0.35f, 0.78f, 0.32f, 1f)
+                        : surfaceInteractive
+                            ? new UnityColor(0.31f, 0.33f, 0.28f, 1f)
+                            : new UnityColor(0.18f, 0.18f, 0.16f, 0.48f);
+                }
+                if (_quickSurfaceSelectionLamps.TryGetValue(
+                        pair.Key,
+                        out Image surfaceLamp) &&
+                    surfaceLamp != null)
+                {
+                    surfaceLamp.sprite =
+                        TerrainImageUiVisuals.GetActivitySprite(selected);
+                    surfaceLamp.gameObject.SetActive(selected);
+                }
+            }
+
+            bool interactive =
+                controlsEnabled &&
+                _editorEnabled &&
+                _draftGeometryComplete &&
+                supportsBiotope;
+            foreach (KeyValuePair<string, Button> pair in _biotopeButtons)
+            {
+                Button button = pair.Value;
+                if (button == null)
+                {
+                    continue;
+                }
+                button.interactable = interactive;
+                Image image = button.GetComponent<Image>();
+                if (image != null)
+                {
+                    bool selected = string.Equals(
+                        pair.Key,
+                        _selectedBiotopeId,
+                        StringComparison.Ordinal);
+                    image.color = selected
+                        ? new UnityColor(0.35f, 0.78f, 0.32f, 1f)
+                        : supportsBiotope
+                            ? new UnityColor(0.31f, 0.33f, 0.28f, 1f)
+                            : new UnityColor(0.18f, 0.18f, 0.16f, 0.48f);
+                    if (_biotopeSelectionLamps.TryGetValue(
+                            pair.Key,
+                            out Image lamp) &&
+                        lamp != null)
+                    {
+                        lamp.sprite =
+                            TerrainImageUiVisuals.GetActivitySprite(selected);
+                        lamp.gameObject.SetActive(selected);
+                    }
+                }
+            }
+        }
+
+        private static Text CreateCoordinateOverlay(Transform parent)
+        {
+            GameObject backgroundObject = new GameObject(
+                "TerrainLabImageCoordinates",
+                typeof(RectTransform),
+                typeof(Image));
+            backgroundObject.transform.SetParent(parent, false);
+            RectTransform rect =
+                backgroundObject.GetComponent<RectTransform>();
+            rect.anchorMin = new Vector2(0.5f, 0f);
+            rect.anchorMax = new Vector2(0.5f, 0f);
+            rect.pivot = new Vector2(0.5f, 0f);
+            rect.sizeDelta = new Vector2(176f, 23f);
+            rect.anchoredPosition = new Vector2(0f, 6f);
+            Image background = backgroundObject.GetComponent<Image>();
+            background.color =
+                new UnityColor(0.01f, 0.01f, 0.01f, 0.86f);
+            background.raycastTarget = false;
+
+            GameObject textObject = new GameObject(
+                "TerrainLabImageCoordinatesText",
+                typeof(RectTransform),
+                typeof(Text));
+            textObject.transform.SetParent(backgroundObject.transform, false);
+            RectTransform textRect =
+                textObject.GetComponent<RectTransform>();
+            textRect.anchorMin = Vector2.zero;
+            textRect.anchorMax = Vector2.one;
+            textRect.offsetMin = new Vector2(6f, 1f);
+            textRect.offsetMax = new Vector2(-6f, -1f);
+            Text text = textObject.GetComponent<Text>();
+            text.font = LocalizedTextManager.current_font;
+            text.text = "X -  Y -";
+            text.fontSize = 11;
+            text.fontStyle = FontStyle.Bold;
+            text.alignment = TextAnchor.MiddleCenter;
+            text.color = new UnityColor(0.72f, 0.84f, 0.94f, 1f);
+            text.raycastTarget = false;
+            return text;
+        }
+
         private static Transform CreateRow(Transform parent, float height)
         {
             GameObject row = new GameObject(
@@ -2899,9 +3523,9 @@ namespace TerrainLab
                 row.GetComponent<HorizontalLayoutGroup>();
             layout.spacing = 6f;
             layout.childAlignment = TextAnchor.MiddleCenter;
-            layout.childControlWidth = false;
+            layout.childControlWidth = true;
             layout.childControlHeight = true;
-            layout.childForceExpandWidth = false;
+            layout.childForceExpandWidth = true;
             layout.childForceExpandHeight = true;
             LayoutElement element = row.GetComponent<LayoutElement>();
             element.preferredHeight = height;
@@ -2958,7 +3582,9 @@ namespace TerrainLab
 
             LayoutElement element =
                 fieldObject.GetComponent<LayoutElement>();
+            element.minWidth = 0f;
             element.preferredWidth = 174f;
+            element.flexibleWidth = 1f;
             element.preferredHeight = 36f;
 
             GameObject textObject = new GameObject(
@@ -3021,8 +3647,23 @@ namespace TerrainLab
                 image.type = Image.Type.Sliced;
             }
             image.color = critical
-                ? new UnityColor(0.95f, 0.28f, 0.22f, 1f)
+                ? UnityColor.white
                 : new UnityColor(0.36f, 0.38f, 0.32f, 1f);
+            if (critical)
+            {
+                ColorBlock colors = button.colors;
+                colors.normalColor =
+                    new UnityColor(0.95f, 0.28f, 0.22f, 1f);
+                colors.highlightedColor =
+                    new UnityColor(1f, 0.40f, 0.28f, 1f);
+                colors.selectedColor = colors.highlightedColor;
+                colors.pressedColor =
+                    new UnityColor(0.76f, 0.16f, 0.12f, 1f);
+                colors.disabledColor =
+                    new UnityColor(0.35f, 0.16f, 0.14f, 0.62f);
+                colors.colorMultiplier = 1f;
+                button.colors = colors;
+            }
             Text label = buttonObject.GetComponentInChildren<Text>();
             label.font = LocalizedTextManager.current_font;
             label.text = text;
@@ -3034,7 +3675,9 @@ namespace TerrainLab
             label.resizeTextMaxSize = 11;
             LayoutElement element =
                 buttonObject.AddComponent<LayoutElement>();
+            element.minWidth = 0f;
             element.preferredWidth = width;
+            element.flexibleWidth = 1f;
             element.preferredHeight = 30f;
             ConfigureTooltip(buttonObject, tooltipKey);
             return button;
@@ -3070,6 +3713,8 @@ namespace TerrainLab
             StyleDropdownPopup(dropdownObject);
             LayoutElement element =
                 dropdownObject.AddComponent<LayoutElement>();
+            element.minWidth = 0f;
+            element.flexibleWidth = 1f;
             element.preferredHeight = 28f;
             ConfigureTooltip(dropdownObject, tooltipKey);
             return dropdown;
@@ -3202,7 +3847,7 @@ namespace TerrainLab
             {
                 text.font = LocalizedTextManager.current_font;
                 text.fontSize = 12;
-                text.color = UnityColor.white;
+                text.color = new UnityColor(1f, 0.82f, 0.22f, 1f);
             }
             Image image = inputObject.GetComponent<Image>();
             image.sprite = SpriteTextureLoader.getSprite(
@@ -3211,6 +3856,8 @@ namespace TerrainLab
             image.color = new UnityColor(0.06f, 0.06f, 0.055f, 1f);
             LayoutElement element =
                 inputObject.AddComponent<LayoutElement>();
+            element.minWidth = 0f;
+            element.flexibleWidth = 1f;
             element.preferredHeight = 28f;
             ConfigureTooltip(inputObject, tooltipKey);
             return input;

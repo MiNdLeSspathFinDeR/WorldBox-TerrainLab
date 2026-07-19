@@ -17,7 +17,38 @@ LIVING_SOIL_BIOMES = (
     "permafrost",
     "swamp",
     "enchanted",
+    "lemon",
+    "crystal",
+    "corrupted",
+    "infernal",
+    "candy",
+    "mushroom",
+    "wasteland",
+    "birch",
+    "maple",
+    "rocklands",
+    "garlic",
+    "flower",
+    "celestial",
+    "clover",
+    "singularity",
+    "paradox",
 )
+CLUSTER_SURFACE_IDS = (
+    "deep_ocean",
+    "shelf",
+    "shallow_water",
+    "river_lake",
+    "sand",
+    "plain",
+    "lowland",
+    "upland",
+    "hills",
+    "rocks",
+    "summit",
+    "depression",
+)
+CLUSTER_BIOTOPE_IDS = LIVING_SOIL_BIOMES
 
 
 @dataclass(frozen=True)
@@ -49,6 +80,8 @@ class TerrainClusteringSettings:
     sample_limit: int = 60_000
     kmeans_iterations: int = 18
     random_seed: int = 1729
+    allowed_surfaces: Tuple[str, ...] = CLUSTER_SURFACE_IDS
+    allowed_biotopes: Tuple[str, ...] = CLUSTER_BIOTOPE_IDS
 
 
 def classify_adaptive_terrain(
@@ -183,6 +216,12 @@ def classify_adaptive_terrain(
             passes=settings.smooth_passes,
         )
     indices = replace_bare_soil(indices, tile_names)
+    indices = constrain_cluster_composition(
+        indices,
+        tile_names,
+        settings,
+        analysis_mask,
+    )
     if valid_mask is not None:
         indices[~analysis_mask] = tile_index(tile_names, "deep_ocean")
 
@@ -206,6 +245,20 @@ def validate_clustering_settings(settings: TerrainClusteringSettings) -> None:
         )
     if settings.random_seed < 0 or settings.random_seed > 2_147_483_647:
         raise ValueError("clustering random_seed is outside supported range")
+    if not settings.allowed_surfaces:
+        raise ValueError("clustering requires at least one surface class")
+    if not settings.allowed_biotopes:
+        raise ValueError("clustering requires at least one biotope class")
+    if any(
+        surface not in CLUSTER_SURFACE_IDS
+        for surface in settings.allowed_surfaces
+    ):
+        raise ValueError("clustering contains an unsupported surface class")
+    if any(
+        biotope not in CLUSTER_BIOTOPE_IDS
+        for biotope in settings.allowed_biotopes
+    ):
+        raise ValueError("clustering contains an unsupported biotope class")
     weighted = (
         settings.color_weight,
         settings.luma_weight,
@@ -717,6 +770,127 @@ def smooth_tiles(
         next_result[isolated] = best_tile[isolated]
         result = next_result
     return result
+
+
+def constrain_cluster_composition(
+    indices: np.ndarray,
+    tile_names: Sequence[str],
+    settings: TerrainClusteringSettings,
+    active_mask: np.ndarray,
+) -> np.ndarray:
+    allowed_surfaces = set(settings.allowed_surfaces)
+    allowed_biotopes = set(settings.allowed_biotopes)
+    eligible = [
+        index
+        for index, tile in enumerate(tile_names)
+        if tile not in {"soil_low", "soil_high"}
+        and _tile_allowed_for_composition(
+            tile,
+            allowed_surfaces,
+            allowed_biotopes,
+        )
+    ]
+    if not eligible:
+        raise ValueError(
+            "selected clustering composition has no tiles in the palette"
+        )
+
+    result = indices.copy()
+    water_surfaces = {
+        "deep_ocean",
+        "shelf",
+        "shallow_water",
+        "river_lake",
+    }
+    eligible_water = [
+        index
+        for index in eligible
+        if set(_tile_surface_options(tile_names[index])) & water_surfaces
+    ]
+    eligible_land = [index for index in eligible if index not in eligible_water]
+
+    for source_index in np.unique(result[active_mask]):
+        source_index = int(source_index)
+        source_tile = tile_names[source_index]
+        if _tile_allowed_for_composition(
+            source_tile,
+            allowed_surfaces,
+            allowed_biotopes,
+        ):
+            continue
+
+        source_is_water = bool(
+            set(_tile_surface_options(source_tile)) & water_surfaces
+        )
+        candidates = (
+            eligible_water
+            if source_is_water and eligible_water
+            else eligible_land
+            if not source_is_water and eligible_land
+            else eligible
+        )
+        source_color = np.asarray(TILES[source_tile], dtype=np.float32)
+        replacement = min(
+            candidates,
+            key=lambda candidate: float(
+                np.sum(
+                    (
+                        np.asarray(
+                            TILES[tile_names[candidate]],
+                            dtype=np.float32,
+                        )
+                        - source_color
+                    )
+                    ** 2
+                )
+            ),
+        )
+        replace_mask = active_mask & (result == source_index)
+        result[replace_mask] = replacement
+    return result
+
+
+def _tile_allowed_for_composition(
+    tile: str,
+    allowed_surfaces: set[str],
+    allowed_biotopes: set[str],
+) -> bool:
+    if not set(_tile_surface_options(tile)) & allowed_surfaces:
+        return False
+    biotope = _tile_biotope(tile)
+    return biotope is None or biotope in allowed_biotopes
+
+
+def _tile_surface_options(tile: str) -> Tuple[str, ...]:
+    base = tile.split(":", 1)[0]
+    if base == "deep_ocean":
+        return ("deep_ocean",)
+    if base == "close_ocean":
+        return ("shelf",)
+    if base == "shallow_waters":
+        return ("shallow_water", "river_lake")
+    if base == "sand":
+        return ("sand",)
+    if base == "soil_low":
+        return ("plain", "lowland", "depression")
+    if base == "soil_high":
+        return ("upland",)
+    if base == "hills":
+        return ("hills",)
+    if base == "mountains":
+        return ("rocks", "summit")
+    return ()
+
+
+def _tile_biotope(tile: str) -> Optional[str]:
+    if ":" not in tile:
+        return None
+    suffix = tile.split(":", 1)[1]
+    if suffix.endswith("_low"):
+        suffix = suffix[:-4]
+    elif suffix.endswith("_high"):
+        suffix = suffix[:-5]
+    return "wasteland" if suffix == "waste" else suffix
 
 
 def fit_size(shape: Tuple[int, int], max_dimension: int) -> Tuple[int, int]:

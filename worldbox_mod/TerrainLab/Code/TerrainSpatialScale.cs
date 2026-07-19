@@ -7,8 +7,8 @@ namespace TerrainLab
         public const double DefaultHorizontalMetresPerCell = 1000d;
         public const double MinimumHorizontalMetresPerCell = 1d;
         public const double MaximumHorizontalMetresPerCell = 1000000d;
-        public const int GeneratedMaximumCardinalRiseMetres = 500;
-        public const int GeneratedMaximumDiagonalRiseMetres = 707;
+        public const int GeneratedMaximumCardinalRiseMetres = 364;
+        public const int GeneratedMaximumDiagonalRiseMetres = 515;
         public const int GeneratedMaximumCoastalMagnitudeMetres = 250;
 
         public static bool IsValid(double metresPerCell)

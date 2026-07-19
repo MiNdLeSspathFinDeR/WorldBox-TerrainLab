@@ -1,6 +1,6 @@
 # TerrainLab WorldBox mod
 
-TerrainLab 1.6 is an NML source mod that adds an in-game GIS workspace without
+TerrainLab 1.18 is an NML source mod that adds an in-game GIS workspace without
 replacing WorldBox's normal save format. Its standalone transparent side icon
 opens an adaptive map toolbar styled from WorldBox's bottom panel and a stock
 internal window. Routine map commands stay in the toolbar, while project/import
@@ -11,13 +11,13 @@ window. Custom GIS data is stored in an adjacent WBXGEO project and a vanilla
 The source mod installs to `<WorldBox>/Mods/TerrainLab`. NML compiles the files
 under `Code` when the game starts.
 
-## Implemented 1.6 surface
+## Implemented 1.18 surface
 
 - signed Int16 elevation in `-20000..9000 m`, sea level `0`, and reserved
   `NODATA=9999`, independent from vanilla terrain morphotypes;
 - Earth-like initial DEM inference from vanilla worlds, preserving raw relief
   order while keeping ordinary land predominantly below `2000 m`, placing the
-  mountain/summit median at `5000 m`, and limiting `7000 m` elevation or depth
+  mountain/summit median at `4500 m`, and limiting `7000 m` elevation or depth
   extremes to at most five percent of their semantic group;
 - a direct translucent DEM overlay with one pixel per world cell and a fixed
   blue/cyan and yellow/red Turbo scale around zero, with incremental
@@ -62,21 +62,38 @@ under `Code` when the game starts.
   and atomically publishes a complete new vanilla `saveN` slot. Its explicit
   input contract is `PNG`, `JPG/JPEG/JFIF`, `TIFF/TIF`, `WebP`, `BMP`, `GIF`,
   `TGA`, `DDS`, and `JP2`;
-- an automatic clustering workspace beside manual classification. It stores an
-  image-specific JSON profile, can exclude noisy background with an independent
-  area-of-interest polygon, and exposes five basic plus ten collapsible expert
-  controls for spline scale, clusters, cleanup, feature weighting, sample
-  budget, convergence, and reproducibility;
 - a manual source-raster canvas with zoom, pan, and explicit publish semantics
   for point, line, and QGIS-style polygon training geometry. Morphotype,
-  biotope, Int16 height, and line width are selected only after geometry
-  completion and reset after publication. Polygon fills use live morphotype
-  patterns; points and vector vertices use Turbo DEM colours. A separate map
-  boundary excludes exterior noise from learning while assigning those cells a
-  configurable safe surface, biotope, and elevation. The compact per-image JSON
-  profile guides adaptive colour/texture/spatial classification, while IDW
-  interpolation is transferred into the save as signed Int16
+  per-vertex Int16 height, and line width are selected only after geometry
+  completion and reset after publication. A compact in-canvas palette begins
+  with native water and plain-through-summit morphotype shortcuts, followed by
+  native biome surface sprites for every one of the 23 normal WorldBox seed
+  biomes. Biotope choices lock for water, sand, rock, hill, and summit
+  morphotypes.
+  Polygon fills use live morphotype patterns; points and vector vertices use
+  Turbo DEM colours. Vertices snap only when an existing control is within
+  40 source pixels, so free placement remains available, and coincident
+  controls from differently elevated objects meet near their mean height. A
+  separate map boundary excludes exterior noise from learning while assigning
+  those cells a configurable safe surface, biotope, and base elevation or a
+  Voronoi-like Auto continuation of the nearest interior class. The
+  compact per-image schema-v3 JSON profile guides adaptive
+  colour/texture/spatial classification, while bounded, non-flat DEM
+  interpolation uses ordinary 20-degree limits plus rare morphotype-dependent
+  hill, rock, and summit tails and is transferred into the save as signed Int16
   `terrainlab-elevation.tif` and adopted on first world load;
+- a collapsible automatic-clustering class-composition editor. Players can
+  open separate game-style Morphotype and Biotope icon palettes, enable any safe
+  morphotype and any of the 23 normal seed biomes before clustering, and read
+  state from native green lamps; disallowed results are remapped to the nearest
+  permitted class;
+- a shared final-size control in both raster workspaces. It fixes the longer
+  map side in 64-cell WorldBox blocks, derives the shorter side from the source
+  aspect or the published boundary bounding box, and displays both the selected
+  dimensions and the largest dimensions permitted by the 1,884,160-cell budget;
+- extent-aware GeoTIFF round-trip: a published image boundary crops processing,
+  translates the original six-coefficient affine before resampling, and keeps
+  every exported layer aligned with the selected source area in QGIS;
 - an in-game save form that edits the WorldBox map name before saving the
   ordinary map and WBXGEO sidecar, or hands a new world to the native slot
   picker;
@@ -85,10 +102,12 @@ under `Code` when the game starts.
 - derivative buttons that automatically calculate missing relief, hydrology,
   and erosion prerequisites before showing all stored derivatives, including
   filled elevation and categorical D8 direction;
+- an adaptive left legend for every active map layer: exact continuous
+  renderer ramps with localized min/max/unit labels, or one framed,
+  sprite-filled row per categorical surface class;
 - a two-level adaptive GIS toolbar with red critical actions, gray chapter
-  selectors, contextual functional tools, balanced wrapping, neutral etched
-  section dividers, colored command outlines, native WorldBox on/off lamps,
-  repeat-click deselection,
+  selectors, contextual functional tools, balanced wrapping, colored semantic
+  separators, native WorldBox on/off lamps, repeat-click deselection,
   availability, progress, cancellation, localized tooltips for every command
   and numeric parameter, a three-level
   side-button cycle, and a separate internal settings window whose close button

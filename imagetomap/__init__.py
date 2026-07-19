@@ -1,4 +1,11 @@
-from .core import convert, fit_map_size_to_budget, quantize, validate_map_size
+from .core import (
+    convert,
+    fit_map_size_to_budget,
+    fit_map_size_to_long_side,
+    maximum_map_size_for_aspect,
+    quantize,
+    validate_map_size,
+)
 from .calibration import (
     ClassificationLine,
     ClassificationProfile,
@@ -11,6 +18,7 @@ from .clustering import (
     clustering_profile_path,
     load_clustering_profile,
 )
+from .georeference import RasterGeoreference, read_raster_georeference
 
 __all__ = (
     "ClassificationProfile",
@@ -18,12 +26,16 @@ __all__ = (
     "ClassificationRegion",
     "ClassificationSample",
     "ClusteringProfile",
+    "RasterGeoreference",
     "clustering_profile_path",
     "convert",
     "fit_map_size_to_budget",
+    "fit_map_size_to_long_side",
+    "maximum_map_size_for_aspect",
     "load_classification_profile",
     "load_clustering_profile",
     "quantize",
+    "read_raster_georeference",
     "validate_map_size",
 )
-__version__ = "13.14.0"
+__version__ = "13.17.0"

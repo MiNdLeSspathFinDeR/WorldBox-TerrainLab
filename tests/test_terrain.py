@@ -3,12 +3,20 @@ import re
 import tempfile
 import unittest
 import zlib
+from dataclasses import replace
 from pathlib import Path
 
 import numpy as np
 from PIL import Image, ImageDraw
 
-from imagetomap import convert, fit_map_size_to_budget, validate_map_size
+from imagetomap import (
+    convert,
+    fit_map_size_to_budget,
+    fit_map_size_to_long_side,
+    maximum_map_size_for_aspect,
+    validate_map_size,
+)
+from imagetomap.__main__ import process_image
 from imagetomap.calibration import (
     ClassificationLine,
     ClassificationProfile,
@@ -16,11 +24,18 @@ from imagetomap.calibration import (
     ClassificationSample,
     GENERATED_ELEVATION_FILE_NAME,
     GENERATED_PROFILE_FILE_NAME,
+    SURFACE_IDS,
+    _surface_slope_caps,
+    classification_processing_extent,
+    crop_classification_profile,
     load_classification_profile,
     rasterize_map_boundary,
+    write_int16_geotiff,
 )
 from imagetomap.clustering import (
     ClusteringProfile,
+    clustering_processing_extent,
+    crop_clustering_profile,
     load_clustering_profile,
     rasterize_clustering_boundary,
 )
@@ -30,6 +45,12 @@ from imagetomap.consts import (
     ELEVATION_NODATA,
     SAFE_TILES_TUPLE,
     UNPLAYABLE_TILES,
+)
+from imagetomap.georeference import (
+    GEOREFERENCE_FILE_NAME,
+    RasterGeoreference,
+    apply_transform,
+    read_raster_georeference,
 )
 from imagetomap.saves import write_game_save_atomically
 from imagetomap.terrain import fill_small_land_regions
@@ -80,6 +101,7 @@ PARAMETER_TOOLTIP_KEYS = (
     "terrain_lab_manual_publish_feature",
     "terrain_lab_manual_line_width",
     "terrain_lab_manual_outside_surface",
+    "terrain_lab_manual_outside_auto",
     "terrain_lab_manual_outside_biotope",
     "terrain_lab_manual_outside_elevation",
     "terrain_lab_cluster_clusters",
@@ -97,6 +119,8 @@ PARAMETER_TOOLTIP_KEYS = (
     "terrain_lab_cluster_sample_limit",
     "terrain_lab_cluster_iterations",
     "terrain_lab_cluster_seed",
+    "terrain_lab_cluster_composition_surfaces",
+    "terrain_lab_cluster_composition_biotopes",
 )
 
 
@@ -331,6 +355,7 @@ class TerrainConversionTests(unittest.TestCase):
             profile_source,
         )
         for json_name in (
+            "long_side_blocks",
             "clusters",
             "spline_radius",
             "smooth_passes",
@@ -356,6 +381,40 @@ class TerrainConversionTests(unittest.TestCase):
         self.assertIn("_profile.SetMapBoundary(_draftVertices);", overlay_source)
         self.assertIn("private void ToggleExpertPanel()", overlay_source)
         self.assertEqual(overlay_source.count("CreateParameterRow(") - 1, 15)
+        boundary_controls = overlay_source.split(
+            "Transform boundaryModes =",
+            maxsplit=1,
+        )[1].split(
+            "_clearBoundaryButton =",
+            maxsplit=1,
+        )[0]
+        self.assertIn(
+            "CreateFlexibleButtonRow(content, 28f);",
+            boundary_controls,
+        )
+        self.assertEqual(boundary_controls.count("CreateFlexibleButton("), 3)
+        self.assertNotIn("92f", boundary_controls)
+        self.assertIn(
+            "element.flexibleWidth = 1f;",
+            overlay_source,
+        )
+        self.assertIn("_longSideInput", overlay_source)
+        self.assertIn("UpdateMapSizePreview()", overlay_source)
+        self.assertIn(
+            "TerrainMapLimits.TryGetMaximumBlockDimensions(",
+            overlay_source,
+        )
+        self.assertIn("CreateCompositionPalette(", overlay_source)
+        self.assertIn("SetCompositionCategory(true)", overlay_source)
+        self.assertIn("SetCompositionCategory(false)", overlay_source)
+        self.assertIn(
+            "TerrainImageUiVisuals.GetActivitySprite(toggle.isOn)",
+            overlay_source,
+        )
+        self.assertIn(
+            "new UnityColor(1f, 0.82f, 0.22f, 1f)",
+            overlay_source,
+        )
         self.assertIn('"image_auto_cluster"', toolbar_source)
         self.assertIn('"image_manual_classify"', toolbar_source)
         self.assertIn(
@@ -370,6 +429,87 @@ class TerrainConversionTests(unittest.TestCase):
             'arguments.Append(" --no-clustering-profile");',
             workspace_source,
         )
+
+    def test_layer_legends_match_gis_layer_semantics(self) -> None:
+        legend_source = (
+            ROOT
+            / "worldbox_mod"
+            / "TerrainLab"
+            / "Code"
+            / "TerrainLayerLegend.cs"
+        ).read_text(encoding="utf-8")
+        ui_source = (
+            ROOT / "worldbox_mod" / "TerrainLab" / "Code" / "TerrainLabUi.cs"
+        ).read_text(encoding="utf-8")
+        locale_directory = ROOT / "worldbox_mod" / "TerrainLab" / "Locales"
+        locales = {
+            name: json.loads((locale_directory / name).read_text(encoding="utf-8"))
+            for name in ("en.json", "ru.json")
+        }
+
+        self.assertIn("TerrainLayerLegendKind.Continuous", legend_source)
+        self.assertIn("TerrainLayerLegendKind.Categories", legend_source)
+        self.assertIn("private const int GradientResolution = 256;", legend_source)
+        self.assertIn("typeof(RectMask2D)", legend_source)
+        self.assertIn("TerrainLabLegendBiotopeTile_", legend_source)
+        self.assertIn("const int repeats = 4;", legend_source)
+        self.assertIn("terrainlab/legend/panel_top", legend_source)
+        self.assertNotIn("terrainlab/legend/panel_bottom", legend_source)
+        self.assertIn("terrainlab/legend/scale_continuous", legend_source)
+        self.assertIn("terrainlab/legend/scale_categorical", legend_source)
+        self.assertIn(
+            "rect.pivot = new Vector2(0.5f, 0f);",
+            legend_source,
+        )
+        self.assertIn(
+            "rect.localScale = new Vector3(1f, -1f, 1f);",
+            legend_source,
+        )
+        self.assertIn(
+            "ReferenceEquals(target, _bottomCap)",
+            legend_source,
+        )
+        self.assertIn("ToolbarButtons.instance.main_background", legend_source)
+        self.assertIn("ToolbarButtons.getSpriteButtonNormal()", legend_source)
+        self.assertIn("ResolveWorldSprites(", legend_source)
+        self.assertIn("TryGetTileSprite(", legend_source)
+        self.assertIn("UpdateLayerLegend(state);", ui_source)
+        self.assertIn(
+            "_workspaceVisible &&\n"
+            "                _classificationOverlay?.IsVisible != true",
+            ui_source,
+        )
+
+        required_keys = {
+            "terrain_lab_legend_maximum_format",
+            "terrain_lab_legend_minimum_format",
+            "terrain_lab_legend_unit_metres",
+            "terrain_lab_legend_unit_degrees",
+            "terrain_lab_legend_unit_percent",
+            "terrain_lab_legend_contour_minor",
+            "terrain_lab_legend_watershed",
+            "terrain_lab_legend_direction_northeast",
+        }
+        for locale in locales.values():
+            self.assertTrue(required_keys.issubset(locale))
+            for key in required_keys:
+                self.assertTrue(locale[key])
+
+        legend_assets = (
+            ROOT
+            / "worldbox_mod"
+            / "TerrainLab"
+            / "GameResources"
+            / "terrainlab"
+            / "legend"
+        )
+        for name in (
+            "panel_top.png",
+            "panel_bottom.png",
+            "scale_continuous.png",
+            "scale_categorical.png",
+        ):
+            self.assertTrue((legend_assets / name).is_file())
 
     def test_geyser_patch_forwards_the_building_lifecycle(self) -> None:
         patch_source = (
@@ -434,8 +574,59 @@ class TerrainConversionTests(unittest.TestCase):
         self.assertEqual(fit_map_size_to_budget(4000, 100), (120, 3))
         self.assertEqual(fit_map_size_to_budget(100, 4000), (3, 120))
 
+    def test_long_side_map_size_and_displayed_maximum_share_one_budget(self) -> None:
+        self.assertEqual(
+            fit_map_size_to_long_side(2000, 1000, 20),
+            (20, 10),
+        )
+        self.assertEqual(
+            fit_map_size_to_long_side(1000, 2000, 20),
+            (10, 20),
+        )
+        self.assertEqual(
+            maximum_map_size_for_aspect(2000, 1000),
+            (30, 15),
+        )
+        self.assertEqual(
+            maximum_map_size_for_aspect(1000, 1000),
+            (21, 21),
+        )
+        with self.assertRaisesRegex(ValueError, "maximum.*30x15"):
+            fit_map_size_to_long_side(2000, 1000, 31)
+
     def test_safe_palette_excludes_gameplay_hazards(self) -> None:
         self.assertFalse(set(SAFE_TILES_TUPLE) & set(UNPLAYABLE_TILES))
+        expected_seed_biomes = {
+            "grass",
+            "savanna",
+            "jungle",
+            "desert",
+            "lemon",
+            "permafrost",
+            "swamp",
+            "crystal",
+            "enchanted",
+            "corrupted",
+            "infernal",
+            "candy",
+            "mushroom",
+            "wasteland",
+            "birch",
+            "maple",
+            "rocklands",
+            "garlic",
+            "flower",
+            "celestial",
+            "clover",
+            "singularity",
+            "paradox",
+        }
+        available = {
+            tile.split(":", 1)[1].removesuffix("_low")
+            for tile in SAFE_TILES_TUPLE
+            if tile.startswith("soil_low:")
+        }
+        self.assertTrue(expected_seed_biomes <= available)
 
     def test_adaptive_clustering_never_outputs_bare_soil(self) -> None:
         pixels = np.zeros((128, 128, 3), dtype=np.uint8)
@@ -530,8 +721,33 @@ class TerrainConversionTests(unittest.TestCase):
         ).read_text(encoding="utf-8")
 
         self.assertIn("SelectableBiotopes = Biotopes", catalog_source)
+        self.assertIn("QuickPaletteSurfaces = Surfaces", catalog_source)
         self.assertNotIn(
             "TerrainImageClassificationCatalog.Biotopes",
+            overlay_source,
+        )
+        self.assertIn("CreateBiotopePalette(_viewport)", overlay_source)
+        self.assertIn("FindBiotopeSurfaceSprite", overlay_source)
+        self.assertIn(
+            "TerrainImageUiVisuals.GetSurfaceSprite(id)",
+            overlay_source,
+        )
+        self.assertIn("FindSurfaceDropdownIndex", overlay_source)
+        self.assertIn("VertexSnapRadiusSourcePixels = 40", overlay_source)
+        self.assertIn("TrySnapToExistingVertex(", overlay_source)
+        self.assertIn("snapped = null;\n                return false;", overlay_source)
+        self.assertIn("_longSideInput", overlay_source)
+        self.assertIn("UpdateMapSizePreview()", overlay_source)
+        self.assertIn(
+            "new UnityColor(1f, 0.82f, 0.22f, 1f)",
+            overlay_source,
+        )
+        self.assertIn(
+            "GetOutputAspectDimensions(out width, out height)",
+            overlay_source,
+        )
+        self.assertIn(
+            "TerrainMapLimits.TryGetMaximumBlockDimensions(",
             overlay_source,
         )
         self.assertIn(
@@ -566,6 +782,7 @@ class TerrainConversionTests(unittest.TestCase):
             source_file_name="clustered.png",
             source_width=128,
             source_height=128,
+            long_side_blocks=18,
             clusters=9,
             spline_radius=2,
             smooth_passes=2,
@@ -581,7 +798,7 @@ class TerrainConversionTests(unittest.TestCase):
             sample_limit=12_000,
             kmeans_iterations=24,
             random_seed=77,
-            map_boundary=((20, 20), (108, 20), (108, 108), (20, 108)),
+            map_boundary=((64, 20), (108, 64), (64, 108), (20, 64)),
         )
         with tempfile.TemporaryDirectory() as temporary_directory:
             path = Path(temporary_directory) / "cluster.json"
@@ -590,8 +807,19 @@ class TerrainConversionTests(unittest.TestCase):
                 encoding="utf-8",
             )
             restored = load_clustering_profile(path, source.size)
+            legacy_payload = profile.to_json_dict()
+            legacy_payload["schema_version"] = 2
+            legacy_payload["settings"].pop("long_side_blocks")
+            path.write_text(
+                json.dumps(legacy_payload),
+                encoding="utf-8",
+            )
+            migrated = load_clustering_profile(path, source.size)
 
         self.assertEqual(restored, profile)
+        self.assertEqual(profile.to_json_dict()["schema_version"], 3)
+        self.assertEqual(restored.long_side_blocks, 18)
+        self.assertEqual(migrated.long_side_blocks, 20)
         converted = convert(
             source,
             width=2,
@@ -599,7 +827,13 @@ class TerrainConversionTests(unittest.TestCase):
             clustering_profile=restored,
         )
         try:
-            mask = rasterize_clustering_boundary(restored, 128, 128)
+            extent = clustering_processing_extent(restored)
+            working_profile = crop_clustering_profile(restored, extent)
+            mask = rasterize_clustering_boundary(
+                working_profile,
+                128,
+                128,
+            )
             tiles = np.asarray(converted.preview)
             deep_ocean = SAFE_TILES_TUPLE.index("deep_ocean")
             self.assertTrue(np.all(tiles[~mask] == deep_ocean))
@@ -712,11 +946,19 @@ class TerrainConversionTests(unittest.TestCase):
                 SAFE_TILES_TUPLE[pixels[108, 32]],
                 "soil_low:grass_low",
             )
-            self.assertEqual(int(converted.elevation[32, 20]), 3200)
-            self.assertEqual(int(converted.elevation[32, 108]), 120)
+            self.assertEqual(int(converted.elevation[2, 2]), 3200)
+            self.assertEqual(int(converted.elevation[2, 69]), 120)
             self.assertGreater(
-                int(converted.elevation[32, 48]),
-                int(converted.elevation[32, 80]),
+                int(np.ptp(converted.elevation[3:61, 3:58])),
+                0,
+            )
+            self.assertGreater(
+                int(np.ptp(converted.elevation[3:61, 70:125])),
+                0,
+            )
+            self.assertGreater(
+                float(np.median(converted.elevation[6:58, 6:54])),
+                float(np.median(converted.elevation[6:58, 74:122])),
             )
             self.assertFalse(np.any(converted.elevation == ELEVATION_NODATA))
         finally:
@@ -752,7 +994,86 @@ class TerrainConversionTests(unittest.TestCase):
                 "mountains",
             )
             self.assertEqual(int(converted.elevation[20, 64]), 2800)
-            self.assertEqual(int(converted.elevation[22, 64]), 2800)
+            self.assertNotEqual(int(converted.elevation[22, 64]), 2800)
+            self.assertLessEqual(
+                abs(
+                    int(converted.elevation[22, 64])
+                    - int(converted.elevation[21, 64])
+                ),
+                364,
+            )
+        finally:
+            converted.preview.close()
+            source.close()
+
+    def test_shared_vertex_conflict_is_averaged_without_vertical_walls(
+        self,
+    ) -> None:
+        source = Image.new("RGB", (128, 64), (112, 126, 104))
+        profile = ClassificationProfile(
+            source_file_name="shared-vertex.png",
+            source_width=128,
+            source_height=64,
+            samples=(),
+            regions=(
+                ClassificationRegion(
+                    ((2, 2), (64, 2), (64, 61), (2, 61)),
+                    "upland",
+                    "grass",
+                    100,
+                    (100, 100, 100, 100),
+                ),
+                ClassificationRegion(
+                    ((64, 2), (125, 2), (125, 61), (64, 61)),
+                    "rocks",
+                    "none",
+                    900,
+                    (900, 900, 900, 900),
+                ),
+            ),
+        )
+        converted = convert(
+            source,
+            width=2,
+            height=1,
+            classification_profile=profile,
+        )
+        try:
+            self.assertEqual(int(converted.elevation[2, 64]), 500)
+            cardinal = max(
+                int(np.max(np.abs(np.diff(converted.elevation, axis=0)))),
+                int(np.max(np.abs(np.diff(converted.elevation, axis=1)))),
+            )
+            self.assertLessEqual(cardinal, 364)
+        finally:
+            converted.preview.close()
+            source.close()
+
+    def test_clustering_composition_can_select_one_safe_living_biome(
+        self,
+    ) -> None:
+        source = Image.new("RGB", (64, 64), (104, 134, 86))
+        profile = ClusteringProfile(
+            source_file_name="composition.png",
+            source_width=64,
+            source_height=64,
+            clusters=4,
+            min_land_region=0,
+            allowed_surfaces=("plain",),
+            allowed_biotopes=("birch",),
+        )
+        converted = convert(
+            source,
+            width=1,
+            height=1,
+            clustering_profile=profile,
+        )
+        try:
+            selected = {
+                SAFE_TILES_TUPLE[int(index)]
+                for index in np.unique(np.asarray(converted.preview))
+            }
+            self.assertEqual(selected, {"soil_low:birch_low"})
         finally:
             converted.preview.close()
             source.close()
@@ -768,7 +1089,7 @@ class TerrainConversionTests(unittest.TestCase):
         second_pixels[20:109, 20:109] = (112, 126, 104)
         first = Image.fromarray(first_pixels, mode="RGB")
         second = Image.fromarray(second_pixels, mode="RGB")
-        boundary = ((20, 20), (108, 20), (108, 108), (20, 108))
+        boundary = ((64, 20), (108, 64), (64, 108), (20, 64))
         interior_samples = (
             ClassificationSample(36, 64, "plain", "grass", 120),
             ClassificationSample(92, 64, "rocks", "none", 3200),
@@ -804,7 +1125,12 @@ class TerrainConversionTests(unittest.TestCase):
         try:
             noisy_tiles = np.asarray(noisy.preview)
             clean_tiles = np.asarray(clean.preview)
-            mask = rasterize_map_boundary(noisy_profile, 128, 128)
+            extent = classification_processing_extent(noisy_profile)
+            working_profile = crop_classification_profile(
+                noisy_profile,
+                extent,
+            )
+            mask = rasterize_map_boundary(working_profile, 128, 128)
             self.assertIsNotNone(mask)
             self.assertTrue(np.array_equal(noisy_tiles, clean_tiles))
             self.assertTrue(
@@ -812,13 +1138,26 @@ class TerrainConversionTests(unittest.TestCase):
             )
             deep_ocean = SAFE_TILES_TUPLE.index("deep_ocean")
             self.assertTrue(np.all(noisy_tiles[~mask] == deep_ocean))
-            self.assertTrue(np.all(noisy.elevation[~mask] == -4000))
+            self.assertGreater(
+                int(np.ptp(noisy.elevation[~mask])),
+                0,
+            )
+            self.assertTrue(np.all(noisy.elevation[~mask] <= -151))
+            left, top, right, bottom = extent
+            plain_position = (
+                int(((36 - left + 0.5) / (right - left)) * 128),
+                int(((64 - top + 0.5) / (bottom - top)) * 128),
+            )
+            rock_position = (
+                int(((92 - left + 0.5) / (right - left)) * 128),
+                int(((64 - top + 0.5) / (bottom - top)) * 128),
+            )
             self.assertEqual(
-                SAFE_TILES_TUPLE[noisy.preview.getpixel((36, 64))],
+                SAFE_TILES_TUPLE[noisy.preview.getpixel(plain_position)],
                 "soil_low:grass_low",
             )
             self.assertEqual(
-                SAFE_TILES_TUPLE[noisy.preview.getpixel((92, 64))],
+                SAFE_TILES_TUPLE[noisy.preview.getpixel(rock_position)],
                 "mountains",
             )
         finally:
@@ -837,7 +1176,7 @@ class TerrainConversionTests(unittest.TestCase):
                 ClassificationSample(40, 64, "plain", "grass", 120),
                 ClassificationSample(88, 64, "rocks", "none", 2400),
             ),
-            map_boundary=((20, 20), (108, 20), (108, 108), (20, 108)),
+            map_boundary=((64, 20), (108, 64), (64, 108), (20, 64)),
             outside_surface="sand",
             outside_biotope="none",
             outside_elevation=7,
@@ -849,14 +1188,81 @@ class TerrainConversionTests(unittest.TestCase):
             classification_profile=profile,
         )
         try:
-            mask = rasterize_map_boundary(profile, 128, 128)
+            extent = classification_processing_extent(profile)
+            working_profile = crop_classification_profile(profile, extent)
+            mask = rasterize_map_boundary(working_profile, 128, 128)
             tiles = np.asarray(converted.preview)
             sand = SAFE_TILES_TUPLE.index("sand")
             self.assertTrue(np.all(tiles[~mask] == sand))
-            self.assertTrue(np.all(converted.elevation[~mask] == 7))
+            outside = converted.elevation[~mask]
+            self.assertGreater(int(np.ptp(outside)), 0)
+            self.assertLess(abs(float(np.median(outside)) - 7.0), 600.0)
         finally:
             converted.preview.close()
             source.close()
+
+    def test_auto_outside_continues_nearest_class_and_dem(self) -> None:
+        source = Image.new("RGB", (128, 96), (112, 126, 104))
+        profile = ClassificationProfile(
+            source_file_name="auto-outside.png",
+            source_width=128,
+            source_height=96,
+            samples=(
+                ClassificationSample(34, 48, "plain", "grass", 200),
+                ClassificationSample(92, 48, "rocks", "none", 3200),
+            ),
+            map_boundary=((18, 48), (50, 12), (110, 48), (50, 84)),
+            outside_surface="auto",
+            outside_biotope="none",
+            outside_elevation=-4000,
+        )
+        converted = convert(
+            source,
+            width=2,
+            height=1,
+            classification_profile=profile,
+        )
+        try:
+            extent = classification_processing_extent(profile)
+            working = crop_classification_profile(profile, extent)
+            mask = rasterize_map_boundary(working, 128, 64)
+            tiles = np.asarray(converted.preview)
+            inside_tiles = np.unique(tiles[mask])
+            self.assertTrue(np.all(np.isin(tiles[~mask], inside_tiles)))
+            outside_dem = converted.elevation[~mask]
+            self.assertGreater(int(np.ptp(outside_dem)), 0)
+            self.assertGreater(float(np.median(outside_dem)), -1000.0)
+            self.assertLess(
+                int(np.max(np.abs(np.diff(converted.elevation, axis=1)))),
+                9001,
+            )
+        finally:
+            converted.preview.close()
+            source.close()
+
+    def test_surface_slope_caps_keep_steep_angles_in_rare_tails(self) -> None:
+        surfaces = np.full(
+            (192, 256),
+            SURFACE_IDS.index("plain"),
+            dtype=np.int8,
+        )
+        surfaces[:, 64:128] = SURFACE_IDS.index("hills")
+        surfaces[:, 128:192] = SURFACE_IDS.index("rocks")
+        surfaces[:, 192:] = SURFACE_IDS.index("summit")
+        caps = _surface_slope_caps(surfaces, 20260719)
+        degrees = np.degrees(np.arctan(caps / 1000.0))
+
+        plain = degrees[:, :64]
+        hills = degrees[:, 64:128]
+        rocks = degrees[:, 128:192]
+        summits = degrees[:, 192:]
+        self.assertLessEqual(float(np.max(plain)), 20.01)
+        self.assertLessEqual(float(np.max(hills)), 50.01)
+        self.assertLess(float(np.median(hills)), 24.0)
+        self.assertLess(float(np.median(rocks)), 26.0)
+        self.assertLess(float(np.median(summits)), 25.0)
+        self.assertGreater(float(np.max(rocks)), 55.0)
+        self.assertGreater(float(np.max(summits)), 70.0)
 
     def test_manual_polygon_profile_round_trips_and_rejects_bow_tie(self) -> None:
         with tempfile.TemporaryDirectory() as temporary_directory:
@@ -866,6 +1272,7 @@ class TerrainConversionTests(unittest.TestCase):
                 source_width=64,
                 source_height=64,
                 samples=(),
+                long_side_blocks=19,
                 regions=(
                     ClassificationRegion(
                         ((4, 4), (50, 4), (50, 50), (4, 50)),
@@ -897,11 +1304,26 @@ class TerrainConversionTests(unittest.TestCase):
                 (64, 64),
             )
             self.assertEqual(restored.samples, ())
+            self.assertEqual(profile.to_json_dict()["schema_version"], 3)
+            self.assertEqual(restored.long_side_blocks, 19)
             self.assertEqual(restored.regions, profile.regions)
             self.assertEqual(restored.lines, profile.lines)
             self.assertEqual(restored.map_boundary, profile.map_boundary)
             self.assertEqual(restored.outside_surface, "sand")
             self.assertEqual(restored.outside_elevation, 4)
+
+            legacy_payload = profile.to_json_dict()
+            legacy_payload["schema_version"] = 2
+            legacy_payload["settings"].pop("long_side_blocks")
+            profile_path.write_text(
+                json.dumps(legacy_payload),
+                encoding="utf-8",
+            )
+            migrated = load_classification_profile(
+                profile_path,
+                (64, 64),
+            )
+            self.assertEqual(migrated.long_side_blocks, 20)
 
             payload = profile.to_json_dict()
             payload["regions"][0]["vertices"] = [
@@ -975,6 +1397,362 @@ class TerrainConversionTests(unittest.TestCase):
         finally:
             converted.preview.close()
             source.close()
+
+    def test_source_georeference_survives_resize_and_geotiff_round_trip(
+        self,
+    ) -> None:
+        source_reference = RasterGeoreference(
+            source_file_name="rotated-source.tif",
+            source_width=128,
+            source_height=64,
+            raster_width=128,
+            raster_height=64,
+            source_raster_to_crs=(30.0, 0.01, 0.002, 60.0, 0.001, -0.01),
+            raster_to_crs=(30.0, 0.01, 0.002, 60.0, 0.001, -0.01),
+            crs_wkt=(
+                'GEOGCS["WGS 84",DATUM["WGS_1984",'
+                'SPHEROID["WGS 84",6378137,298.257223563]],'
+                'PRIMEM["Greenwich",0],'
+                'UNIT["degree",0.0174532925199433],'
+                'AUTHORITY["EPSG","4326"]]'
+            ),
+            crs_projjson='{"type":"GeographicCRS","name":"WGS 84"}',
+            epsg=4326,
+            crs_kind="geographic",
+            pixel_interpretation="area",
+            geo_key_directory=(
+                1,
+                1,
+                0,
+                3,
+                1024,
+                0,
+                1,
+                2,
+                1025,
+                0,
+                1,
+                1,
+                2048,
+                0,
+                1,
+                4326,
+            ),
+        )
+        reference = source_reference.resampled(64, 64)
+        self.assertEqual(
+            reference.raster_to_crs,
+            (30.0, 0.02, 0.002, 60.0, 0.002, -0.01),
+        )
+        self.assertEqual(len(reference.wgs84_control_points), 25)
+        self.assertTrue(
+            np.allclose(
+                apply_transform(reference.worldbox_cell_to_crs, 0.0, 0.0),
+                apply_transform(reference.raster_to_crs, 0.0, 64.0),
+            )
+        )
+        source_xy = apply_transform(
+            reference.worldbox_cell_to_crs,
+            17.5,
+            23.25,
+        )
+        self.assertTrue(
+            np.allclose(
+                apply_transform(
+                    reference.crs_to_worldbox_cell,
+                    *source_xy,
+                ),
+                (17.5, 23.25),
+            )
+        )
+
+        source = Image.new("RGB", (64, 64), (90, 140, 80))
+        profile = ClassificationProfile(
+            source_file_name="rotated-source.tif",
+            source_width=64,
+            source_height=64,
+            samples=(
+                ClassificationSample(4, 4, "deep_ocean", "auto", -4000),
+                ClassificationSample(59, 59, "summit", "none", 5000),
+            ),
+        )
+        converted = convert(
+            source,
+            width=1,
+            height=1,
+            classification_profile=profile,
+        )
+        converted = replace(converted, georeference=reference)
+        try:
+            with tempfile.TemporaryDirectory() as temporary_directory:
+                destination = Path(temporary_directory) / "save1"
+                write_game_save_atomically(
+                    output_path=destination,
+                    converted_map=converted,
+                    name="Georeferenced map",
+                )
+                dem_path = destination / GENERATED_ELEVATION_FILE_NAME
+                self.assertTrue((destination / GEOREFERENCE_FILE_NAME).is_file())
+                self.assertTrue(
+                    dem_path.with_name(
+                        dem_path.stem + ".terrainlab-georef.json"
+                    ).is_file()
+                )
+                self.assertTrue(dem_path.with_suffix(".tfw").is_file())
+                self.assertTrue(dem_path.with_suffix(".prj").is_file())
+                with Image.open(dem_path) as dem:
+                    self.assertIn(34264, dem.tag_v2)
+                    self.assertNotIn(33550, dem.tag_v2)
+                    self.assertNotIn(33922, dem.tag_v2)
+
+                restored = read_raster_georeference(
+                    dem_path,
+                    expected_size=(64, 64),
+                )
+                self.assertIsNotNone(restored)
+                self.assertEqual(restored.epsg, 4326)
+                self.assertEqual(restored.pixel_interpretation, "area")
+                self.assertTrue(
+                    np.allclose(
+                        restored.raster_to_crs,
+                        reference.raster_to_crs,
+                    )
+                )
+
+                point_reference = replace(
+                    reference,
+                    pixel_interpretation="point",
+                    geo_key_directory=(
+                        1,
+                        1,
+                        0,
+                        3,
+                        1024,
+                        0,
+                        1,
+                        2,
+                        1025,
+                        0,
+                        1,
+                        2,
+                        2048,
+                        0,
+                        1,
+                        4326,
+                    ),
+                )
+                point_path = destination / "pixel-point.tif"
+                write_int16_geotiff(
+                    point_path,
+                    converted.elevation,
+                    point_reference,
+                )
+                restored_point = read_raster_georeference(
+                    point_path,
+                    expected_size=(64, 64),
+                )
+                self.assertIsNotNone(restored_point)
+                self.assertEqual(
+                    restored_point.pixel_interpretation,
+                    "point",
+                )
+                self.assertTrue(
+                    np.allclose(
+                        restored_point.raster_to_crs,
+                        point_reference.raster_to_crs,
+                    )
+                )
+        finally:
+            converted.preview.close()
+            source.close()
+
+    def test_process_image_carries_source_georeference_into_map_output(
+        self,
+    ) -> None:
+        source_reference = RasterGeoreference(
+            source_file_name="source.tif",
+            source_width=128,
+            source_height=64,
+            raster_width=128,
+            raster_height=64,
+            source_raster_to_crs=(500000.0, 20.0, 0.0, 6200000.0, 0.0, -20.0),
+            raster_to_crs=(500000.0, 20.0, 0.0, 6200000.0, 0.0, -20.0),
+            crs_wkt=(
+                'PROJCS["WGS 84 / UTM zone 37N",'
+                'GEOGCS["WGS 84",DATUM["WGS_1984",'
+                'SPHEROID["WGS 84",6378137,298.257223563]],'
+                'PRIMEM["Greenwich",0],'
+                'UNIT["degree",0.0174532925199433]],'
+                'PROJECTION["Transverse_Mercator"],'
+                'PARAMETER["latitude_of_origin",0],'
+                'PARAMETER["central_meridian",39],'
+                'PARAMETER["scale_factor",0.9996],'
+                'PARAMETER["false_easting",500000],'
+                'PARAMETER["false_northing",0],'
+                'UNIT["metre",1],AUTHORITY["EPSG","32637"]]'
+            ),
+            epsg=32637,
+            crs_kind="projected",
+            pixel_interpretation="area",
+            geo_key_directory=(
+                1,
+                1,
+                0,
+                3,
+                1024,
+                0,
+                1,
+                1,
+                1025,
+                0,
+                1,
+                1,
+                3072,
+                0,
+                1,
+                32637,
+            ),
+        )
+        profile = ClassificationProfile(
+            source_file_name="source.tif",
+            source_width=128,
+            source_height=64,
+            samples=(
+                ClassificationSample(4, 4, "deep_ocean", "auto", -4000),
+                ClassificationSample(123, 59, "summit", "none", 5000),
+            ),
+        )
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            root = Path(temporary_directory)
+            source_path = root / "source.tif"
+            profile_path = root / "source-profile.json"
+            write_int16_geotiff(
+                source_path,
+                np.arange(128 * 64, dtype=np.int16).reshape((64, 128)),
+                source_reference,
+            )
+            profile_path.write_text(
+                json.dumps(profile.to_json_dict()),
+                encoding="utf-8",
+            )
+            output_root = root / "output"
+            process_image(
+                source_path,
+                {
+                    "map_name": None,
+                    "output": output_root,
+                    "save_to_game": False,
+                    "game_saves_dir": None,
+                    "classification_profile": profile_path,
+                    "no_classification_profile": False,
+                    "clustering_profile": None,
+                    "no_clustering_profile": True,
+                    "width": 1,
+                    "height": 1,
+                    "fit_budget": False,
+                    "dither": False,
+                    "algorithm": "terrain",
+                    "terrain_clusters": 8,
+                    "terrain_smooth": 0,
+                    "terrain_min_region": 0,
+                },
+                SAFE_TILES_TUPLE,
+            )
+            map_directory = output_root / "source"
+            metadata = json.loads(
+                (map_directory / GEOREFERENCE_FILE_NAME).read_text(
+                    encoding="utf-8"
+                )
+            )
+            self.assertEqual(metadata["epsg"], 32637)
+            self.assertEqual(
+                metadata["source_raster_to_crs"],
+                [500000.0, 20.0, 0.0, 6200000.0, 0.0, -20.0],
+            )
+            self.assertEqual(
+                metadata["raster_to_crs"],
+                [500000.0, 40.0, 0.0, 6200000.0, 0.0, -20.0],
+            )
+            restored = read_raster_georeference(
+                map_directory / GENERATED_ELEVATION_FILE_NAME
+            )
+            self.assertIsNotNone(restored)
+            self.assertEqual(restored.epsg, 32637)
+            self.assertTrue(
+                np.allclose(
+                    restored.raster_to_crs,
+                    metadata["raster_to_crs"],
+                )
+            )
+
+    def test_published_extent_updates_aspect_and_georeference(self) -> None:
+        profile = ClassificationProfile(
+            source_file_name="extent.tif",
+            source_width=128,
+            source_height=128,
+            samples=(
+                ClassificationSample(24, 20, "plain", "grass", 100),
+                ClassificationSample(94, 40, "rocks", "none", 3000),
+            ),
+            long_side_blocks=20,
+            map_boundary=((20, 10), (99, 10), (99, 49), (20, 49)),
+        )
+        extent = classification_processing_extent(profile)
+        self.assertEqual(extent, (20, 10, 100, 50))
+        self.assertEqual(
+            fit_map_size_to_long_side(
+                extent[2] - extent[0],
+                extent[3] - extent[1],
+                profile.long_side_blocks,
+            ),
+            (20, 10),
+        )
+
+        reference = RasterGeoreference(
+            source_file_name="extent.tif",
+            source_width=128,
+            source_height=128,
+            raster_width=128,
+            raster_height=128,
+            source_raster_to_crs=(
+                500000.0,
+                10.0,
+                0.0,
+                6200000.0,
+                0.0,
+                -10.0,
+            ),
+            raster_to_crs=(
+                500000.0,
+                10.0,
+                0.0,
+                6200000.0,
+                0.0,
+                -10.0,
+            ),
+            epsg=32637,
+            crs_kind="projected",
+        )
+        cropped = reference.cropped(*extent)
+        self.assertEqual(
+            (cropped.source_width, cropped.source_height),
+            (128, 128),
+        )
+        self.assertEqual(
+            (cropped.raster_width, cropped.raster_height),
+            (80, 40),
+        )
+        self.assertEqual(
+            cropped.raster_to_crs,
+            (500200.0, 10.0, 0.0, 6199900.0, 0.0, -10.0),
+        )
+        output = cropped.resampled(1280, 640)
+        self.assertTrue(
+            np.allclose(
+                output.raster_to_crs,
+                (500200.0, 0.625, 0.0, 6199900.0, 0.0, -0.625),
+            )
+        )
 
     def test_manual_profile_rejects_reserved_nodata(self) -> None:
         with tempfile.TemporaryDirectory() as temporary_directory:

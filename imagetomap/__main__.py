@@ -1,4 +1,5 @@
 import argparse
+from dataclasses import replace
 import json
 from time import sleep
 from typing import Any, Dict, Iterable, Iterator, Optional, Tuple
@@ -6,16 +7,19 @@ from typing import Any, Dict, Iterable, Iterator, Optional, Tuple
 from pathlib import Path
 from PIL import Image as Img
 
-from . import convert, fit_map_size_to_budget
+from . import convert, fit_map_size_to_budget, fit_map_size_to_long_side
 from .calibration import (
+    classification_processing_extent,
     classification_profile_path,
     load_classification_profile,
 )
 from .clustering import (
+    clustering_processing_extent,
     clustering_profile_path,
     load_clustering_profile,
 )
 from .consts import SAFE_TILES_TUPLE, TILES_TUPLE
+from .georeference import read_raster_georeference
 from .saves import (
     find_worldbox_stats_template,
     next_worldbox_save_slot,
@@ -347,6 +351,7 @@ def get_output_path(image_path: Path, args: Dict[str, Any]) -> Path:
 def process_image(image_path: Path, args: Dict[str, Any], tiles: Iterable[str]) -> None:
     map_name = get_map_name(image_path=image_path, args=args)
     output_path = get_output_path(image_path=image_path, args=args)
+    source_georeference = read_raster_georeference(image_path)
 
     with Img.open(image_path) as image:
         explicit_clustering = args["clustering_profile"] is not None
@@ -390,8 +395,32 @@ def process_image(image_path: Path, args: Dict[str, Any], tiles: Iterable[str]) 
         )
         width = args["width"]
         height = args["height"]
-        if args["fit_budget"] and width == 0 and height == 0:
-            width, height = fit_map_size_to_budget(*image.size)
+        processing_extent = (
+            classification_processing_extent(classification_profile)
+            if classification_profile is not None
+            else clustering_processing_extent(clustering_profile)
+            if clustering_profile is not None
+            else (0, 0, image.width, image.height)
+        )
+        processing_size = (
+            processing_extent[2] - processing_extent[0],
+            processing_extent[3] - processing_extent[1],
+        )
+        if width == 0 and height == 0:
+            long_side_blocks = (
+                classification_profile.long_side_blocks
+                if classification_profile is not None
+                else clustering_profile.long_side_blocks
+                if clustering_profile is not None
+                else None
+            )
+            if long_side_blocks is not None:
+                width, height = fit_map_size_to_long_side(
+                    *processing_size,
+                    long_side_blocks,
+                )
+            elif args["fit_budget"]:
+                width, height = fit_map_size_to_budget(*processing_size)
         converted_map = convert(
             image=image,
             dither=args["dither"],
@@ -406,6 +435,19 @@ def process_image(image_path: Path, args: Dict[str, Any], tiles: Iterable[str]) 
             classification_profile=classification_profile,
             clustering_profile=clustering_profile,
         )
+        if source_georeference is not None:
+            processing_georeference = (
+                source_georeference.cropped(*processing_extent)
+                if processing_extent != (0, 0, image.width, image.height)
+                else source_georeference
+            )
+            converted_map = replace(
+                converted_map,
+                georeference=processing_georeference.resampled(
+                    converted_map.width * 64,
+                    converted_map.height * 64,
+                ),
+            )
 
     if args["save_to_game"]:
         write_game_save_atomically(

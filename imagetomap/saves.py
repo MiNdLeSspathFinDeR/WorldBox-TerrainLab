@@ -17,6 +17,7 @@ from .calibration import (
     write_int16_geotiff,
 )
 from .clustering import GENERATED_CLUSTERING_PROFILE_FILE_NAME
+from .georeference import write_map_georeference
 from .models import Map
 
 SAVE_SLOT_RE = re.compile(r"save(\d+)$")
@@ -234,7 +235,10 @@ def write_map_folder(
         write_int16_geotiff(
             output_path / GENERATED_ELEVATION_FILE_NAME,
             converted_map.elevation,
+            converted_map.georeference,
         )
+    if converted_map.georeference is not None:
+        write_map_georeference(output_path, converted_map.georeference)
     if converted_map.classification_profile is not None:
         (output_path / GENERATED_PROFILE_FILE_NAME).write_text(
             json.dumps(

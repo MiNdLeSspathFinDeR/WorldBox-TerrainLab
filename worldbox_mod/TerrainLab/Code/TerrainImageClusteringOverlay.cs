@@ -103,6 +103,10 @@ namespace TerrainLab
             new List<Selectable>();
         private readonly Dictionary<string, InputField> _parameterInputs =
             new Dictionary<string, InputField>(StringComparer.Ordinal);
+        private readonly Dictionary<string, Toggle> _surfaceToggles =
+            new Dictionary<string, Toggle>(StringComparer.Ordinal);
+        private readonly Dictionary<string, Toggle> _biotopeToggles =
+            new Dictionary<string, Toggle>(StringComparer.Ordinal);
         private readonly List<TerrainImageClassificationVertex> _draftVertices =
             new List<TerrainImageClassificationVertex>();
 
@@ -116,7 +120,9 @@ namespace TerrainLab
         private Text _fileLabel;
         private Text _summaryLabel;
         private Text _coordinateLabel;
+        private Text _mapSizeLabel;
         private Text _panelStatus;
+        private InputField _longSideInput;
         private Button _previousImageButton;
         private Button _nextImageButton;
         private Button _openSelectedButton;
@@ -126,6 +132,12 @@ namespace TerrainLab
         private Button _clearBoundaryButton;
         private Button _expertButton;
         private GameObject _expertPanel;
+        private Button _compositionButton;
+        private GameObject _compositionPanel;
+        private Button _surfaceCompositionButton;
+        private Button _biotopeCompositionButton;
+        private GameObject _surfaceCompositionPanel;
+        private GameObject _biotopeCompositionPanel;
         private TerrainImagePolygonGraphic _savedBoundaryGraphic;
         private TerrainImagePolygonGraphic _draftBoundaryGraphic;
         private TerrainImageClusteringProfile _profile;
@@ -142,6 +154,8 @@ namespace TerrainLab
         private bool _hasHoverVertex;
         private bool _drawingBoundary;
         private bool _expertVisible;
+        private bool _compositionVisible;
+        private bool _surfaceCompositionVisible = true;
         private bool _initialized;
 
         public event Action<string, bool> StatusChanged;
@@ -465,6 +479,7 @@ namespace TerrainLab
             _graphicRoot.offsetMin = Vector2.zero;
             _graphicRoot.offsetMax = Vector2.zero;
 
+            _coordinateLabel = CreateCoordinateOverlay(_viewport);
             CreatePanel(_root.transform);
             _root.SetActive(false);
         }
@@ -519,7 +534,7 @@ namespace TerrainLab
 
             VerticalLayoutGroup layout =
                 contentObject.GetComponent<VerticalLayoutGroup>();
-            layout.padding = new RectOffset(9, 9, 8, 8);
+            layout.padding = new RectOffset(14, 14, 8, 12);
             layout.spacing = 5f;
             layout.childAlignment = TextAnchor.UpperCenter;
             layout.childControlWidth = true;
@@ -581,32 +596,81 @@ namespace TerrainLab
 
             CreateLabel(
                 content,
+                LM.Get("terrain_lab_output_size_heading"),
+                11,
+                FontStyle.Bold,
+                18f,
+                NeutralText());
+            Transform mapSizeRow = CreateRow(content, 34f);
+            Text mapSizeCaption = CreateLabel(
+                mapSizeRow,
+                LM.Get("terrain_lab_output_long_side"),
+                9,
+                FontStyle.Normal,
+                34f,
+                UnityColor.white);
+            mapSizeCaption.alignment = TextAnchor.MiddleLeft;
+            LayoutElement mapSizeCaptionElement =
+                mapSizeCaption.GetComponent<LayoutElement>();
+            mapSizeCaptionElement.preferredWidth = 108f;
+            mapSizeCaptionElement.flexibleWidth = 1f;
+            _longSideInput = TrackEditorControl(
+                CreateInputField(
+                    mapSizeRow,
+                    "20",
+                    "terrain_lab_output_long_side"));
+            LayoutElement mapSizeInputElement =
+                _longSideInput.GetComponent<LayoutElement>();
+            mapSizeInputElement.preferredWidth = 48f;
+            mapSizeInputElement.flexibleWidth = 0f;
+            _longSideInput.characterLimit = 3;
+            _longSideInput.onValueChanged.AddListener(
+                delegate { UpdateMapSizePreview(); });
+            _mapSizeLabel = CreateLabel(
+                mapSizeRow,
+                string.Empty,
+                8,
+                FontStyle.Normal,
+                34f,
+                new UnityColor(0.72f, 0.84f, 0.94f, 1f));
+            _mapSizeLabel.alignment = TextAnchor.MiddleLeft;
+            _mapSizeLabel.resizeTextForBestFit = true;
+            _mapSizeLabel.resizeTextMinSize = 6;
+            _mapSizeLabel.resizeTextMaxSize = 8;
+            LayoutElement mapSizeLabelElement =
+                _mapSizeLabel.GetComponent<LayoutElement>();
+            mapSizeLabelElement.preferredWidth = 118f;
+            mapSizeLabelElement.flexibleWidth = 1f;
+            ConfigureTooltip(
+                _mapSizeLabel.gameObject,
+                "terrain_lab_output_long_side");
+
+            CreateLabel(
+                content,
                 LM.Get("terrain_lab_cluster_boundary_heading"),
                 11,
                 FontStyle.Bold,
                 18f,
                 NeutralText());
-            Transform boundaryModes = CreateRow(content, 28f);
+            Transform boundaryModes =
+                CreateFlexibleButtonRow(content, 28f);
             _drawBoundaryButton = TrackEditorControl(
-                CreateButton(
+                CreateFlexibleButton(
                     boundaryModes,
                     LM.Get("terrain_lab_cluster_boundary_draw"),
                     StartBoundary,
-                    92f,
                     "terrain_lab_cluster_boundary_draw"));
             _finishBoundaryButton = TrackEditorControl(
-                CreateButton(
+                CreateFlexibleButton(
                     boundaryModes,
                     LM.Get("terrain_lab_cluster_boundary_finish"),
                     FinishBoundary,
-                    92f,
                     "terrain_lab_cluster_boundary_finish"));
             _cancelBoundaryButton = TrackEditorControl(
-                CreateButton(
+                CreateFlexibleButton(
                     boundaryModes,
                     LM.Get("terrain_lab_cluster_boundary_cancel"),
                     delegate { CancelBoundary(true); },
-                    92f,
                     "terrain_lab_cluster_boundary_cancel"));
             _clearBoundaryButton = TrackEditorControl(
                 CreateButton(
@@ -648,6 +712,56 @@ namespace TerrainLab
                 "water_sensitivity",
                 "terrain_lab_cluster_water_sensitivity",
                 "100");
+
+            _compositionButton = CreateButton(
+                content,
+                LM.Get("terrain_lab_cluster_composition_show"),
+                ToggleCompositionPanel,
+                292f,
+                "terrain_lab_cluster_composition_toggle");
+            _compositionPanel = CreateVerticalGroup(
+                content,
+                "TerrainLabClusteringCompositionPanel");
+            Transform composition = _compositionPanel.transform;
+            Transform compositionCategories =
+                CreateFlexibleButtonRow(composition, 32f);
+            _surfaceCompositionButton = CreateFlexibleButton(
+                compositionCategories,
+                LM.Get("terrain_lab_cluster_composition_surfaces"),
+                delegate { SetCompositionCategory(true); },
+                "terrain_lab_cluster_composition_surfaces");
+            _biotopeCompositionButton = CreateFlexibleButton(
+                compositionCategories,
+                LM.Get("terrain_lab_cluster_composition_biotopes"),
+                delegate { SetCompositionCategory(false); },
+                "terrain_lab_cluster_composition_biotopes");
+            _surfaceCompositionPanel = CreateCompositionPalette(
+                composition,
+                "TerrainLabClusteringSurfacePalette");
+            foreach (TerrainImageClassOption option in
+                     TerrainImageClassificationCatalog.Surfaces)
+            {
+                _surfaceToggles[option.Id] = CreateCompositionToggle(
+                    _surfaceCompositionPanel.transform,
+                    option.Id,
+                    true,
+                    option.LocalizationKey);
+            }
+            _biotopeCompositionPanel = CreateCompositionPalette(
+                composition,
+                "TerrainLabClusteringBiotopePalette");
+            foreach (TerrainImageBiotopeOption option in
+                     TerrainImageClassificationCatalog.SelectableBiotopes)
+            {
+                _biotopeToggles[option.Id] = CreateCompositionToggle(
+                    _biotopeCompositionPanel.transform,
+                    option.Id,
+                    false,
+                    option.LocalizationKey);
+            }
+            _surfaceCompositionPanel.SetActive(true);
+            _biotopeCompositionPanel.SetActive(false);
+            _compositionPanel.SetActive(false);
 
             _expertButton = CreateButton(
                 content,
@@ -718,13 +832,6 @@ namespace TerrainLab
                 FontStyle.Normal,
                 34f,
                 UnityColor.white);
-            _coordinateLabel = CreateLabel(
-                content,
-                "X -  Y -",
-                10,
-                FontStyle.Normal,
-                18f,
-                new UnityColor(0.72f, 0.84f, 0.94f, 1f));
             _panelStatus = CreateLabel(
                 content,
                 string.Empty,
@@ -802,6 +909,7 @@ namespace TerrainLab
                 _root.SetActive(true);
                 BringToFront();
                 PopulateParameterControls();
+                PopulateCompositionControls();
 
                 Canvas.ForceUpdateCanvases();
                 FitImageToViewport(true);
@@ -956,6 +1064,7 @@ namespace TerrainLab
                 RefreshBoundaryGraphics();
                 UpdateSummary();
                 UpdateBoundaryButtons();
+                UpdateMapSizePreview();
                 SetPanelStatus(
                     LM.Get("terrain_lab_cluster_boundary_saved"),
                     false);
@@ -998,6 +1107,7 @@ namespace TerrainLab
                 CancelBoundary(false);
                 RefreshBoundaryGraphics();
                 UpdateSummary();
+                UpdateMapSizePreview();
                 SetPanelStatus(
                     LM.Get("terrain_lab_cluster_boundary_cleared"),
                     false);
@@ -1023,6 +1133,38 @@ namespace TerrainLab
                         ? "terrain_lab_cluster_expert_hide"
                         : "terrain_lab_cluster_expert_show"));
             }
+            Canvas.ForceUpdateCanvases();
+        }
+
+        private void ToggleCompositionPanel()
+        {
+            _compositionVisible = !_compositionVisible;
+            if (_compositionPanel != null)
+            {
+                _compositionPanel.SetActive(_compositionVisible);
+            }
+            if (_compositionVisible)
+            {
+                SetCompositionCategory(_surfaceCompositionVisible);
+            }
+            if (_compositionButton != null)
+            {
+                SetButtonText(
+                    _compositionButton,
+                    LM.Get(_compositionVisible
+                        ? "terrain_lab_cluster_composition_hide"
+                        : "terrain_lab_cluster_composition_show"));
+            }
+            Canvas.ForceUpdateCanvases();
+        }
+
+        private void SetCompositionCategory(bool surfaces)
+        {
+            _surfaceCompositionVisible = surfaces;
+            _surfaceCompositionPanel?.SetActive(surfaces);
+            _biotopeCompositionPanel?.SetActive(!surfaces);
+            SetModeButtonState(_surfaceCompositionButton, surfaces);
+            SetModeButtonState(_biotopeCompositionButton, !surfaces);
             Canvas.ForceUpdateCanvases();
         }
 
@@ -1099,6 +1241,7 @@ namespace TerrainLab
         private void ApplyParameterControls()
         {
             TerrainImageClusteringSettings settings = _profile.Settings;
+            settings.LongSideBlocks = ReadLongSideBlocks();
             settings.Clusters = ReadInteger("clusters", 4, 64);
             settings.SplineRadius = ReadInteger("spline_radius", 0, 12);
             settings.SmoothPasses = ReadInteger("smooth_passes", 0, 8);
@@ -1126,6 +1269,16 @@ namespace TerrainLab
                 ReadInteger("kmeans_iterations", 1, 100);
             settings.RandomSeed =
                 ReadInteger("random_seed", 0, int.MaxValue);
+            _profile.Composition.AllowedSurfaces =
+                _surfaceToggles
+                    .Where(pair => pair.Value != null && pair.Value.isOn)
+                    .Select(pair => pair.Key)
+                    .ToList();
+            _profile.Composition.AllowedBiotopes =
+                _biotopeToggles
+                    .Where(pair => pair.Value != null && pair.Value.isOn)
+                    .Select(pair => pair.Key)
+                    .ToList();
             _profile.Validate(_sourceWidth, _sourceHeight);
             UpdateSummary();
         }
@@ -1154,6 +1307,10 @@ namespace TerrainLab
         private void PopulateParameterControls()
         {
             TerrainImageClusteringSettings settings = _profile.Settings;
+            _longSideInput?.SetTextWithoutNotify(
+                settings.LongSideBlocks.ToString(
+                    CultureInfo.InvariantCulture));
+            UpdateMapSizePreview();
             SetParameter("clusters", settings.Clusters);
             SetParameter("spline_radius", settings.SplineRadius);
             SetParameter("smooth_passes", settings.SmoothPasses);
@@ -1173,6 +1330,29 @@ namespace TerrainLab
             SetParameter("sample_limit", settings.SampleLimit);
             SetParameter("kmeans_iterations", settings.KMeansIterations);
             SetParameter("random_seed", settings.RandomSeed);
+        }
+
+        private void PopulateCompositionControls()
+        {
+            HashSet<string> surfaces = new HashSet<string>(
+                _profile.Composition.AllowedSurfaces,
+                StringComparer.Ordinal);
+            foreach (KeyValuePair<string, Toggle> pair in _surfaceToggles)
+            {
+                pair.Value?.SetIsOnWithoutNotify(
+                    surfaces.Contains(pair.Key));
+                UpdateCompositionToggleVisual(pair.Value);
+            }
+
+            HashSet<string> biotopes = new HashSet<string>(
+                _profile.Composition.AllowedBiotopes,
+                StringComparer.Ordinal);
+            foreach (KeyValuePair<string, Toggle> pair in _biotopeToggles)
+            {
+                pair.Value?.SetIsOnWithoutNotify(
+                    biotopes.Contains(pair.Key));
+                UpdateCompositionToggleVisual(pair.Value);
+            }
         }
 
         private static int Percent(double value)
@@ -1209,7 +1389,110 @@ namespace TerrainLab
             {
                 _coordinateLabel.text = "X -  Y -";
             }
+            if (_mapSizeLabel != null)
+            {
+                _mapSizeLabel.text = string.Empty;
+            }
             SetEditorControlsEnabled(false);
+        }
+
+        private int ReadLongSideBlocks()
+        {
+            GetOutputAspectDimensions(
+                out int aspectWidth,
+                out int aspectHeight);
+            if (_longSideInput == null ||
+                !int.TryParse(
+                    _longSideInput.text,
+                    NumberStyles.Integer,
+                    CultureInfo.InvariantCulture,
+                    out int value) ||
+                !TerrainMapLimits.TryGetBlockDimensions(
+                    aspectWidth,
+                    aspectHeight,
+                    value,
+                    out _,
+                    out _))
+            {
+                throw new InvalidDataException(
+                    LM.Get("terrain_lab_output_size_error"));
+            }
+            return value;
+        }
+
+        private void UpdateMapSizePreview()
+        {
+            if (_mapSizeLabel == null)
+            {
+                return;
+            }
+            GetOutputAspectDimensions(
+                out int aspectWidth,
+                out int aspectHeight);
+            if (!TerrainMapLimits.TryGetMaximumBlockDimensions(
+                    aspectWidth,
+                    aspectHeight,
+                    out int maximumWidth,
+                    out int maximumHeight))
+            {
+                _mapSizeLabel.text = string.Empty;
+                return;
+            }
+
+            int width = 0;
+            int height = 0;
+            bool valid =
+                _longSideInput != null &&
+                int.TryParse(
+                    _longSideInput.text,
+                    NumberStyles.Integer,
+                    CultureInfo.InvariantCulture,
+                    out int longSide) &&
+                TerrainMapLimits.TryGetBlockDimensions(
+                    aspectWidth,
+                    aspectHeight,
+                    longSide,
+                    out width,
+                    out height);
+            string sizeText = valid
+                ? string.Format(
+                    CultureInfo.InvariantCulture,
+                    LM.Get("terrain_lab_output_size_preview_format"),
+                    width,
+                    height,
+                    maximumWidth,
+                    maximumHeight)
+                : string.Format(
+                    CultureInfo.InvariantCulture,
+                    LM.Get("terrain_lab_output_size_maximum_format"),
+                    maximumWidth,
+                    maximumHeight);
+            _mapSizeLabel.text =
+                sizeText + "  " +
+                string.Format(
+                    CultureInfo.InvariantCulture,
+                    LM.Get(
+                        _profile?.MapBoundary == null
+                            ? "terrain_lab_output_size_scope_source_format"
+                            : "terrain_lab_output_size_scope_extent_format"),
+                    aspectWidth,
+                    aspectHeight);
+            _mapSizeLabel.color = valid
+                ? new UnityColor(0.72f, 0.84f, 0.94f, 1f)
+                : new UnityColor(0.95f, 0.52f, 0.46f, 1f);
+        }
+
+        private void GetOutputAspectDimensions(
+            out int width,
+            out int height)
+        {
+            if (_profile != null)
+            {
+                _profile.GetOutputAspectDimensions(out width, out height);
+                return;
+            }
+            width = Math.Max(1, _sourceWidth);
+            height = Math.Max(1, _sourceHeight);
         }
 
         private void UpdatePendingImageLabels()
@@ -1599,6 +1882,173 @@ namespace TerrainLab
             return group;
         }
 
+        private static GameObject CreateCompositionPalette(
+            Transform parent,
+            string objectName)
+        {
+            GameObject palette = new GameObject(
+                objectName,
+                typeof(RectTransform),
+                typeof(Image),
+                typeof(GridLayoutGroup),
+                typeof(ContentSizeFitter));
+            palette.transform.SetParent(parent, false);
+            Image background = palette.GetComponent<Image>();
+            Image nativePanel = ToolbarButtons.instance?.main_background;
+            background.sprite = nativePanel?.sprite ??
+                                SpriteTextureLoader.getSprite(
+                                    "ui/special/darkInputFieldEmpty");
+            background.type = Image.Type.Sliced;
+            background.material = nativePanel?.material;
+            background.color = nativePanel != null
+                ? nativePanel.color
+                : new UnityColor(0.20f, 0.22f, 0.18f, 0.98f);
+
+            GridLayoutGroup grid = palette.GetComponent<GridLayoutGroup>();
+            grid.padding = new RectOffset(7, 7, 7, 7);
+            grid.cellSize = new Vector2(34f, 34f);
+            grid.spacing = new Vector2(6f, 6f);
+            grid.startAxis = GridLayoutGroup.Axis.Horizontal;
+            grid.startCorner = GridLayoutGroup.Corner.UpperLeft;
+            grid.constraint = GridLayoutGroup.Constraint.FixedColumnCount;
+            grid.constraintCount = 7;
+
+            ContentSizeFitter fitter =
+                palette.GetComponent<ContentSizeFitter>();
+            fitter.horizontalFit = ContentSizeFitter.FitMode.Unconstrained;
+            fitter.verticalFit = ContentSizeFitter.FitMode.PreferredSize;
+            return palette;
+        }
+
+        private Toggle CreateCompositionToggle(
+            Transform parent,
+            string optionId,
+            bool surface,
+            string tooltipKey)
+        {
+            GameObject toggleObject = new GameObject(
+                "TerrainLabClusteringComposition_" + optionId,
+                typeof(RectTransform),
+                typeof(Image),
+                typeof(Toggle));
+            toggleObject.transform.SetParent(parent, false);
+            Image background = toggleObject.GetComponent<Image>();
+            background.sprite = ToolbarButtons.getSpriteButtonNormal();
+            background.type = Image.Type.Sliced;
+            background.color =
+                new UnityColor(0.30f, 0.32f, 0.27f, 1f);
+
+            Toggle toggle = toggleObject.GetComponent<Toggle>();
+            toggle.isOn = true;
+            toggle.targetGraphic = background;
+            toggle.transition = Selectable.Transition.ColorTint;
+
+            GameObject iconObject = new GameObject(
+                "TerrainLabCompositionIcon",
+                typeof(RectTransform),
+                typeof(Image));
+            iconObject.transform.SetParent(toggleObject.transform, false);
+            RectTransform iconRect =
+                iconObject.GetComponent<RectTransform>();
+            iconRect.anchorMin = Vector2.zero;
+            iconRect.anchorMax = Vector2.one;
+            iconRect.offsetMin = new Vector2(4f, 4f);
+            iconRect.offsetMax = new Vector2(-4f, -4f);
+            Image icon = iconObject.GetComponent<Image>();
+            icon.sprite = surface
+                ? TerrainImageUiVisuals.GetSurfaceSprite(optionId)
+                : TerrainImageUiVisuals.GetBiotopeSprite(optionId);
+            icon.preserveAspect = false;
+            icon.raycastTarget = false;
+
+            GameObject lampObject = new GameObject(
+                "TerrainLabCompositionSelectionLamp",
+                typeof(RectTransform),
+                typeof(Image));
+            lampObject.transform.SetParent(toggleObject.transform, false);
+            RectTransform lampRect =
+                lampObject.GetComponent<RectTransform>();
+            lampRect.anchorMin = new Vector2(0.5f, 1f);
+            lampRect.anchorMax = new Vector2(0.5f, 1f);
+            lampRect.pivot = new Vector2(0.5f, 0.5f);
+            lampRect.anchoredPosition = new Vector2(0f, 1f);
+            lampRect.sizeDelta = new Vector2(6f, 6f);
+            Image lamp = lampObject.GetComponent<Image>();
+            lamp.sprite = TerrainImageUiVisuals.GetActivitySprite(true);
+            lamp.preserveAspect = true;
+            lamp.raycastTarget = false;
+            toggle.graphic = lamp;
+
+            toggle.onValueChanged.AddListener(
+                delegate(bool _) { UpdateCompositionToggleVisual(toggle); });
+            ConfigureTooltip(toggleObject, tooltipKey);
+            TrackEditorControl(toggle);
+            UpdateCompositionToggleVisual(toggle);
+            return toggle;
+        }
+
+        private static void UpdateCompositionToggleVisual(Toggle toggle)
+        {
+            if (toggle == null)
+            {
+                return;
+            }
+            Image background = toggle.targetGraphic as Image;
+            if (background != null)
+            {
+                background.color = toggle.isOn
+                    ? new UnityColor(0.32f, 0.58f, 0.29f, 1f)
+                    : new UnityColor(0.30f, 0.32f, 0.27f, 1f);
+            }
+            if (toggle.graphic is Image lamp)
+            {
+                lamp.sprite =
+                    TerrainImageUiVisuals.GetActivitySprite(toggle.isOn);
+                lamp.gameObject.SetActive(toggle.isOn);
+            }
+        }
+
+        private static Text CreateCoordinateOverlay(Transform parent)
+        {
+            GameObject backgroundObject = new GameObject(
+                "TerrainLabClusterImageCoordinates",
+                typeof(RectTransform),
+                typeof(Image));
+            backgroundObject.transform.SetParent(parent, false);
+            RectTransform rect =
+                backgroundObject.GetComponent<RectTransform>();
+            rect.anchorMin = new Vector2(0.5f, 0f);
+            rect.anchorMax = new Vector2(0.5f, 0f);
+            rect.pivot = new Vector2(0.5f, 0f);
+            rect.sizeDelta = new Vector2(176f, 23f);
+            rect.anchoredPosition = new Vector2(0f, 6f);
+            Image background = backgroundObject.GetComponent<Image>();
+            background.color =
+                new UnityColor(0.01f, 0.01f, 0.01f, 0.86f);
+            background.raycastTarget = false;
+
+            GameObject textObject = new GameObject(
+                "TerrainLabClusterImageCoordinatesText",
+                typeof(RectTransform),
+                typeof(Text));
+            textObject.transform.SetParent(backgroundObject.transform, false);
+            RectTransform textRect =
+                textObject.GetComponent<RectTransform>();
+            textRect.anchorMin = Vector2.zero;
+            textRect.anchorMax = Vector2.one;
+            textRect.offsetMin = new Vector2(6f, 1f);
+            textRect.offsetMax = new Vector2(-6f, -1f);
+            Text text = textObject.GetComponent<Text>();
+            text.font = LocalizedTextManager.current_font;
+            text.text = "X -  Y -";
+            text.fontSize = 11;
+            text.fontStyle = FontStyle.Bold;
+            text.alignment = TextAnchor.MiddleCenter;
+            text.color = new UnityColor(0.72f, 0.84f, 0.94f, 1f);
+            text.raycastTarget = false;
+            return text;
+        }
+
         private static Transform CreateRow(Transform parent, float height)
         {
             GameObject row = new GameObject(
@@ -1611,13 +2061,26 @@ namespace TerrainLab
                 row.GetComponent<HorizontalLayoutGroup>();
             layout.spacing = 6f;
             layout.childAlignment = TextAnchor.MiddleCenter;
-            layout.childControlWidth = false;
+            layout.childControlWidth = true;
             layout.childControlHeight = true;
-            layout.childForceExpandWidth = false;
+            layout.childForceExpandWidth = true;
             layout.childForceExpandHeight = true;
             LayoutElement element = row.GetComponent<LayoutElement>();
             element.preferredHeight = height;
             return row.transform;
+        }
+
+        private static Transform CreateFlexibleButtonRow(
+            Transform parent,
+            float height)
+        {
+            Transform row = CreateRow(parent, height);
+            HorizontalLayoutGroup layout =
+                row.GetComponent<HorizontalLayoutGroup>();
+            layout.spacing = 4f;
+            layout.childControlWidth = true;
+            layout.childForceExpandWidth = true;
+            return row;
         }
 
         private static Text CreateLabel(
@@ -1669,7 +2132,9 @@ namespace TerrainLab
             background.raycastTarget = true;
             LayoutElement element =
                 fieldObject.GetComponent<LayoutElement>();
+            element.minWidth = 0f;
             element.preferredWidth = 214f;
+            element.flexibleWidth = 1f;
             element.preferredHeight = 36f;
 
             GameObject textObject = new GameObject(
@@ -1731,8 +2196,23 @@ namespace TerrainLab
                 image.type = Image.Type.Sliced;
             }
             image.color = critical
-                ? new UnityColor(0.95f, 0.28f, 0.22f, 1f)
+                ? UnityColor.white
                 : new UnityColor(0.36f, 0.38f, 0.32f, 1f);
+            if (critical)
+            {
+                ColorBlock colors = button.colors;
+                colors.normalColor =
+                    new UnityColor(0.95f, 0.28f, 0.22f, 1f);
+                colors.highlightedColor =
+                    new UnityColor(1f, 0.40f, 0.28f, 1f);
+                colors.selectedColor = colors.highlightedColor;
+                colors.pressedColor =
+                    new UnityColor(0.76f, 0.16f, 0.12f, 1f);
+                colors.disabledColor =
+                    new UnityColor(0.35f, 0.16f, 0.14f, 0.62f);
+                colors.colorMultiplier = 1f;
+                button.colors = colors;
+            }
             Text label = buttonObject.GetComponentInChildren<Text>();
             label.font = LocalizedTextManager.current_font;
             label.text = text;
@@ -1744,9 +2224,30 @@ namespace TerrainLab
             label.resizeTextMaxSize = 11;
             LayoutElement element =
                 buttonObject.AddComponent<LayoutElement>();
+            element.minWidth = 0f;
             element.preferredWidth = width;
+            element.flexibleWidth = 1f;
             element.preferredHeight = 30f;
             ConfigureTooltip(buttonObject, tooltipKey);
+            return button;
+        }
+
+        private Button CreateFlexibleButton(
+            Transform parent,
+            string text,
+            UnityEngine.Events.UnityAction action,
+            string tooltipKey)
+        {
+            Button button = CreateButton(
+                parent,
+                text,
+                action,
+                0f,
+                tooltipKey);
+            LayoutElement element = button.GetComponent<LayoutElement>();
+            element.minWidth = 0f;
+            element.preferredWidth = 0f;
+            element.flexibleWidth = 1f;
             return button;
         }
 
@@ -1767,7 +2268,7 @@ namespace TerrainLab
             {
                 text.font = LocalizedTextManager.current_font;
                 text.fontSize = 12;
-                text.color = UnityColor.white;
+                text.color = new UnityColor(1f, 0.82f, 0.22f, 1f);
             }
             Image image = inputObject.GetComponent<Image>();
             image.sprite = SpriteTextureLoader.getSprite(
@@ -1776,6 +2277,8 @@ namespace TerrainLab
             image.color = new UnityColor(0.06f, 0.06f, 0.055f, 1f);
             LayoutElement element =
                 inputObject.AddComponent<LayoutElement>();
+            element.minWidth = 0f;
+            element.flexibleWidth = 1f;
             element.preferredHeight = 28f;
             ConfigureTooltip(inputObject, tooltipKey);
             return input;

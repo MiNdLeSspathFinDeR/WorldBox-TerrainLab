@@ -176,50 +176,85 @@ namespace TerrainLab
             switch (mode)
             {
                 case TerrainErosionOverlayMode.NetChange:
-                    if (change < 0)
-                    {
-                        return Ramp(
-                            new Color32(245, 190, 60, 105),
-                            new Color32(205, 40, 45, 235),
-                            Ratio(-change, result.Statistics.MaximumCut));
-                    }
-
-                    if (change > 0)
-                    {
-                        return Ramp(
-                            new Color32(80, 210, 175, 105),
-                            new Color32(40, 95, 225, 235),
-                            Ratio(change, result.Statistics.MaximumFill));
-                    }
-
-                    return new Color32(0, 0, 0, 0);
+                    return GetNetChangeColor(
+                        change,
+                        result.Statistics.MaximumCut,
+                        result.Statistics.MaximumFill);
                 case TerrainErosionOverlayMode.Erosion:
-                    return change < 0
-                        ? Ramp(
-                            new Color32(245, 190, 60, 115),
-                            new Color32(205, 40, 45, 235),
-                            Ratio(-change, result.Statistics.MaximumCut))
-                        : new Color32(0, 0, 0, 0);
+                    return GetErosionColor(
+                        change,
+                        result.Statistics.MaximumCut);
                 case TerrainErosionOverlayMode.Deposition:
-                    return change > 0
-                        ? Ramp(
-                            new Color32(100, 220, 155, 115),
-                            new Color32(35, 80, 225, 235),
-                            Ratio(change, result.Statistics.MaximumFill))
-                        : new Color32(0, 0, 0, 0);
+                    return GetDepositionColor(
+                        change,
+                        result.Statistics.MaximumFill);
                 case TerrainErosionOverlayMode.ResultElevation:
-                    short elevation = result.ResultElevation[index];
-                    float normalized = Mathf.InverseLerp(
+                    return GetResultElevationColor(
+                        result.ResultElevation[index],
                         _minimumResultElevation,
-                        _maximumResultElevation,
-                        elevation);
-                    return Ramp(
-                        new Color32(30, 90, 185, 130),
-                        new Color32(245, 220, 90, 195),
-                        normalized);
+                        _maximumResultElevation);
                 default:
                     return new Color32(0, 0, 0, 0);
             }
+        }
+
+        public static Color32 GetNetChangeColor(
+            int change,
+            int maximumCut,
+            int maximumFill)
+        {
+            if (change < 0)
+            {
+                return Ramp(
+                    new Color32(245, 190, 60, 105),
+                    new Color32(205, 40, 45, 235),
+                    Ratio(-change, maximumCut));
+            }
+
+            if (change > 0)
+            {
+                return Ramp(
+                    new Color32(80, 210, 175, 105),
+                    new Color32(40, 95, 225, 235),
+                    Ratio(change, maximumFill));
+            }
+
+            return new Color32(0, 0, 0, 0);
+        }
+
+        public static Color32 GetErosionColor(int change, int maximumCut)
+        {
+            return change < 0
+                ? Ramp(
+                    new Color32(245, 190, 60, 115),
+                    new Color32(205, 40, 45, 235),
+                    Ratio(-change, maximumCut))
+                : new Color32(0, 0, 0, 0);
+        }
+
+        public static Color32 GetDepositionColor(int change, int maximumFill)
+        {
+            return change > 0
+                ? Ramp(
+                    new Color32(100, 220, 155, 115),
+                    new Color32(35, 80, 225, 235),
+                    Ratio(change, maximumFill))
+                : new Color32(0, 0, 0, 0);
+        }
+
+        public static Color32 GetResultElevationColor(
+            short elevation,
+            int minimum,
+            int maximum)
+        {
+            float normalized = Mathf.InverseLerp(
+                minimum,
+                maximum,
+                elevation);
+            return Ramp(
+                new Color32(30, 90, 185, 130),
+                new Color32(245, 220, 90, 195),
+                normalized);
         }
 
         private static float Ratio(int value, int maximum)

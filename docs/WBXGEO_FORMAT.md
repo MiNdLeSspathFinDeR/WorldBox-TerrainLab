@@ -167,6 +167,63 @@ must match the adjacent `map.wbox` before TerrainLab applies the overlay.
 cell. New projects default to `1000 m`; schema `1.0.x` manifests using
 `worldbox_tile` are migrated with one legacy tile equal to `1000 m`.
 
+## Optional source georeference
+
+An imported GIS raster adds a top-level `georeference` object without replacing
+the stable local `crs` section. The local `ENGCRS` remains the simulation and
+module coordinate system. The optional object records how that grid returns to
+the original raster:
+
+```json
+{
+  "format": "terrainlab-raster-georeference",
+  "schema_version": "1.0.0",
+  "source_file_name": "source.tif",
+  "source_width": 3601,
+  "source_height": 2550,
+  "raster_width": 1280,
+  "raster_height": 896,
+  "source_raster_to_crs": [440000, 10, 0, 6200000, 0, -10],
+  "raster_to_crs": [440000, 28.1328125, 0, 6200000, 0, -28.4598214285714],
+  "worldbox_cell_to_crs": [440000, 28.1328125, 0, 6174500, 0, 28.4598214285714],
+  "worldbox_metre_to_crs": [440000, 0.0281328125, 0, 6174500, 0, 0.0284598214285714],
+  "crs_to_worldbox_cell": [-15640.09997, 0.035545682, 0, -216954.98039, 0, 0.035137255],
+  "crs_to_worldbox_metre": [-15640099.97223, 35.545681755, 0, -216954980.39216, 0, 35.137254902],
+  "worldbox_metres_per_cell": 1000,
+  "epsg": 32637,
+  "pixel_interpretation": "area",
+  "crs_wkt": "...",
+  "crs_projjson": "...",
+  "wgs84_epsg": 4326,
+  "wgs84_control_points": []
+}
+```
+
+All affine arrays use GDAL order:
+
+```text
+X = GT0 + pixel * GT1 + line * GT2
+Y = GT3 + pixel * GT4 + line * GT5
+```
+
+`source_raster_to_crs` preserves the original raster. If the player publishes
+an image boundary, its bounding box becomes the processing extent:
+`raster_to_crs` first translates the source transform by that pixel/line offset
+and then composes the exact X/Y scale introduced when the cropped image is
+resized. Without a published boundary the offset is zero. The WorldBox
+transforms also invert the row axis because package arrays start at the
+south-west while raster rows start at the north-west. Their two
+`crs_to_worldbox_*` counterparts store the validated inverse operations for
+direct import-side lookup. Thus every derived GeoTIFF returns to the selected
+part of the source raster instead of being stretched across its full footprint.
+
+The complete original GeoKey directory, GeoDoubleParams, GeoAsciiParams,
+horizontal WKT/PROJJSON, vertical EPSG/name, and pixel interpretation are
+preserved. A bounded WGS84 control grid stores local cell coordinates, source
+coordinates, longitude, and latitude. It is a diagnostic/interchange aid, not
+a replacement for PROJ: arbitrary projected-to-geographic operations are
+nonlinear and must be reconstructed from the stored source CRS.
+
 ## Module extension contract
 
 A module owns exactly one entry prefix:
@@ -304,10 +361,12 @@ preview never applies it to the authoritative DEM automatically.
 
 ## External GIS exchange
 
-GeoTIFF exports and file-sync state are intentionally outside WBXGEO. This keeps
-the portable game project independent from transient QGIS working files. See
-[TerrainLab file sync](FILE_SYNC.md) for the strict raster profile, baseline
-hashes, conflict policies, branch files, and change log.
+GeoTIFF files and file-sync history remain outside WBXGEO, while the immutable
+source georeference required to recreate them is part of the manifest. This
+keeps transient QGIS working files out of the portable project without losing
+round-trip coordinates. See [TerrainLab file sync](FILE_SYNC.md) for the strict
+raster profile, baseline hashes, conflict policies, branch files, and change
+log.
 
 ## Save and load lifecycle
 

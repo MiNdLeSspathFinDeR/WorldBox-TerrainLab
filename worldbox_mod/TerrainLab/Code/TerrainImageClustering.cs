@@ -9,6 +9,9 @@ namespace TerrainLab
 {
     public sealed class TerrainImageClusteringSettings
     {
+        [JsonProperty("long_side_blocks")]
+        public int LongSideBlocks { get; set; } = 20;
+
         [JsonProperty("clusters")]
         public int Clusters { get; set; } = 14;
 
@@ -62,9 +65,28 @@ namespace TerrainLab
             new List<TerrainImageClassificationVertex>();
     }
 
+    public sealed class TerrainImageClusteringComposition
+    {
+        [JsonProperty(
+            "allowed_surfaces",
+            ObjectCreationHandling = ObjectCreationHandling.Replace)]
+        public List<string> AllowedSurfaces { get; set; } =
+            TerrainImageClassificationCatalog.Surfaces
+                .Select(option => option.Id)
+                .ToList();
+
+        [JsonProperty(
+            "allowed_biotopes",
+            ObjectCreationHandling = ObjectCreationHandling.Replace)]
+        public List<string> AllowedBiotopes { get; set; } =
+            TerrainImageClassificationCatalog.SelectableBiotopes
+                .Select(option => option.Id)
+                .ToList();
+    }
+
     public sealed class TerrainImageClusteringProfile
     {
-        public const int CurrentSchemaVersion = 1;
+        public const int CurrentSchemaVersion = 3;
         public const int MaximumBoundaryVertices = 256;
         public const int MaximumProfileBytes = 1024 * 1024;
         public const string SidecarSuffix = ".terrainlab-clustering.json";
@@ -78,6 +100,10 @@ namespace TerrainLab
         [JsonProperty("settings")]
         public TerrainImageClusteringSettings Settings { get; set; } =
             new TerrainImageClusteringSettings();
+
+        [JsonProperty("composition")]
+        public TerrainImageClusteringComposition Composition { get; set; } =
+            new TerrainImageClusteringComposition();
 
         [JsonProperty(
             "map_boundary",
@@ -145,6 +171,7 @@ namespace TerrainLab
                     "Clustering profile is empty.");
             }
 
+            profile.UpgradeSchema();
             profile.Validate(width, height);
             return profile;
         }
@@ -196,6 +223,18 @@ namespace TerrainLab
             return true;
         }
 
+        public void GetOutputAspectDimensions(
+            out int width,
+            out int height)
+        {
+            TerrainMapLimits.GetEffectiveAspectDimensions(
+                Source?.Width ?? 0,
+                Source?.Height ?? 0,
+                MapBoundary?.Vertices,
+                out width,
+                out height);
+        }
+
         public void Save(string imagePath)
         {
             Validate(Source?.Width ?? 0, Source?.Height ?? 0);
@@ -242,6 +281,7 @@ namespace TerrainLab
 
         public void Validate(int expectedWidth, int expectedHeight)
         {
+            UpgradeSchema();
             if (SchemaVersion != CurrentSchemaVersion)
             {
                 throw new InvalidDataException(
@@ -259,6 +299,20 @@ namespace TerrainLab
                 Settings = new TerrainImageClusteringSettings();
             }
             ValidateSettings(Settings);
+            GetOutputAspectDimensions(
+                out int outputAspectWidth,
+                out int outputAspectHeight);
+            if (!TerrainMapLimits.TryGetBlockDimensions(
+                    outputAspectWidth,
+                    outputAspectHeight,
+                    Settings.LongSideBlocks,
+                    out _,
+                    out _))
+            {
+                throw new InvalidDataException(
+                    "Clustering output size exceeds the map cell budget.");
+            }
+            ValidateComposition();
 
             if (MapBoundary == null)
             {
@@ -283,10 +337,64 @@ namespace TerrainLab
                 Source.Height);
         }
 
+        private void UpgradeSchema()
+        {
+            if (SchemaVersion == CurrentSchemaVersion)
+            {
+                return;
+            }
+            if (SchemaVersion != 1 && SchemaVersion != 2)
+            {
+                return;
+            }
+
+            if (SchemaVersion == 1)
+            {
+                Composition = new TerrainImageClusteringComposition();
+            }
+            SchemaVersion = CurrentSchemaVersion;
+        }
+
+        private void ValidateComposition()
+        {
+            if (Composition == null)
+            {
+                Composition = new TerrainImageClusteringComposition();
+            }
+            if (Composition.AllowedSurfaces == null ||
+                Composition.AllowedSurfaces.Count == 0 ||
+                Composition.AllowedSurfaces.Any(id =>
+                    TerrainImageClassificationCatalog.FindSurface(id) ==
+                    null) ||
+                Composition.AllowedSurfaces.Distinct(
+                    StringComparer.Ordinal).Count() !=
+                Composition.AllowedSurfaces.Count)
+            {
+                throw new InvalidDataException(
+                    "Clustering composition has invalid surface classes.");
+            }
+            if (Composition.AllowedBiotopes == null ||
+                Composition.AllowedBiotopes.Count == 0 ||
+                Composition.AllowedBiotopes.Any(id =>
+                    TerrainImageClassificationCatalog.FindBiotope(id) ==
+                        null ||
+                    string.Equals(id, "auto", StringComparison.Ordinal) ||
+                    string.Equals(id, "none", StringComparison.Ordinal)) ||
+                Composition.AllowedBiotopes.Distinct(
+                    StringComparer.Ordinal).Count() !=
+                Composition.AllowedBiotopes.Count)
+            {
+                throw new InvalidDataException(
+                    "Clustering composition has invalid biotope classes.");
+            }
+        }
+
         private static void ValidateSettings(
             TerrainImageClusteringSettings settings)
         {
-            if (settings.Clusters < 4 || settings.Clusters > 64 ||
+            if (settings.LongSideBlocks < 1 ||
+                settings.LongSideBlocks > TerrainMapLimits.MaximumBlockCount ||
+                settings.Clusters < 4 || settings.Clusters > 64 ||
                 settings.SplineRadius < 0 || settings.SplineRadius > 12 ||
                 settings.SmoothPasses < 0 || settings.SmoothPasses > 8 ||
                 settings.MinimumLandRegion < 0 ||

@@ -144,6 +144,7 @@ namespace TerrainLab
         private TerrainReliefOverlay _reliefOverlay;
         private TerrainHydrologyOverlay _hydrologyOverlay;
         private TerrainErosionOverlay _erosionOverlay;
+        private TerrainLayerLegend _layerLegend;
         private TerrainImageClassificationOverlay _classificationOverlay;
         private TerrainImageClusteringOverlay _clusteringOverlay;
         private Transform _moduleContent;
@@ -202,6 +203,7 @@ namespace TerrainLab
         private TerrainHydrologyOverlayMode _pendingHydrologyOverlay;
         private TerrainErosionOverlayMode _pendingErosionOverlay;
         private string _pendingOverlayJobId;
+        private string _layerLegendSourceSignature;
         private float _nextLiveModuleRefreshTime;
         private bool _initialized;
 
@@ -246,6 +248,12 @@ namespace TerrainLab
             CreateWindow();
             ScrollWindow.addCallbackHide(HandleWindowHidden);
             CreateTopToolbar();
+            _layerLegend = GetComponent<TerrainLayerLegend>();
+            if (_layerLegend == null)
+            {
+                _layerLegend = gameObject.AddComponent<TerrainLayerLegend>();
+            }
+            _layerLegend.Initialize(CanvasMain.instance.canvas_ui.transform);
             _classificationOverlay =
                 GetComponent<TerrainImageClassificationOverlay>();
             if (_classificationOverlay == null)
@@ -372,6 +380,8 @@ namespace TerrainLab
             {
                 _erosionOverlay.Clear();
             }
+
+            UpdateLayerLegend(state);
         }
 
         private void CreateWindow()
@@ -660,15 +670,6 @@ namespace TerrainLab
                 ToggleImageWorkspaceWatcher,
                 "terrain_lab_action_toggle_image_watcher",
                 "terrain_lab_action_toggle_image_watcher_description");
-            _toolbarCommandButtons["image_auto_cluster"] =
-                CreateToolbarButton(
-                    row,
-                    "image_auto_cluster",
-                    "layer_group",
-                    "K",
-                    ToggleAutomaticImageClustering,
-                    "terrain_lab_action_automatic_clustering",
-                    "terrain_lab_action_automatic_clustering_description");
             _toolbarCommandButtons["image_manual_classify"] =
                 CreateToolbarButton(
                     row,
@@ -678,6 +679,15 @@ namespace TerrainLab
                     ToggleManualImageClassification,
                     "terrain_lab_action_manual_classification",
                     "terrain_lab_action_manual_classification_description");
+            _toolbarCommandButtons["image_auto_cluster"] =
+                CreateToolbarButton(
+                    row,
+                    "image_auto_cluster",
+                    "layer_group",
+                    "K",
+                    ToggleAutomaticImageClustering,
+                    "terrain_lab_action_automatic_clustering",
+                    "terrain_lab_action_automatic_clustering_description");
             CreateToolbarSeparator(row);
             _toolbarCommandButtons["export"] = CreateToolbarButton(
                 row,
@@ -4952,6 +4962,7 @@ namespace TerrainLab
             _reliefOverlay?.Clear();
             _hydrologyOverlay?.Clear();
             _erosionOverlay?.Clear();
+            _layerLegendSourceSignature = null;
         }
 
         private void HideAllOverlaysWithStatus()
@@ -4959,6 +4970,156 @@ namespace TerrainLab
             ClearPendingOverlayRequest();
             HideAllOverlays();
             SetStatus(LM.Get("terrain_lab_toolbar_overlays_hidden"), false);
+        }
+
+        private void UpdateLayerLegend(TerrainWorldState state)
+        {
+            if (_layerLegend == null)
+            {
+                return;
+            }
+
+            string sourceSignature = GetLayerLegendSourceSignature(state);
+            if (string.IsNullOrEmpty(sourceSignature))
+            {
+                _layerLegendSourceSignature = null;
+                _layerLegend.Hide();
+                return;
+            }
+
+            if (!string.Equals(
+                    _layerLegendSourceSignature,
+                    sourceSignature,
+                    StringComparison.Ordinal))
+            {
+                TerrainLayerLegendDescriptor descriptor =
+                    CreateActiveLayerLegend(state);
+                _layerLegendSourceSignature = descriptor == null
+                    ? null
+                    : sourceSignature;
+                _layerLegend.Show(descriptor);
+            }
+
+            bool visible =
+                _workspaceVisible &&
+                _classificationOverlay?.IsVisible != true &&
+                _clusteringOverlay?.IsVisible != true;
+            _layerLegend.Tick(visible);
+        }
+
+        private string GetLayerLegendSourceSignature(TerrainWorldState state)
+        {
+            if (state == null)
+            {
+                return null;
+            }
+
+            string prefix = state.ProjectId + "|" + state.Revision + "|";
+            if (_elevationOverlay?.IsVisible == true)
+            {
+                return prefix + "elevation|" +
+                       _elevationOverlay.DisplayMinimum + "|" +
+                       _elevationOverlay.DisplayMaximum + "|" +
+                       _elevationOverlay.SeaLevel;
+            }
+
+            TerrainDataOverlayMode dataMode =
+                _dataOverlay?.Mode ?? TerrainDataOverlayMode.None;
+            if (dataMode != TerrainDataOverlayMode.None)
+            {
+                return prefix + "data|" + dataMode;
+            }
+
+            TerrainReliefOverlayMode reliefMode =
+                _reliefOverlay?.Mode ?? TerrainReliefOverlayMode.None;
+            TerrainReliefStatistics relief = state.Relief?.Statistics;
+            if (reliefMode != TerrainReliefOverlayMode.None && relief != null)
+            {
+                return prefix + "relief|" + reliefMode + "|" +
+                       relief.MinimumElevation + "|" +
+                       relief.MaximumElevation + "|" +
+                       relief.MaximumSlopeTenths + "|" +
+                       relief.MaximumRuggedness;
+            }
+
+            TerrainHydrologyOverlayMode hydrologyMode =
+                _hydrologyOverlay?.Mode ?? TerrainHydrologyOverlayMode.None;
+            TerrainHydrologyStatistics hydrology =
+                state.Hydrology?.Statistics;
+            if (hydrologyMode != TerrainHydrologyOverlayMode.None &&
+                hydrology != null)
+            {
+                return prefix + "hydrology|" + hydrologyMode + "|" +
+                       state.Hydrology.StreamThreshold + "|" +
+                       hydrology.MaximumAccumulation + "|" +
+                       hydrology.MaximumFillDepth + "|" +
+                       hydrology.WatershedCount + "|" +
+                       hydrology.MaximumStreamOrder;
+            }
+
+            TerrainErosionOverlayMode erosionMode =
+                _erosionOverlay?.Mode ?? TerrainErosionOverlayMode.None;
+            TerrainErosionStatistics erosion = state.Erosion?.Statistics;
+            if (erosionMode != TerrainErosionOverlayMode.None &&
+                erosion != null)
+            {
+                return prefix + "erosion|" + erosionMode + "|" +
+                       erosion.MaximumCut + "|" +
+                       erosion.MaximumFill;
+            }
+
+            return null;
+        }
+
+        private TerrainLayerLegendDescriptor CreateActiveLayerLegend(
+            TerrainWorldState state)
+        {
+            if (_elevationOverlay?.IsVisible == true)
+            {
+                return TerrainLayerLegendCatalog.CreateElevation(
+                    _elevationOverlay.DisplayMinimum,
+                    _elevationOverlay.DisplayMaximum,
+                    _elevationOverlay.SeaLevel);
+            }
+
+            TerrainDataOverlayMode dataMode =
+                _dataOverlay?.Mode ?? TerrainDataOverlayMode.None;
+            if (dataMode != TerrainDataOverlayMode.None)
+            {
+                return TerrainLayerLegendCatalog.CreateData(dataMode, state);
+            }
+
+            TerrainReliefOverlayMode reliefMode =
+                _reliefOverlay?.Mode ?? TerrainReliefOverlayMode.None;
+            if (reliefMode != TerrainReliefOverlayMode.None)
+            {
+                return TerrainLayerLegendCatalog.CreateRelief(
+                    reliefMode,
+                    state,
+                    state.Relief);
+            }
+
+            TerrainHydrologyOverlayMode hydrologyMode =
+                _hydrologyOverlay?.Mode ?? TerrainHydrologyOverlayMode.None;
+            if (hydrologyMode != TerrainHydrologyOverlayMode.None)
+            {
+                return TerrainLayerLegendCatalog.CreateHydrology(
+                    hydrologyMode,
+                    state,
+                    state.Hydrology);
+            }
+
+            TerrainErosionOverlayMode erosionMode =
+                _erosionOverlay?.Mode ?? TerrainErosionOverlayMode.None;
+            if (erosionMode != TerrainErosionOverlayMode.None)
+            {
+                return TerrainLayerLegendCatalog.CreateErosion(
+                    erosionMode,
+                    state,
+                    state.Erosion);
+            }
+
+            return null;
         }
 
         private static string GetLayerAvailabilityLocalizationKey(

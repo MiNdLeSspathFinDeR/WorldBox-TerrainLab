@@ -61,6 +61,9 @@ namespace TerrainLab
         [JsonProperty("nodata")]
         public int NoData { get; set; }
 
+        [JsonProperty("georeference", NullValueHandling = NullValueHandling.Ignore)]
+        public TerrainRasterGeoreference Georeference { get; set; }
+
         internal static TerrainSyncBaseline FromState(
             TerrainWorldState state,
             string elevationSha256)
@@ -77,7 +80,8 @@ namespace TerrainLab
                 Height = state.Height,
                 HorizontalMetresPerCell = state.HorizontalMetresPerCell,
                 DataType = "int16",
-                NoData = TerrainElevationEncoding.NoData
+                NoData = TerrainElevationEncoding.NoData,
+                Georeference = state.Georeference
             };
         }
     }
@@ -289,7 +293,10 @@ namespace TerrainLab
                     stagingPath,
                     state.Width,
                     state.Height,
-                    state.HorizontalMetresPerCell);
+                    state.Georeference == null
+                        ? state.HorizontalMetresPerCell
+                        : (double?)null,
+                    state.Georeference);
                 string incomingHash = ComputeElevationSha256(incoming);
                 if (conflict && (policy == TerrainSyncConflictPolicy.Reject ||
                                  policy == TerrainSyncConflictPolicy.PreferWorld))
@@ -476,7 +483,8 @@ namespace TerrainLab
                 TerrainElevationEncoding.NoData.ToString(CultureInfo.InvariantCulture),
                 state.ProjectId,
                 "core.elevation",
-                state.HorizontalMetresPerCell);
+                state.HorizontalMetresPerCell,
+                state.Georeference);
             WriteJsonAtomic(
                 Path.Combine(workspace, BaselineFileName),
                 TerrainSyncBaseline.FromState(state, hash));
@@ -524,6 +532,7 @@ namespace TerrainLab
                     "Sync baseline does not match the active TerrainLab project.");
             }
 
+            ValidateBaselineGeoreference(baseline, state);
             return baseline;
         }
 
@@ -546,7 +555,8 @@ namespace TerrainLab
                 TerrainElevationEncoding.NoData.ToString(CultureInfo.InvariantCulture),
                 state.ProjectId,
                 "core.elevation.branch",
-                state.HorizontalMetresPerCell);
+                state.HorizontalMetresPerCell,
+                state.Georeference);
             WriteJsonAtomic(
                 Path.ChangeExtension(path, ".json"),
                 TerrainSyncBaseline.FromState(state, elevationSha256));
@@ -571,7 +581,12 @@ namespace TerrainLab
             {
                 File.Move(sourceTiff, destinationTiff);
                 moved.Add(Tuple.Create(sourceTiff, destinationTiff));
-                foreach (string extension in new[] { ".tfw", ".prj" })
+                foreach (string extension in new[]
+                {
+                    ".tfw",
+                    ".prj",
+                    ".terrainlab-georef.json"
+                })
                 {
                     string source = Path.ChangeExtension(sourceTiff, extension);
                     if (!File.Exists(source))
@@ -700,8 +715,60 @@ namespace TerrainLab
                 "1. Open outgoing/elevation.tif in a GIS editor.\r\n" +
                 "2. Export the edited DEM atomically as incoming/elevation.tif.\r\n" +
                 "3. In TerrainLab, pull with conflict checking.\r\n" +
-                "The raster must remain signed Int16, use NODATA 9999, keep its dimensions, and preserve the metric cell size.\r\n",
+                "The raster must remain signed Int16, use NODATA 9999, keep its dimensions, CRS, pixel-is-area/point mode, and affine transform.\r\n",
                 new UTF8Encoding(false));
+        }
+
+        private static void ValidateBaselineGeoreference(
+            TerrainSyncBaseline baseline,
+            TerrainWorldState state)
+        {
+            if (state.Georeference == null)
+            {
+                if (baseline.Georeference != null)
+                {
+                    throw new InvalidDataException(
+                        "Sync baseline georeference does not match the active project.");
+                }
+
+                return;
+            }
+
+            if (baseline.Georeference == null)
+            {
+                throw new InvalidDataException(
+                    "Sync baseline is missing the active source georeference.");
+            }
+
+            baseline.Georeference.Validate(state.Width, state.Height);
+            for (int index = 0; index < 6; index++)
+            {
+                double expected = state.Georeference.RasterToCrs[index];
+                double tolerance = Math.Max(1e-10, Math.Abs(expected) * 1e-10);
+                if (Math.Abs(
+                    baseline.Georeference.RasterToCrs[index] -
+                    expected) > tolerance)
+                {
+                    throw new InvalidDataException(
+                        "Sync baseline affine transform does not match the active project.");
+                }
+            }
+
+            if (baseline.Georeference.Epsg != state.Georeference.Epsg ||
+                !string.Equals(
+                    baseline.Georeference.PixelInterpretation,
+                    state.Georeference.PixelInterpretation,
+                    StringComparison.Ordinal) ||
+                (!state.Georeference.Epsg.HasValue ||
+                 state.Georeference.Epsg.Value > ushort.MaxValue) &&
+                !(baseline.Georeference.GeoKeyDirectory ??
+                    Array.Empty<ushort>()).SequenceEqual(
+                    state.Georeference.GeoKeyDirectory ??
+                    Array.Empty<ushort>()))
+            {
+                throw new InvalidDataException(
+                    "Sync baseline CRS does not match the active project.");
+            }
         }
 
         private static string GetIncomingPath(string workspace)

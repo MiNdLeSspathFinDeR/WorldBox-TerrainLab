@@ -12,11 +12,13 @@ namespace TerrainLab
         public TerrainImageClassOption(
             string id,
             string localizationKey,
-            short defaultElevation)
+            short defaultElevation,
+            bool supportsBiotope = false)
         {
             Id = id;
             LocalizationKey = localizationKey;
             DefaultElevation = defaultElevation;
+            SupportsBiotope = supportsBiotope;
         }
 
         public string Id { get; }
@@ -24,6 +26,8 @@ namespace TerrainLab
         public string LocalizationKey { get; }
 
         public short DefaultElevation { get; }
+
+        public bool SupportsBiotope { get; }
     }
 
     public sealed class TerrainImageBiotopeOption
@@ -67,15 +71,18 @@ namespace TerrainLab
                 new TerrainImageClassOption(
                     "plain",
                     "terrain_lab_manual_surface_plain",
-                    150),
+                    150,
+                    true),
                 new TerrainImageClassOption(
                     "lowland",
                     "terrain_lab_manual_surface_lowland",
-                    50),
+                    50,
+                    true),
                 new TerrainImageClassOption(
                     "upland",
                     "terrain_lab_manual_surface_upland",
-                    800),
+                    800,
+                    true),
                 new TerrainImageClassOption(
                     "hills",
                     "terrain_lab_manual_surface_hills",
@@ -83,16 +90,62 @@ namespace TerrainLab
                 new TerrainImageClassOption(
                     "rocks",
                     "terrain_lab_manual_surface_rocks",
-                    3000),
+                    4500),
                 new TerrainImageClassOption(
                     "summit",
                     "terrain_lab_manual_surface_summit",
-                    5000),
+                    7000),
                 new TerrainImageClassOption(
                     "depression",
                     "terrain_lab_manual_surface_depression",
-                    -50)
+                    -50,
+                    true)
             };
+
+        public static readonly IReadOnlyList<TerrainImageClassOption>
+            QuickPaletteSurfaces = Surfaces
+                .Where(option =>
+                    string.Equals(
+                        option.Id,
+                        "deep_ocean",
+                        StringComparison.Ordinal) ||
+                    string.Equals(
+                        option.Id,
+                        "shelf",
+                        StringComparison.Ordinal) ||
+                    string.Equals(
+                        option.Id,
+                        "shallow_water",
+                        StringComparison.Ordinal) ||
+                    string.Equals(
+                        option.Id,
+                        "river_lake",
+                        StringComparison.Ordinal) ||
+                    string.Equals(
+                        option.Id,
+                        "plain",
+                        StringComparison.Ordinal) ||
+                    string.Equals(
+                        option.Id,
+                        "lowland",
+                        StringComparison.Ordinal) ||
+                    string.Equals(
+                        option.Id,
+                        "upland",
+                        StringComparison.Ordinal) ||
+                    string.Equals(
+                        option.Id,
+                        "hills",
+                        StringComparison.Ordinal) ||
+                    string.Equals(
+                        option.Id,
+                        "rocks",
+                        StringComparison.Ordinal) ||
+                    string.Equals(
+                        option.Id,
+                        "summit",
+                        StringComparison.Ordinal))
+                .ToArray();
 
         public static readonly IReadOnlyList<TerrainImageBiotopeOption> Biotopes =
             new[]
@@ -123,7 +176,55 @@ namespace TerrainLab
                     "terrain_lab_manual_biotope_swamp"),
                 new TerrainImageBiotopeOption(
                     "enchanted",
-                    "terrain_lab_manual_biotope_enchanted")
+                    "terrain_lab_manual_biotope_enchanted"),
+                new TerrainImageBiotopeOption(
+                    "lemon",
+                    "terrain_lab_manual_biotope_lemon"),
+                new TerrainImageBiotopeOption(
+                    "crystal",
+                    "terrain_lab_manual_biotope_crystal"),
+                new TerrainImageBiotopeOption(
+                    "corrupted",
+                    "terrain_lab_manual_biotope_corrupted"),
+                new TerrainImageBiotopeOption(
+                    "infernal",
+                    "terrain_lab_manual_biotope_infernal"),
+                new TerrainImageBiotopeOption(
+                    "candy",
+                    "terrain_lab_manual_biotope_candy"),
+                new TerrainImageBiotopeOption(
+                    "mushroom",
+                    "terrain_lab_manual_biotope_mushroom"),
+                new TerrainImageBiotopeOption(
+                    "wasteland",
+                    "terrain_lab_manual_biotope_wasteland"),
+                new TerrainImageBiotopeOption(
+                    "birch",
+                    "terrain_lab_manual_biotope_birch"),
+                new TerrainImageBiotopeOption(
+                    "maple",
+                    "terrain_lab_manual_biotope_maple"),
+                new TerrainImageBiotopeOption(
+                    "rocklands",
+                    "terrain_lab_manual_biotope_rocklands"),
+                new TerrainImageBiotopeOption(
+                    "garlic",
+                    "terrain_lab_manual_biotope_garlic"),
+                new TerrainImageBiotopeOption(
+                    "flower",
+                    "terrain_lab_manual_biotope_flower"),
+                new TerrainImageBiotopeOption(
+                    "celestial",
+                    "terrain_lab_manual_biotope_celestial"),
+                new TerrainImageBiotopeOption(
+                    "clover",
+                    "terrain_lab_manual_biotope_clover"),
+                new TerrainImageBiotopeOption(
+                    "singularity",
+                    "terrain_lab_manual_biotope_singularity"),
+                new TerrainImageBiotopeOption(
+                    "paradox",
+                    "terrain_lab_manual_biotope_paradox")
             };
 
         public static readonly IReadOnlyList<TerrainImageBiotopeOption>
@@ -132,12 +233,43 @@ namespace TerrainLab
                     !string.Equals(
                         option.Id,
                         "none",
+                        StringComparison.Ordinal) &&
+                    !string.Equals(
+                        option.Id,
+                        "auto",
                         StringComparison.Ordinal))
+                .ToArray();
+
+        public static readonly IReadOnlyList<TerrainImageBiotopeOption>
+            OutsideBiotopes = Biotopes
+                .Where(option =>
+                    !string.Equals(
+                        option.Id,
+                        "auto",
+                        StringComparison.Ordinal))
+                .ToArray();
+
+        public static readonly IReadOnlyList<TerrainImageClassOption>
+            OutsideSurfaces =
+                new[]
+                {
+                    new TerrainImageClassOption(
+                        "auto",
+                        "terrain_lab_manual_outside_auto",
+                        0)
+                }
+                .Concat(Surfaces)
                 .ToArray();
 
         public static TerrainImageClassOption FindSurface(string id)
         {
             return Surfaces.FirstOrDefault(option =>
+                string.Equals(option.Id, id, StringComparison.Ordinal));
+        }
+
+        public static TerrainImageClassOption FindOutsideSurface(string id)
+        {
+            return OutsideSurfaces.FirstOrDefault(option =>
                 string.Equals(option.Id, id, StringComparison.Ordinal));
         }
 
@@ -162,6 +294,9 @@ namespace TerrainLab
 
     public sealed class TerrainImageClassificationSettings
     {
+        [JsonProperty("long_side_blocks")]
+        public int LongSideBlocks { get; set; } = 20;
+
         [JsonProperty("color_weight")]
         public double ColorWeight { get; set; } = 0.55;
 
@@ -211,10 +346,14 @@ namespace TerrainLab
         {
         }
 
-        public TerrainImageClassificationVertex(int x, int y)
+        public TerrainImageClassificationVertex(
+            int x,
+            int y,
+            short? elevation = null)
         {
             X = x;
             Y = y;
+            Elevation = elevation;
         }
 
         [JsonProperty("x")]
@@ -222,6 +361,11 @@ namespace TerrainLab
 
         [JsonProperty("y")]
         public int Y { get; set; }
+
+        [JsonProperty(
+            "elevation",
+            NullValueHandling = NullValueHandling.Ignore)]
+        public short? Elevation { get; set; }
     }
 
     public sealed class TerrainImageClassificationRegion
@@ -277,7 +421,7 @@ namespace TerrainLab
 
     public sealed class TerrainImageClassificationProfile
     {
-        public const int CurrentSchemaVersion = 1;
+        public const int CurrentSchemaVersion = 3;
         public const int MaximumSamples = 512;
         public const int MaximumRegions = 128;
         public const int MaximumLines = 128;
@@ -387,6 +531,7 @@ namespace TerrainLab
                     "Manual classification profile is empty.");
             }
 
+            profile.UpgradeSchema();
             profile.Validate(width, height);
             return profile;
         }
@@ -474,15 +619,7 @@ namespace TerrainLab
             }
 
             List<TerrainImageClassificationVertex> copied =
-                vertices?
-                    .Select(vertex =>
-                        vertex == null
-                            ? null
-                            : new TerrainImageClassificationVertex(
-                                vertex.X,
-                                vertex.Y))
-                    .ToList() ??
-                new List<TerrainImageClassificationVertex>();
+                CopyVertices(vertices, elevation);
             if (copied.Count >= 4 &&
                 copied[0].X == copied[copied.Count - 1].X &&
                 copied[0].Y == copied[copied.Count - 1].Y)
@@ -546,7 +683,7 @@ namespace TerrainLab
             }
 
             List<TerrainImageClassificationVertex> copied =
-                CopyVertices(vertices);
+                CopyVertices(vertices, elevation);
             ValidateLineVertices(
                 copied,
                 Source.Width,
@@ -588,7 +725,8 @@ namespace TerrainLab
                             ? null
                             : new TerrainImageClassificationVertex(
                                 vertex.X,
-                                vertex.Y))
+                                vertex.Y,
+                                vertex.Elevation))
                     .ToList() ??
                 new List<TerrainImageClassificationVertex>();
             if (copied.Count >= 4 &&
@@ -627,7 +765,8 @@ namespace TerrainLab
                 throw new InvalidOperationException(
                     "Draw and publish the map boundary first.");
             }
-            if (TerrainImageClassificationCatalog.FindSurface(surface) == null ||
+            if (TerrainImageClassificationCatalog.FindOutsideSurface(surface) ==
+                    null ||
                 TerrainImageClassificationCatalog.FindBiotope(biotope) == null ||
                 !TerrainElevationEncoding.IsDataValue(elevation) ||
                 elevation == TerrainElevationEncoding.NoData)
@@ -657,6 +796,18 @@ namespace TerrainLab
         {
             return MapBoundary == null ||
                    ContainsPoint(MapBoundary.Vertices, x, y);
+        }
+
+        public void GetOutputAspectDimensions(
+            out int width,
+            out int height)
+        {
+            TerrainMapLimits.GetEffectiveAspectDimensions(
+                Source?.Width ?? 0,
+                Source?.Height ?? 0,
+                MapBoundary?.Vertices,
+                out width,
+                out height);
         }
 
         public bool RemoveLastAnnotation()
@@ -752,6 +903,7 @@ namespace TerrainLab
 
         public void Validate(int expectedWidth, int expectedHeight)
         {
+            UpgradeSchema();
             if (SchemaVersion != CurrentSchemaVersion)
             {
                 throw new InvalidDataException(
@@ -770,6 +922,9 @@ namespace TerrainLab
                 Settings = new TerrainImageClassificationSettings();
             }
 
+            GetOutputAspectDimensions(
+                out int outputAspectWidth,
+                out int outputAspectHeight);
             if (!IsFiniteRange(Settings.ColorWeight, 0.0, 10.0) ||
                 !IsFiniteRange(Settings.TextureWeight, 0.0, 10.0) ||
                 !IsFiniteRange(Settings.SpatialWeight, 0.0, 10.0) ||
@@ -779,7 +934,13 @@ namespace TerrainLab
                 !IsFiniteRange(Settings.LocalInfluence, 0.001, 1.0) ||
                 !IsFiniteRange(Settings.ElevationPower, 0.25, 8.0) ||
                 Settings.ElevationSmoothing < 0 ||
-                Settings.ElevationSmoothing > 8)
+                Settings.ElevationSmoothing > 8 ||
+                !TerrainMapLimits.TryGetBlockDimensions(
+                    outputAspectWidth,
+                    outputAspectHeight,
+                    Settings.LongSideBlocks,
+                    out _,
+                    out _))
             {
                 throw new InvalidDataException(
                     "Manual classification settings are outside supported ranges.");
@@ -864,6 +1025,9 @@ namespace TerrainLab
                     region.Vertices,
                     Source.Width,
                     Source.Height);
+                ValidateVertexElevations(
+                    region.Vertices,
+                    region.Elevation);
                 totalRegionVertices += region.Vertices.Count;
                 if (totalRegionVertices > MaximumTotalRegionVertices)
                 {
@@ -901,6 +1065,9 @@ namespace TerrainLab
                     line.Vertices,
                     Source.Width,
                     Source.Height);
+                ValidateVertexElevations(
+                    line.Vertices,
+                    line.Elevation);
                 totalRegionVertices += line.Vertices.Count;
                 if (totalRegionVertices > MaximumTotalRegionVertices)
                 {
@@ -931,7 +1098,7 @@ namespace TerrainLab
                     MapBoundary.Vertices,
                     Source.Width,
                     Source.Height);
-                if (TerrainImageClassificationCatalog.FindSurface(
+                if (TerrainImageClassificationCatalog.FindOutsideSurface(
                         MapBoundary.OutsideSurface) == null ||
                     TerrainImageClassificationCatalog.FindBiotope(
                         MapBoundary.OutsideBiotope ?? "none") == null ||
@@ -949,7 +1116,8 @@ namespace TerrainLab
         }
 
         private static List<TerrainImageClassificationVertex> CopyVertices(
-            IEnumerable<TerrainImageClassificationVertex> vertices)
+            IEnumerable<TerrainImageClassificationVertex> vertices,
+            short? defaultElevation = null)
         {
             return vertices?
                 .Select(vertex =>
@@ -957,9 +1125,78 @@ namespace TerrainLab
                         ? null
                         : new TerrainImageClassificationVertex(
                             vertex.X,
-                            vertex.Y))
+                            vertex.Y,
+                            vertex.Elevation ?? defaultElevation))
                 .ToList() ??
                 new List<TerrainImageClassificationVertex>();
+        }
+
+        private void UpgradeSchema()
+        {
+            if (SchemaVersion == CurrentSchemaVersion)
+            {
+                return;
+            }
+            if (SchemaVersion != 1 && SchemaVersion != 2)
+            {
+                return;
+            }
+
+            if (SchemaVersion == 1)
+            {
+                foreach (TerrainImageClassificationRegion region in
+                         Regions ??
+                         Enumerable.Empty<TerrainImageClassificationRegion>())
+                {
+                    foreach (TerrainImageClassificationVertex vertex in
+                             region?.Vertices ??
+                             Enumerable.Empty<TerrainImageClassificationVertex>())
+                    {
+                        if (vertex != null && !vertex.Elevation.HasValue)
+                        {
+                            vertex.Elevation = region.Elevation;
+                        }
+                    }
+                }
+                foreach (TerrainImageClassificationLine line in
+                         Lines ??
+                         Enumerable.Empty<TerrainImageClassificationLine>())
+                {
+                    foreach (TerrainImageClassificationVertex vertex in
+                             line?.Vertices ??
+                             Enumerable.Empty<TerrainImageClassificationVertex>())
+                    {
+                        if (vertex != null && !vertex.Elevation.HasValue)
+                        {
+                            vertex.Elevation = line.Elevation;
+                        }
+                    }
+                }
+            }
+
+            SchemaVersion = CurrentSchemaVersion;
+        }
+
+        private static void ValidateVertexElevations(
+            IEnumerable<TerrainImageClassificationVertex> vertices,
+            short fallback)
+        {
+            foreach (TerrainImageClassificationVertex vertex in
+                     vertices ??
+                     Enumerable.Empty<TerrainImageClassificationVertex>())
+            {
+                short elevation = vertex?.Elevation ?? fallback;
+                if (!TerrainElevationEncoding.IsDataValue(elevation) ||
+                    elevation == TerrainElevationEncoding.NoData)
+                {
+                    throw new InvalidDataException(
+                        "A classification vertex has an invalid elevation.");
+                }
+                if (vertex != null && !vertex.Elevation.HasValue)
+                {
+                    vertex.Elevation = fallback;
+                }
+            }
         }
 
         private static void ValidateLineVertices(

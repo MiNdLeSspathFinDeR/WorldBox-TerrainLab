@@ -155,6 +155,8 @@ namespace TerrainLab
 
         public double HorizontalMetresPerCell { get; private set; }
 
+        public TerrainRasterGeoreference Georeference { get; private set; }
+
         public short[] Elevation { get; private set; }
 
         public byte[] Landform { get; private set; }
@@ -245,7 +247,8 @@ namespace TerrainLab
             byte[] landform,
             byte[] material,
             double horizontalMetresPerCell =
-                TerrainSpatialScale.DefaultHorizontalMetresPerCell)
+                TerrainSpatialScale.DefaultHorizontalMetresPerCell,
+            TerrainRasterGeoreference georeference = null)
         {
             if (!TerrainMapLimits.TryValidate(width, height, out string error))
             {
@@ -331,6 +334,7 @@ namespace TerrainLab
                 }
             }
 
+            georeference?.Validate(width, height);
             return new TerrainWorldState
             {
                 ProjectId = string.IsNullOrWhiteSpace(projectId)
@@ -341,10 +345,17 @@ namespace TerrainLab
                 Height = height,
                 SeaLevel = 0,
                 HorizontalMetresPerCell = horizontalMetresPerCell,
+                Georeference = georeference,
                 Elevation = normalizedElevation,
                 Landform = landform,
                 Material = material
             };
+        }
+
+        internal void SetGeoreference(TerrainRasterGeoreference georeference)
+        {
+            georeference?.Validate(Width, Height);
+            Georeference = georeference;
         }
 
         public bool MatchesCurrentWorld()

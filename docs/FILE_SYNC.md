@@ -1,4 +1,4 @@
-# TerrainLab file sync 1.1
+# TerrainLab file sync
 
 TerrainLab 1.1 exposes a local, tool-neutral exchange contract for QGIS and
 other GIS software. It does not open a network port or launch an external
@@ -17,7 +17,8 @@ The project view creates:
 |-- outgoing/
 |   |-- elevation.tif
 |   |-- elevation.tfw
-|   `-- elevation.prj
+|   |-- elevation.prj
+|   `-- elevation.terrainlab-georef.json  when imported from a GIS raster
 |-- incoming/
 |   `-- elevation.tif            supplied by the GIS editor
 |-- history/
@@ -40,11 +41,26 @@ The elevation exchange raster is:
 - every data sample in `-20000..9000` metres;
 - exact project width and height;
 - GDAL NODATA tag `9999`;
-- pixel-is-area, one WorldBox tile per pixel, with the project's metric cell
-  size (`1000 m` by default);
+- one WorldBox cell per pixel;
 - file row zero at the north/top edge;
-- user-defined local model in GeoTIFF and a WorldBox WKT2 `ENGCRS` in `.prj`;
 - world-file origin at the center of the north-west pixel.
+
+Projects created without a georeferenced source use `PixelIsArea`, the
+project's metric cell size (`1000 m` by default), a user-defined local GeoTIFF
+model, and a WorldBox WKT2 `ENGCRS` in `.prj`.
+
+Projects imported from a georeferenced TIFF instead retain the source CRS,
+complete resized six-coefficient affine transform, rotation, GeoKeys,
+`PixelIsArea`/`PixelIsPoint`, and vertical CRS metadata. The source WKT is in
+`.prj`; the full WKT/PROJJSON, original and resized transforms, local transforms,
+and WGS84 control grid are in `.terrainlab-georef.json`. GeoTIFF embeds
+ModelTransformationTag `34264` and the source GeoKeys.
+
+When an image-workspace boundary is published, export first translates the
+source affine to the north-west pixel of its bounding box and then applies the
+output resize. The immutable original transform remains in the sidecar.
+Consequently a layer edited and returned through TerrainLab overlays the same
+selected source area in QGIS rather than the complete uncropped TIFF.
 
 TerrainLab's in-memory and WBXGEO row order starts at the south-west. Export and
 import reverse rows exactly once. Landform and material do not change when an
@@ -52,14 +68,17 @@ external elevation grid is applied.
 
 The protected importer rejects a missing/wrong NODATA tag, samples outside the
 DEM domain, another sample type, compression, extra bands, inconsistent strips,
-unexpected dimensions, and any offset outside the file. The source file is
-copied to a private staging file and must remain unchanged during that copy.
+unexpected dimensions, and any offset outside the file. For a source-referenced
+project it also rejects a changed CRS, affine, or pixel interpretation. The
+source file is copied to a private staging file and must remain unchanged during
+that copy.
 
 ## Baseline and conflicts
 
 `baseline.json` records format/schema, project ID, source revision, dimensions,
-metric horizontal cell size, data type, NODATA, UTC export time, and SHA-256 of
-the south-first little-endian Int16 elevation array.
+metric horizontal cell size, optional source georeference, data type, NODATA,
+UTC export time, and SHA-256 of the south-first little-endian Int16 elevation
+array.
 
 On pull, TerrainLab compares three DEMs:
 
@@ -101,10 +120,10 @@ For a one-way analytical export, use `GeoTIFF` in the project view. It writes a
 timestamped directory containing every currently ready core, relief, hydrology,
 and erosion raster plus `terrainlab-gis.json` with checksums.
 
-## 1.1 boundary
+## Boundary
 
-This release synchronizes the authoritative DEM only. It does not yet import
-vector Simple Features, assign a real-world CRS, reproject rasters, merge cells,
-or maintain a live socket connection. Those are separate modules that can use
-the stable project ID, revision, layer catalog, and baseline protocol introduced
-here.
+This release synchronizes the authoritative DEM only. It preserves an imported
+real-world CRS but does not reproject the game grid inside WorldBox, import
+vector Simple Features, merge cells, or maintain a live socket connection.
+Those are separate modules that can use the stable project ID, revision, layer
+catalog, georeference chain, and baseline protocol introduced here.

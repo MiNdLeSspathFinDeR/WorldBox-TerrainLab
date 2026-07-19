@@ -157,30 +157,16 @@ namespace TerrainLab
             switch (mode)
             {
                 case TerrainReliefOverlayMode.Hypsometry:
-                    return GetHypsometry(elevation, state.SeaLevel, result.Statistics);
+                    return GetHypsometryColor(
+                        elevation,
+                        state.SeaLevel,
+                        result.Statistics);
                 case TerrainReliefOverlayMode.Slope:
-                    ushort slope = result.SlopeTenths[index];
-                    if (slope == ushort.MaxValue || slope < 10)
-                    {
-                        return new Color32(0, 0, 0, 0);
-                    }
-
-                    return Ramp(
-                        new Color32(245, 220, 70, 70),
-                        new Color32(220, 45, 45, 220),
-                        Mathf.Clamp01(slope / 600f));
+                    return GetSlopeColor(result.SlopeTenths[index]);
                 case TerrainReliefOverlayMode.Aspect:
-                    ushort aspect = result.AspectTenths[index];
-                    if (aspect == ushort.MaxValue)
-                    {
-                        return new Color32(125, 125, 125, 80);
-                    }
-
-                    return Color.HSVToRGB(aspect / 3600f, 0.72f, 0.95f, false)
-                        .WithAlpha(0.65f);
+                    return GetAspectColor(result.AspectTenths[index]);
                 case TerrainReliefOverlayMode.Hillshade:
-                    byte shade = result.Hillshade[index];
-                    return new Color32(shade, shade, shade, 175);
+                    return GetHillshadeColor(result.Hillshade[index]);
                 case TerrainReliefOverlayMode.Ruggedness:
                     return GetRuggednessColor(
                         result.Ruggedness[index],
@@ -188,6 +174,82 @@ namespace TerrainLab
                 default:
                     return new Color32(0, 0, 0, 0);
             }
+        }
+
+        public static Color32 GetLegendColor(
+            TerrainReliefOverlayMode mode,
+            float normalized,
+            short seaLevel,
+            TerrainReliefStatistics statistics)
+        {
+            if (statistics == null)
+            {
+                return new Color32(0, 0, 0, 0);
+            }
+
+            normalized = Mathf.Clamp01(normalized);
+            switch (mode)
+            {
+                case TerrainReliefOverlayMode.Hypsometry:
+                    short elevation = (short)Mathf.RoundToInt(Mathf.Lerp(
+                        statistics.MinimumElevation,
+                        statistics.MaximumElevation,
+                        normalized));
+                    return GetHypsometryColor(
+                        elevation,
+                        seaLevel,
+                        statistics);
+                case TerrainReliefOverlayMode.Slope:
+                    return GetSlopeColor((ushort)Mathf.RoundToInt(
+                        statistics.MaximumSlopeTenths * normalized));
+                case TerrainReliefOverlayMode.Aspect:
+                    return GetAspectColor((ushort)Mathf.Min(
+                        3599,
+                        Mathf.RoundToInt(3599f * normalized)));
+                case TerrainReliefOverlayMode.Hillshade:
+                    return GetHillshadeColor((byte)Mathf.RoundToInt(
+                        byte.MaxValue * normalized));
+                case TerrainReliefOverlayMode.Ruggedness:
+                    return GetRuggednessColor(
+                        (ushort)Mathf.RoundToInt(
+                            statistics.MaximumRuggedness * normalized),
+                        statistics.MaximumRuggedness);
+                default:
+                    return new Color32(0, 0, 0, 0);
+            }
+        }
+
+        public static Color32 GetSlopeColor(ushort slopeTenths)
+        {
+            if (slopeTenths == ushort.MaxValue || slopeTenths < 10)
+            {
+                return new Color32(0, 0, 0, 0);
+            }
+
+            return Ramp(
+                new Color32(245, 220, 70, 70),
+                new Color32(220, 45, 45, 220),
+                Mathf.Clamp01(slopeTenths / 600f));
+        }
+
+        public static Color32 GetAspectColor(ushort aspectTenths)
+        {
+            if (aspectTenths == ushort.MaxValue)
+            {
+                return new Color32(125, 125, 125, 80);
+            }
+
+            return Color.HSVToRGB(
+                    aspectTenths / 3600f,
+                    0.72f,
+                    0.95f,
+                    false)
+                .WithAlpha(0.65f);
+        }
+
+        public static Color32 GetHillshadeColor(byte shade)
+        {
+            return new Color32(shade, shade, shade, 175);
         }
 
         public static Color32 GetRuggednessColor(ushort value, ushort maximum)
@@ -211,7 +273,7 @@ namespace TerrainLab
                     (normalized - 0.5f) * 2f);
         }
 
-        private static Color32 GetHypsometry(
+        public static Color32 GetHypsometryColor(
             short elevation,
             short seaLevel,
             TerrainReliefStatistics statistics)

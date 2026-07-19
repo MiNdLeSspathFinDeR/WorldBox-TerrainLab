@@ -4,7 +4,7 @@ from copy import deepcopy
 from decimal import ROUND_CEILING as CEILING, ROUND_HALF_EVEN as HALF_EVEN, Decimal
 
 from itertools import groupby
-from math import ceil
+from math import ceil, floor
 import zlib
 
 from PIL import Image as Img
@@ -13,9 +13,16 @@ from PIL.Image import Image
 from .calibration import (
     ClassificationProfile,
     apply_manual_classification,
+    classification_processing_extent,
+    crop_classification_profile,
     rasterize_map_boundary,
 )
-from .clustering import ClusteringProfile, rasterize_clustering_boundary
+from .clustering import (
+    ClusteringProfile,
+    clustering_processing_extent,
+    crop_clustering_profile,
+    rasterize_clustering_boundary,
+)
 from .consts import CHUNK_SIZE, MAP_TEMPLATE, MAX_MAP_CELLS, SAFE_TILES_TUPLE, TILES
 from .models import Map
 from .terrain import classify_adaptive_terrain
@@ -166,6 +173,76 @@ def fit_map_size_to_budget(
     return best_width, best_height
 
 
+def fit_map_size_to_long_side(
+    pixel_width: int,
+    pixel_height: int,
+    long_side_blocks: int,
+    maximum_cells: int = MAX_MAP_CELLS,
+) -> Tuple[int, int]:
+    """Set the longer WorldBox side and preserve the raster aspect."""
+    if pixel_width <= 0 or pixel_height <= 0:
+        raise ValueError("image dimensions must be greater than 0")
+    if long_side_blocks <= 0:
+        raise ValueError("long side must be greater than 0")
+    if maximum_cells < CHUNK_SIZE * CHUNK_SIZE:
+        raise ValueError("maximum cell budget cannot fit one WorldBox block")
+
+    landscape = pixel_width >= pixel_height
+    ratio = (
+        pixel_height / pixel_width
+        if landscape
+        else pixel_width / pixel_height
+    )
+    short_side_blocks = max(
+        1,
+        floor(long_side_blocks * ratio + 0.5),
+    )
+    width = long_side_blocks if landscape else short_side_blocks
+    height = short_side_blocks if landscape else long_side_blocks
+    maximum_blocks = maximum_cells // (CHUNK_SIZE * CHUNK_SIZE)
+    if width * height > maximum_blocks:
+        maximum_width, maximum_height = maximum_map_size_for_aspect(
+            pixel_width,
+            pixel_height,
+            maximum_cells,
+        )
+        raise ValueError(
+            f"requested map is {width}x{height} blocks; maximum for this "
+            f"raster is {maximum_width}x{maximum_height} blocks"
+        )
+    validate_map_size(width, height)
+    return width, height
+
+
+def maximum_map_size_for_aspect(
+    pixel_width: int,
+    pixel_height: int,
+    maximum_cells: int = MAX_MAP_CELLS,
+) -> Tuple[int, int]:
+    """Return the largest selectable long side under the shared cell budget."""
+    if pixel_width <= 0 or pixel_height <= 0:
+        raise ValueError("image dimensions must be greater than 0")
+    maximum_blocks = maximum_cells // (CHUNK_SIZE * CHUNK_SIZE)
+    if maximum_blocks <= 0:
+        raise ValueError("maximum cell budget cannot fit one WorldBox block")
+
+    best = (1, 1)
+    for long_side in range(1, maximum_blocks + 1):
+        landscape = pixel_width >= pixel_height
+        ratio = (
+            pixel_height / pixel_width
+            if landscape
+            else pixel_width / pixel_height
+        )
+        short_side = max(1, floor(long_side * ratio + 0.5))
+        width = long_side if landscape else short_side
+        height = short_side if landscape else long_side
+        if width * height > maximum_blocks:
+            break
+        best = (width, height)
+    return best
+
+
 def validate_map_size(width: int, height: int) -> None:
     """Validate the shared TerrainLab cell budget without restricting aspect."""
     if width <= 0 or height <= 0:
@@ -294,8 +371,25 @@ def convert(
         )
 
     if algorithm == "terrain":
+        stored_classification_profile = classification_profile
+        stored_clustering_profile = clustering_profile
+        processing_image = image
+        if classification_profile is not None and classification_profile.map_boundary:
+            extent = classification_processing_extent(classification_profile)
+            processing_image = image.crop(extent)
+            classification_profile = crop_classification_profile(
+                classification_profile,
+                extent,
+            )
+        elif clustering_profile is not None and clustering_profile.map_boundary:
+            extent = clustering_processing_extent(clustering_profile)
+            processing_image = image.crop(extent)
+            clustering_profile = crop_clustering_profile(
+                clustering_profile,
+                extent,
+            )
         resized_image, (width, height) = resize_to_map(
-            image=image,
+            image=processing_image,
             width=width,
             height=height,
             resample=Img.Resampling.LANCZOS,
@@ -344,8 +438,8 @@ def convert(
             tiles=tiles,
             name=name,
             elevation=elevation,
-            classification_profile=classification_profile,
-            clustering_profile=clustering_profile,
+            classification_profile=stored_classification_profile,
+            clustering_profile=stored_clustering_profile,
         )
 
     palette = make_palette(tiles=tiles)

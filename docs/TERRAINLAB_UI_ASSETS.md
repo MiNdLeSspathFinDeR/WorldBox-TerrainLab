@@ -20,7 +20,7 @@ against screen edges and can be collapsed independently.
 
 ## Implementation status
 
-Version 1.13.0 implements the standalone side button, an adaptive top GIS
+Version 1.18.0 implements the standalone side button, an adaptive top GIS
 toolbar, and a stock WorldBox internal window. The toolbar copies the bottom
 WorldBox panel and button sprites, stretches to the logical canvas width, and
 balances commands across as few rows as the current UI scale permits. Its frame
@@ -80,10 +80,29 @@ adjacent, equally visible image-interpretation paths. Automatic clustering has
 its own full-screen source preview, explicit file confirmation, and independent
 `<image>.terrainlab-clustering.json` sidecar. Its optional cyan
 area-of-interest boundary excludes scan margins, legends, and noisy background
-from both sampling and cluster fitting; every exterior output cell becomes deep
-ocean. Five basic controls remain visible, while a collapsible expert section
+from both sampling and cluster fitting; every exterior output cell inside the
+processing crop becomes deep ocean. Five basic controls remain visible, while a
+collapsible expert section
 adds ten feature, regularization, quality, and reproducibility controls. All 15
-rows have English and Russian hover explanations.
+rows have English and Russian hover explanations. A separate collapsible class
+composition section opens two independent **Morphotypes** and **Biotopes**
+palettes. Each choice is a native surface icon with a native green selection
+lamp, rather than a text checkbox, so its class and state remain visible
+without scrolling between mixed lists. Legacy paradox, wasteland, and
+singularity classes receive deterministic visible icon fallbacks when their
+game asset ID differs between WorldBox versions.
+
+Both raster workspaces expose the same **Long side, blocks** field immediately
+after the source selector. One WorldBox block is `64 x 64` game cells. The
+chosen value fixes the longer output side; the shorter side follows the source
+raster aspect until an area boundary is published, then follows that
+boundary's bounding-box aspect. A live adjacent caption shows
+`selected width x height; maximum width x height`, where the maximum is the
+last aspect-derived integer pair below the shared `1,884,160`-cell threshold.
+It also states whether the calculation uses the complete source or the
+published extent. The default is 20 blocks, and out-of-budget values cannot be
+saved or queued. Editable values use yellow text; labels retain the stock
+panel colour.
 
 Both interpretation paths now reject sterile bare-soil output. Soil always has
 a living biome, the manual selector omits `none`, and old profiles using it
@@ -95,23 +114,42 @@ The manual raster classifier uses a compact text-segmented
 controls, so it needs no additional icon asset. Geometry is always an
 unpublished draft first. A point completes on its first click; right-click,
 double-click, or **Finish geometry** completes a line or polygon. Only then are
-the object morphotype, biotope, elevation, and optional `1..32`-cell line width
-enabled. **Publish object** commits the visible draft, leaves the committed
-object on the raster, and resets geometry and every object attribute to an
-explicit unselected state.
+the object morphotype, per-vertex elevation, and optional `1..32`-cell line
+width enabled. A compact two-row palette overlays the source canvas and shows
+native surface sprites. Its first five columns duplicate the most frequently
+used morphotypes as paired shortcuts: deep ocean/shelf,
+shallow water/river-lake, plain/lowland, upland/hills, and rocks/summit.
+Every one of the 23 normal WorldBox seed biomes follows in the same horizontal
+strip. Morphotype shortcuts update the primary surface selector; biotope
+choices are disabled for surfaces that cannot host vegetation.
+**Publish object** commits the visible draft, leaves the committed object on
+the raster, and resets geometry and every object attribute to an explicit
+unselected state.
 
 Completed polygon drafts and saved polygons use a repeated pixel-art texture
 for the selected morphotype and update immediately when the morphotype changes.
 Point samples and all line/polygon vertices use the same split Turbo DEM palette
 as the world overlay, while class-coloured outlines keep the surface identity
 readable. Lines are first-class JSON geometry and are rasterized at their
-selected WorldBox-cell width for authoritative surface and DEM assignment.
+selected WorldBox-cell width for authoritative surface assignment. Draft
+vertices snap to an existing control only when one lies within 40 source
+pixels; otherwise the click remains exactly where the player placed it.
+Elevation remains a vertex observation rather than a flat polygon value;
+bounded multiscale interpolation creates smooth irregular terrain between
+controls. Ordinary terrain stays within 20 degrees with typical slopes in the
+low single digits, hills receive a rare tail up to 50 degrees, and only the
+extreme tails of rocks and summits can approach 84-88 degrees. Coincident
+controls with conflicting heights meet near their arithmetic mean.
 
 Boundary mode stores one independent area-of-interest polygon with a cyan
 outline. Its exterior is excluded from adaptive clustering and manual training.
 A separate **Outside map extent** block selects any safe morphotype, compatible
 biotope, and signed elevation for those external cells; the backwards-compatible
-default remains deep ocean at `-4000 m`. The side panel is organized into
+default remains deep ocean at `-4000 m`. Its **Auto** option extends the nearest
+interior class with a deterministic Voronoi-like fill while preserving the
+smooth interpolated DEM instead of assigning one homogeneous outer platform.
+Publishing or deleting the boundary immediately recalculates the final map
+size. The side panel is organized into
 compact geometry, attribute, extent, and annotation groups and scrolls on short
 screens. Opening the classifier first shows one compact
 `previous | filename | next` selector and a distinct **Open selected** command.
@@ -123,7 +161,9 @@ Classification profiles are stored per raster in a neighbouring JSON sidecar
 and are saved before switching files. Delete one mode removes the
 topmost training polygon under a left-click. Delete all removes every training
 polygon immediately, but deliberately preserves point samples and the map
-boundary.
+boundary. Delete-one is a persistent tool and remains active until explicitly
+toggled off. Source coordinates stay visible in a compact status overlay at the
+bottom of the raster instead of consuming panel width.
 
 The Analysis chapter also exposes `Live DEM water` with WorldBox's native rain
 icon. It is a repeat-click toggle with a green native activity lamp; the lamp
@@ -166,13 +206,29 @@ Erodibility and local terrain derivatives cover every valid DEM cell. Empty
 managed-water, storage, feature, or moisture rasters remain selected and begin
 drawing as soon as the first routed water cells appear.
 
+Every active map overlay now has an adaptive legend docked to the left edge
+below the top toolbar. Quantitative layers use the exact renderer palette in a
+continuous vertical ramp with localized minimum, maximum, zero, and unit
+labels; dynamic limits come from the current relief, hydrology, or erosion
+statistics. Categorical layers use one vertically stacked framed sample per
+class. Landform, material, river, and waterbody samples repeat a matching live
+WorldBox tile sprite inside the supplied short pixel-art frame, while contours
+and D8 directions retain line and color symbols. Continuous ramps use the
+supplied long frame. The lower ornate end reuses the supplied upper sprite with
+a vertical mirror, so both ends have identical proportions and point away from
+the legend body. The stock lower-toolbar panel remains only behind the legend
+body. Short canvases keep the legend inside the
+playable area and scroll the categorical list. The legend persists across
+toolbar chapter changes and hides with the active layer or the complete GIS
+workspace.
+
 The standalone side button cycles through three levels: off, toolbar only, and
 toolbar plus general settings. Another press from settings closes the complete
 workspace. Closing the settings window with its stock cross performs that same
 next transition instead of falling back to toolbar-only mode. Three compact
 native lamps below the side button expose the current level.
 
-The docked layer tree, custom cursors, legends, and advanced layer styling remain
+The docked layer tree, custom cursors, and advanced layer styling remain
 later interface batches. Their semantic command IDs below are unchanged, so
 delivering art will not require WBXGEO or runtime API changes.
 
@@ -245,7 +301,7 @@ These are actual runtime boundaries, not merely missing icons:
 1. Optional UMAP embedding. The current adaptive image backend uses deterministic
    feature-space clustering; the UMAP stage described in `GIS_PIPELINE.md` is
    still a design target.
-2. Docked layer tree and properties panels, legends, opacity/blend controls,
+2. Docked layer tree and properties panels, opacity/blend controls,
    layer styling, custom cursors, and selection/attribute-table workflows.
 3. Persistent OGC Simple Features, vector import/export, geometry editing,
    buffering, clipping, intersection, and raster-to-vector output.
@@ -396,7 +452,8 @@ The future controls and their art names remain listed in Batches A-D below.
 - Status markers: clean, modified, calculating, warning, invalid, and offline.
 - Color ramps: elevation, bathymetry, slope, flow accumulation, moisture,
   temperature, sediment, and categorical landform/material palettes.
-- Compact legends for continuous gradients and categorical swatches.
+- Supplied purpose-drawn legend caps plus long quantitative and short
+  categorical swatch frames in `GameResources/terrainlab/legend/`.
 - Progress strip and cancellable background-job indicator.
 - CRS selector row, numeric elevation field, unit selector, sea-level marker,
   opacity slider, blend-mode selector, and layer search field.

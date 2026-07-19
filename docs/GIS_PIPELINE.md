@@ -36,10 +36,13 @@ manual classification profile is active, so quick unsupervised conversion and
 deliberate supervised calibration cannot silently contaminate one another.
 
 The automatic workspace can digitize one non-self-intersecting map boundary.
-Only cells inside it contribute to adaptive percentiles, water detection,
-K-means sampling, and semantic cluster fitting. Every output cell outside it is
-written as deep ocean. This removes paper margins, legends, labels, and other
-background without teaching those colours to the classifier.
+Publishing it first crops processing to its bounding box, so output dimensions
+and georeferencing follow the selected area instead of the complete scan. Only
+cells inside the polygon contribute to adaptive percentiles, water detection,
+K-means sampling, and semantic cluster fitting. Cells inside that crop but
+outside the polygon are written as deep ocean. This removes paper margins,
+legends, labels, and other background without teaching those colours to the
+classifier.
 
 The profile exposes 15 bounded and reproducible controls:
 
@@ -60,6 +63,24 @@ whose hatching or relief boundaries carry information. Nearest-centre distances
 use a bounded matrix calculation rather than allocating a
 pixel-by-cluster-by-feature tensor.
 
+A separate collapsible composition editor opens two independent game-style
+icon palettes: **Morphotypes** and **Biotopes**. Native surface sprites show
+what every choice produces, and native green activity lamps show its state.
+The biotope palette includes every normal seed biome registered by current
+WorldBox, with deterministic visible fallbacks for legacy paradox, wasteland,
+and singularity assets. The final semantic projection remaps excluded results
+to the nearest permitted class while preserving the water/land domain whenever
+possible.
+
+Manual and automatic profiles both store `settings.long_side_blocks`. It fixes
+the longer side of the generated map in `64 x 64`-cell WorldBox blocks; the
+shorter side is rounded from the current processing aspect. Before a boundary
+is published this is the source aspect; afterwards it is the published
+boundary's bounding-box aspect. The in-game editor immediately recomputes the
+selected `width x height`, source/extent dimensions, and largest admissible pair
+under the `1,884,160`-cell budget with the same algorithm used by the converter.
+Existing schema-1 and schema-2 profiles migrate to a 20-block long side.
+
 ## Implemented manual calibration
 
 TerrainLab can display a workspace raster over the live map and store point,
@@ -69,12 +90,13 @@ not alter the profile. A point completes on its first click; a line or polygon
 uses desktop-GIS digitizing with a live rubber band and explicit completion.
 Only **Publish object** commits the feature. It remains visible after commit,
 while geometry and all object attributes reset to an unselected state. Every
-annotation contains three independent observations:
+annotation contains these independent observations:
 
 - a surface morphotype such as shelf, river/lake, plain, hill, rock, summit, or
   local depression;
-- a required playable WorldBox biotope for soil surfaces (`auto` may infer it);
-- a signed Int16 elevation in `-20000..9000 m`, excluding reserved
+- a playable WorldBox biotope for seedable soil surfaces, selected from an
+  in-canvas native-sprite palette;
+- signed Int16 elevations on its vertices in `-20000..9000 m`, excluding reserved
   `NODATA=9999`.
 
 Lines additionally store an authoritative `1..32`-cell output width. Completed
@@ -82,8 +104,11 @@ polygon drafts and saved polygons use a repeated morphotype pattern; points and
 all line/polygon vertices use the shared Turbo DEM palette. Both update live as
 the draft attributes change.
 
-The editor no longer offers a bare-soil biotope. Schema version 1 profiles that
-already contain `none` still load, but soil is projected to grass. When an
+The editor no longer offers a bare-soil biotope. Schema version 3 stores a
+height on every vector vertex plus the requested output long side. Version 1
+profiles still load and copy their object-level height to each vertex; version
+2 profiles retain their vertex heights and receive the 20-block size default.
+Legacy `none` soil is projected to grass. When an
 ImageToMap world is opened for the first time, the mod incrementally calls
 WorldBox's native biome vegetation selector for trees, plants, and bushes. A
 custom-data flag makes this initial seed pass idempotent.
@@ -100,9 +125,15 @@ and 8192 vector vertices in total, so broad areas do not become millions of
 JSON samples. Later vectors own overlap, while precise point controls are
 applied last. Calculations run in bounded chunks.
 
-Point and distributed vector heights form an inverse-distance-weighted DEM on a
-coarse bounded grid, are bicubically expanded, smoothed, and restored exactly
-at point controls, throughout polygon interiors, and along rasterized lines.
+Point and vector-vertex heights form a bounded inverse-distance-weighted DEM on
+a coarse grid. Coincident controls are averaged, then the surface is
+bicubically expanded and receives deterministic multiscale relief. Polygon
+interiors and line corridors therefore follow their vertex controls instead of
+becoming flat platforms. Ordinary terrain is limited to approximately
+20 degrees at the default 1000-metre cell scale. Hills receive only a rare
+tail up to 50 degrees; rocks and summits can approach 84-88 degrees only in
+their extreme tail. Low-amplitude broad waves keep the median slope in ordinary
+terrestrial single digits.
 Deep ocean, shelf, and marine shallows retain their defined depth intervals;
 the river/lake class is intentionally independent of absolute elevation so
 high-altitude water remains possible. The generated save contains the
@@ -111,9 +142,12 @@ combines that DEM with the vanilla-safe surface map; a subsequent normal save
 promotes the state into WBXGEO.
 
 An optional map boundary excludes scan margins, legends, and other exterior
-noise from clustering and training. Its exterior has an independent safe
-morphotype, biotope, and elevation. Existing profiles remain compatible and
-default to `deep_ocean`, `none`, and `-4000 m`.
+noise from clustering and training and controls the processing crop and output
+aspect after publication. Its exterior can use an independent safe morphotype,
+biotope, and elevation, or **Auto**. Auto propagates the nearest classified
+interior surface and biotope in a deterministic Voronoi-like pass while the
+interpolated DEM continues smoothly through the exterior. Existing profiles
+remain compatible and default to `deep_ocean`, `none`, and `-4000 m`.
 
 ## Implemented Earth-like initial DEM
 
@@ -128,7 +162,7 @@ cell across the complete Int16 domain.
 | Lowland | `350 m` | `1200 m` | `0..1800 m` |
 | Upland | `900 m` | `1800 m` | `300..2400 m` |
 | Hill | `1600 m` | `2800 m` | `600..3800 m` |
-| Mountain and summit | `5000 m` | `7000 m` | `2200..9000 m` |
+| Mountain and summit | `4500 m` | `7000 m` | `2200..9000 m` |
 | Shallow water | n/a | n/a | `-5..0 m` |
 | Shelf | n/a | n/a | `-149..-6 m` |
 | Deep ocean | `-5000 m` | `-7000 m` | `-11000..-150 m` |
@@ -137,7 +171,7 @@ The mountain and deep-ocean extreme budgets use integer cell counts, so no
 more than five percent of either group can reach `7000 m` elevation or depth.
 The inferred grid then receives a metric `1000 m` horizontal cell size and a
 spatial grade constraint: same-domain cardinal neighbors may differ by at most
-`500 m`, diagonal neighbors by `707 m`, and coast cells approach the zero datum
+`364 m`, diagonal neighbors by `515 m`, and coast cells approach the zero datum
 through a bounded transition. This removes isolated one-cell spikes without
 changing imported or manually edited DEMs.
 The natural deep-ocean floor approximates terrestrial bathymetry; the full
@@ -348,6 +382,42 @@ Files use conventional north-first row order, while WBXGEO remains south-first.
 Elevation import is restricted to signed Int16 values in `-20000..9000`, exact
 project dimensions, and `NODATA=9999`. File sync adds a source SHA-256 baseline,
 conflict policies, branches, incoming history, and an append-only JSONL log.
+
+When the imported TIFF is georeferenced, ImageToMap now preserves:
+
+- the source WKT and PROJJSON plus an identified horizontal EPSG code;
+- the complete six-coefficient GDAL affine transform, including rotation;
+- `PixelIsArea` or `PixelIsPoint`;
+- the source GeoKey directory, double parameters, ASCII parameters, and
+  vertical EPSG/name when present;
+- the original raster size, published processing extent, and the affine
+  translated to that extent before it is resampled to the WorldBox grid;
+- a `5 x 5` local-cell/source/WGS84 control grid.
+
+`terrainlab-georeference.json` travels beside the generated save and inside the
+WBXGEO manifest. The affine chain is explicit:
+
+```text
+WorldBox cell (south-west origin)
+  -> resized raster pixel/line (north-west origin)
+  -> source CRS
+  -> EPSG:4326 through PROJ
+```
+
+The first two operations are exact affine transforms. A projected source CRS
+usually cannot be converted to EPSG:4326 by one affine, so TerrainLab does not
+invent one. It stores the source CRS definition and WGS84 control grid; QGIS or
+PROJ performs the actual nonlinear operation. Grid-shift resources required by
+the source CRS must also exist in the receiving PROJ installation.
+
+Every GIS export layer receives the same source CRS and resized affine. When a
+map boundary was published, the source transform is first translated by the
+boundary bounding-box pixel offset and only then scaled to the output grid.
+Consequently a returned GeoTIFF overlays the selected part of the original in
+QGIS even when the source was rotated. A ModelTransformationTag is used so
+rotated rasters remain rotated. Each TIFF also gets `.tfw`, `.prj`, and
+`.terrainlab-georef.json` sidecars. When the world has no source georeference,
+export retains the synthetic WorldBox metric `ENGCRS` fallback.
 
 ## Next scientific modules
 

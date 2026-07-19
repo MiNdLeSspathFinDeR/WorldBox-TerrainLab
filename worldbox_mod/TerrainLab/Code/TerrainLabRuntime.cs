@@ -713,6 +713,20 @@ namespace TerrainLab
 
                 TerrainWorldState captured =
                     TerrainWorldState.CaptureCurrentWorld();
+                TerrainRasterGeoreference importedGeoreference = null;
+                if (!string.IsNullOrWhiteSpace(directory) &&
+                    !TerrainRasterGeoreference.TryReadMapSidecar(
+                        directory,
+                        MapBox.width,
+                        MapBox.height,
+                        out importedGeoreference,
+                        out string georeferenceError) &&
+                    !string.IsNullOrWhiteSpace(georeferenceError))
+                {
+                    Debug.LogWarning(
+                        "[TerrainLab] Imported georeference ignored: " +
+                        georeferenceError);
+                }
                 string generatedElevationPath =
                     string.IsNullOrWhiteSpace(directory)
                         ? null
@@ -727,7 +741,9 @@ namespace TerrainLab
                         short[] elevation = TerrainGeoTiff.ReadInt16(
                             generatedElevationPath,
                             MapBox.width,
-                            MapBox.height);
+                            MapBox.height,
+                            null,
+                            importedGeoreference);
                         State = TerrainWorldState.CreateFromLayers(
                             captured.ProjectId,
                             captured.CreatedUtc,
@@ -737,7 +753,8 @@ namespace TerrainLab
                             elevation,
                             captured.Landform,
                             captured.Material,
-                            captured.HorizontalMetresPerCell);
+                            captured.HorizontalMetresPerCell,
+                            importedGeoreference);
                         State.ApplyElevationToWorldCache();
                         State.MarkSemanticLayersChanged();
                         Debug.Log(
@@ -747,6 +764,7 @@ namespace TerrainLab
                     catch (Exception generatedDemException)
                     {
                         State = captured;
+                        State.SetGeoreference(importedGeoreference);
                         Debug.LogWarning(
                             "[TerrainLab] Generated DEM ignored; using vanilla " +
                             "terrain: " + generatedDemException.Message);
@@ -755,6 +773,7 @@ namespace TerrainLab
                 else
                 {
                     State = captured;
+                    State.SetGeoreference(importedGeoreference);
                     Debug.Log(
                         "[TerrainLab] Initialized GIS layers from the vanilla world.");
                 }
