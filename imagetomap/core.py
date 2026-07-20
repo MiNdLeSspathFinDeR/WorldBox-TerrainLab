@@ -4,9 +4,10 @@ from copy import deepcopy
 from decimal import ROUND_CEILING as CEILING, ROUND_HALF_EVEN as HALF_EVEN, Decimal
 
 from itertools import groupby
-from math import ceil, floor
+from math import ceil, floor, sqrt
 import zlib
 
+import numpy as np
 from PIL import Image as Img
 from PIL.Image import Image
 
@@ -19,12 +20,18 @@ from .calibration import (
 )
 from .clustering import (
     ClusteringProfile,
+    SEMANTIC_CLUSTERING_ALGORITHM,
     clustering_processing_extent,
     crop_clustering_profile,
     rasterize_clustering_boundary,
 )
 from .consts import CHUNK_SIZE, MAP_TEMPLATE, MAX_MAP_CELLS, SAFE_TILES_TUPLE, TILES
 from .models import Map
+from .semantic import (
+    categorical_area_resample_with_confidence,
+    derive_semantic_raster,
+    make_index_image,
+)
 from .terrain import classify_adaptive_terrain
 from .utils import batched, json_dumps, make_palette
 
@@ -80,14 +87,31 @@ def resize_to_map(
     height: int,
     resample: int,
 ) -> Tuple[Image, Tuple[int, int]]:
+    (map_width, map_height), size = resolve_map_geometry(
+        image.size,
+        width,
+        height,
+    )
+    resized_image = image.resize(size=size, resample=resample).convert("RGB")
+
+    return resized_image, (map_width, map_height)
+
+
+def resolve_map_geometry(
+    image_size: Tuple[int, int],
+    width: int,
+    height: int,
+) -> Tuple[Tuple[int, int], Tuple[int, int]]:
     if width < 0 or height < 0:
         raise ValueError("width and height cannot be lower than 0")
+    if image_size[0] <= 0 or image_size[1] <= 0:
+        raise ValueError("image dimensions must be greater than 0")
 
     width_dcm = Decimal(width)
     height_dcm = Decimal(height)
 
-    temp_width = Decimal(max(round(image.size[0] / CHUNK_SIZE), 1))
-    temp_height = Decimal(max(round(image.size[1] / CHUNK_SIZE), 1))
+    temp_width = Decimal(max(round(image_size[0] / CHUNK_SIZE), 1))
+    temp_height = Decimal(max(round(image_size[1] / CHUNK_SIZE), 1))
     ratio = temp_height / temp_width
 
     if width_dcm == 0:
@@ -108,7 +132,7 @@ def resize_to_map(
     map_height = int(height_dcm)
     validate_map_size(map_width, map_height)
 
-    size = (
+    target_size = (
         map_width * CHUNK_SIZE,
         int(
             ((height_dcm / width_dcm) * width_dcm * CHUNK_SIZE).to_integral_exact(
@@ -116,9 +140,35 @@ def resize_to_map(
             ),
         ),
     )
-    resized_image = image.resize(size=size, resample=resample).convert("RGB")
+    return (map_width, map_height), target_size
 
-    return resized_image, (map_width, map_height)
+
+def resize_for_semantic_analysis(
+    image: Image,
+    maximum_dimension: int,
+) -> Image:
+    """Preserve source detail under an explicit analysis memory bound."""
+    if maximum_dimension < 512 or maximum_dimension > 4096:
+        raise ValueError(
+            "analysis_max_dimension must be between 512 and 4096"
+        )
+    longest = max(image.size)
+    pixel_limit = 12_000_000
+    scale = min(
+        1.0,
+        maximum_dimension / longest,
+        sqrt(pixel_limit / (image.width * image.height)),
+    )
+    if scale >= 1.0:
+        return image.convert("RGB")
+    size = (
+        max(1, int(round(image.width * scale))),
+        max(1, int(round(image.height * scale))),
+    )
+    return image.resize(
+        size,
+        resample=Img.Resampling.LANCZOS,
+    ).convert("RGB")
 
 
 def fit_map_size_to_budget(
@@ -265,6 +315,7 @@ def build_map(
     elevation=None,
     classification_profile: Optional[ClassificationProfile] = None,
     clustering_profile: Optional[ClusteringProfile] = None,
+    semantic=None,
 ) -> Map:
     tiles = tuple(tiles)
     flipped_image = tile_image.transpose(Img.Transpose.FLIP_TOP_BOTTOM)
@@ -305,6 +356,7 @@ def build_map(
             if clustering_profile is not None
             else None
         ),
+        semantic=semantic,
     )
 
 
@@ -388,6 +440,89 @@ def convert(
                 clustering_profile,
                 extent,
             )
+        use_semantic_v2 = (
+            clustering_profile is not None
+            and clustering_profile.algorithm_id
+            == SEMANTIC_CLUSTERING_ALGORITHM
+        )
+        if use_semantic_v2:
+            (width, height), target_size = resolve_map_geometry(
+                processing_image.size,
+                width,
+                height,
+            )
+            analysis_image = resize_for_semantic_analysis(
+                processing_image,
+                clustering_profile.analysis_max_dimension,
+            )
+            try:
+                boundary_mask = rasterize_clustering_boundary(
+                    clustering_profile,
+                    analysis_image.width,
+                    analysis_image.height,
+                )
+                analysis_tiles = classify_adaptive_terrain(
+                    image=analysis_image,
+                    tiles=tiles,
+                    clusters=terrain_clusters,
+                    smooth_passes=terrain_smooth,
+                    min_land_region=terrain_min_region,
+                    valid_mask=boundary_mask,
+                    clustering_settings=(
+                        clustering_profile.to_terrain_settings()
+                    ),
+                )
+                try:
+                    derive_semantic_raster(
+                        analysis_tiles,
+                        tiles,
+                    ).validate()
+                    tile_image, confidence = (
+                        categorical_area_resample_with_confidence(
+                            analysis_tiles,
+                            target_size,
+                            tiles,
+                        )
+                    )
+                finally:
+                    analysis_tiles.close()
+            finally:
+                analysis_image.close()
+            target_boundary_mask = rasterize_clustering_boundary(
+                clustering_profile,
+                target_size[0],
+                target_size[1],
+            )
+            if target_boundary_mask is not None:
+                target_indices = np.asarray(
+                    tile_image,
+                    dtype=np.uint8,
+                ).copy()
+                target_indices[~target_boundary_mask] = tiles.index(
+                    "deep_ocean"
+                )
+                masked_tile_image = make_index_image(
+                    target_indices,
+                    tiles,
+                )
+                tile_image.close()
+                tile_image = masked_tile_image
+                confidence[~target_boundary_mask] = 255
+            semantic = derive_semantic_raster(
+                tile_image,
+                tiles,
+                confidence=confidence,
+            )
+            return build_map(
+                tile_image=tile_image,
+                width=width,
+                height=height,
+                tiles=tiles,
+                name=name,
+                clustering_profile=stored_clustering_profile,
+                semantic=semantic,
+            )
+
         resized_image, (width, height) = resize_to_map(
             image=processing_image,
             width=width,

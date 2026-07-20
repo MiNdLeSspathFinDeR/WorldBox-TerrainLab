@@ -133,6 +133,8 @@ namespace TerrainLab
         private Button _finishBoundaryButton;
         private Button _cancelBoundaryButton;
         private Button _clearBoundaryButton;
+        private Button _legacyAlgorithmButton;
+        private Button _semanticAlgorithmButton;
         private Button _expertButton;
         private GameObject _expertPanel;
         private Button _compositionButton;
@@ -650,6 +652,36 @@ namespace TerrainLab
 
             CreateLabel(
                 content,
+                LM.Get("terrain_lab_cluster_algorithm_heading"),
+                11,
+                FontStyle.Bold,
+                18f,
+                NeutralText());
+            Transform algorithmModes =
+                CreateFlexibleButtonRow(content, 32f);
+            _legacyAlgorithmButton = TrackEditorControl(
+                CreateFlexibleButton(
+                    algorithmModes,
+                    LM.Get("terrain_lab_cluster_algorithm_legacy"),
+                    delegate
+                    {
+                        SetClusteringAlgorithm(
+                            TerrainImageClusteringAlgorithms.LegacyAdaptive);
+                    },
+                    "terrain_lab_cluster_algorithm_legacy"));
+            _semanticAlgorithmButton = TrackEditorControl(
+                CreateFlexibleButton(
+                    algorithmModes,
+                    LM.Get("terrain_lab_cluster_algorithm_semantic"),
+                    delegate
+                    {
+                        SetClusteringAlgorithm(
+                            TerrainImageClusteringAlgorithms.Semantic);
+                    },
+                    "terrain_lab_cluster_algorithm_semantic"));
+
+            CreateLabel(
+                content,
                 LM.Get("terrain_lab_cluster_boundary_heading"),
                 11,
                 FontStyle.Bold,
@@ -715,6 +747,11 @@ namespace TerrainLab
                 "water_sensitivity",
                 "terrain_lab_cluster_water_sensitivity",
                 "100");
+            CreateParameterRow(
+                content,
+                "analysis_max_dimension",
+                "terrain_lab_cluster_analysis_max_dimension",
+                "2048");
 
             _clusterBudgetLabel = CreateLabel(
                 content,
@@ -1186,6 +1223,37 @@ namespace TerrainLab
             Canvas.ForceUpdateCanvases();
         }
 
+        private void SetClusteringAlgorithm(string algorithmId)
+        {
+            if (_profile == null)
+            {
+                return;
+            }
+            _profile.Algorithm =
+                TerrainImageClusteringAlgorithm.Create(algorithmId);
+            UpdateAlgorithmButtons();
+            UpdateSummary();
+            SetPanelStatus(
+                LM.Get(
+                    string.Equals(
+                        algorithmId,
+                        TerrainImageClusteringAlgorithms.Semantic,
+                        StringComparison.Ordinal)
+                        ? "terrain_lab_cluster_algorithm_semantic_selected"
+                        : "terrain_lab_cluster_algorithm_legacy_selected"),
+                false);
+        }
+
+        private void UpdateAlgorithmButtons()
+        {
+            bool semantic = string.Equals(
+                _profile?.Algorithm?.Id,
+                TerrainImageClusteringAlgorithms.Semantic,
+                StringComparison.Ordinal);
+            SetModeButtonState(_legacyAlgorithmButton, !semantic);
+            SetModeButtonState(_semanticAlgorithmButton, semantic);
+        }
+
         private void SaveProfileCommand()
         {
             if (SaveCurrentProfile(true))
@@ -1260,6 +1328,8 @@ namespace TerrainLab
         {
             ValidateParameterControls();
             TerrainImageClusteringSettings settings = _profile.Settings;
+            settings.AnalysisMaximumDimension =
+                ReadInteger("analysis_max_dimension", 512, 4096);
             settings.LongSideBlocks = ReadLongSideBlocks();
             settings.Clusters = ReadInteger("clusters", 4, 64);
             settings.SplineRadius = ReadInteger("spline_radius", 0, 12);
@@ -1421,6 +1491,10 @@ namespace TerrainLab
         {
             switch (id)
             {
+                case "analysis_max_dimension":
+                    minimum = 512;
+                    maximum = 4096;
+                    return true;
                 case "clusters":
                     minimum = 4;
                     maximum = 64;
@@ -1476,10 +1550,14 @@ namespace TerrainLab
         private void PopulateParameterControls()
         {
             TerrainImageClusteringSettings settings = _profile.Settings;
+            UpdateAlgorithmButtons();
             _longSideInput?.SetTextWithoutNotify(
                 settings.LongSideBlocks.ToString(
                     CultureInfo.InvariantCulture));
             UpdateMapSizePreview();
+            SetParameter(
+                "analysis_max_dimension",
+                settings.AnalysisMaximumDimension);
             SetParameter("clusters", settings.Clusters);
             SetParameter("spline_radius", settings.SplineRadius);
             SetParameter("smooth_passes", settings.SmoothPasses);
@@ -1765,7 +1843,14 @@ namespace TerrainLab
                 _profile.Settings.Clusters,
                 _profile.Settings.SplineRadius,
                 _profile.MapBoundary?.Vertices?.Count ?? 0,
-                _draftVertices.Count);
+                _draftVertices.Count,
+                LM.Get(
+                    string.Equals(
+                        _profile.Algorithm?.Id,
+                        TerrainImageClusteringAlgorithms.Semantic,
+                        StringComparison.Ordinal)
+                        ? "terrain_lab_cluster_algorithm_semantic"
+                        : "terrain_lab_cluster_algorithm_legacy"));
             UpdateBoundaryButtons();
             UpdateClusterBudgetLabel();
         }

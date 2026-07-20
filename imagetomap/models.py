@@ -14,3 +14,4 @@ class Map:
     classification_profile: Optional[Dict[str, Any]] = None
     clustering_profile: Optional[Dict[str, Any]] = None
     georeference: Optional[Any] = None
+    semantic: Optional[Any] = None

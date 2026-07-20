@@ -7,8 +7,60 @@ using Newtonsoft.Json;
 
 namespace TerrainLab
 {
+    public static class TerrainImageClusteringAlgorithms
+    {
+        public const string LegacyAdaptive = "adaptive_v1";
+        public const string Semantic = "semantic_v2";
+        public const int LegacyAdaptiveVersion = 1;
+        public const int SemanticVersion = 2;
+    }
+
+    public sealed class TerrainImageClusteringAlgorithm
+    {
+        [JsonProperty("id")]
+        public string Id { get; set; } =
+            TerrainImageClusteringAlgorithms.Semantic;
+
+        [JsonProperty("version")]
+        public int Version { get; set; } =
+            TerrainImageClusteringAlgorithms.SemanticVersion;
+
+        public static TerrainImageClusteringAlgorithm Create(string id)
+        {
+            if (string.Equals(
+                    id,
+                    TerrainImageClusteringAlgorithms.LegacyAdaptive,
+                    StringComparison.Ordinal))
+            {
+                return new TerrainImageClusteringAlgorithm
+                {
+                    Id = TerrainImageClusteringAlgorithms.LegacyAdaptive,
+                    Version =
+                        TerrainImageClusteringAlgorithms.LegacyAdaptiveVersion
+                };
+            }
+            if (string.Equals(
+                    id,
+                    TerrainImageClusteringAlgorithms.Semantic,
+                    StringComparison.Ordinal))
+            {
+                return new TerrainImageClusteringAlgorithm
+                {
+                    Id = TerrainImageClusteringAlgorithms.Semantic,
+                    Version = TerrainImageClusteringAlgorithms.SemanticVersion
+                };
+            }
+            throw new ArgumentException(
+                "Unsupported clustering algorithm.",
+                nameof(id));
+        }
+    }
+
     public sealed class TerrainImageClusteringSettings
     {
+        [JsonProperty("analysis_max_dimension")]
+        public int AnalysisMaximumDimension { get; set; } = 2048;
+
         [JsonProperty("long_side_blocks")]
         public int LongSideBlocks { get; set; } = 20;
 
@@ -86,7 +138,7 @@ namespace TerrainLab
 
     public sealed class TerrainImageClusteringProfile
     {
-        public const int CurrentSchemaVersion = 3;
+        public const int CurrentSchemaVersion = 4;
         public const int MaximumBoundaryVertices = 256;
         public const int MaximumProfileBytes = 1024 * 1024;
         public const string SidecarSuffix = ".terrainlab-clustering.json";
@@ -96,6 +148,11 @@ namespace TerrainLab
 
         [JsonProperty("source")]
         public TerrainImageClassificationSource Source { get; set; }
+
+        [JsonProperty("algorithm")]
+        public TerrainImageClusteringAlgorithm Algorithm { get; set; } =
+            TerrainImageClusteringAlgorithm.Create(
+                TerrainImageClusteringAlgorithms.Semantic);
 
         [JsonProperty("settings")]
         public TerrainImageClusteringSettings Settings { get; set; } =
@@ -298,6 +355,7 @@ namespace TerrainLab
             {
                 Settings = new TerrainImageClusteringSettings();
             }
+            ValidateAlgorithm();
             ValidateSettings(Settings);
             GetOutputAspectDimensions(
                 out int outputAspectWidth,
@@ -343,7 +401,9 @@ namespace TerrainLab
             {
                 return;
             }
-            if (SchemaVersion != 1 && SchemaVersion != 2)
+            if (SchemaVersion != 1 &&
+                SchemaVersion != 2 &&
+                SchemaVersion != 3)
             {
                 return;
             }
@@ -352,7 +412,37 @@ namespace TerrainLab
             {
                 Composition = new TerrainImageClusteringComposition();
             }
+            Algorithm = TerrainImageClusteringAlgorithm.Create(
+                TerrainImageClusteringAlgorithms.LegacyAdaptive);
             SchemaVersion = CurrentSchemaVersion;
+        }
+
+        private void ValidateAlgorithm()
+        {
+            if (Algorithm == null)
+            {
+                throw new InvalidDataException(
+                    "Clustering algorithm descriptor is missing.");
+            }
+            bool legacy = string.Equals(
+                Algorithm.Id,
+                TerrainImageClusteringAlgorithms.LegacyAdaptive,
+                StringComparison.Ordinal);
+            bool semantic = string.Equals(
+                Algorithm.Id,
+                TerrainImageClusteringAlgorithms.Semantic,
+                StringComparison.Ordinal);
+            if ((!legacy && !semantic) ||
+                legacy &&
+                Algorithm.Version !=
+                TerrainImageClusteringAlgorithms.LegacyAdaptiveVersion ||
+                semantic &&
+                Algorithm.Version !=
+                TerrainImageClusteringAlgorithms.SemanticVersion)
+            {
+                throw new InvalidDataException(
+                    "Unsupported clustering algorithm version.");
+            }
         }
 
         private void ValidateComposition()
@@ -392,7 +482,9 @@ namespace TerrainLab
         private static void ValidateSettings(
             TerrainImageClusteringSettings settings)
         {
-            if (settings.LongSideBlocks < 1 ||
+            if (settings.AnalysisMaximumDimension < 512 ||
+                settings.AnalysisMaximumDimension > 4096 ||
+                settings.LongSideBlocks < 1 ||
                 settings.LongSideBlocks > TerrainMapLimits.MaximumBlockCount ||
                 settings.Clusters < 4 || settings.Clusters > 64 ||
                 settings.SplineRadius < 0 || settings.SplineRadius > 12 ||

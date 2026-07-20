@@ -2,6 +2,21 @@
 
 ## Unreleased
 
+## 2.0.0-alpha.1 - 2026-07-20
+
+- Added clustering profile schema 4 with explicit `adaptive_v1` and
+  `semantic_v2` engine identifiers. Existing schema-1..3 profiles migrate to
+  legacy v1 behavior; new profiles opt into semantic v2.
+- Added bounded source-resolution analysis before WorldBox-grid reduction.
+  Semantic v2 uses categorical covered-area voting instead of interpolating
+  tile IDs, preserves an authoritative final boundary mask, and exposes a
+  configurable 512..4096-pixel analysis limit plus a 12-megapixel guard.
+- Added independent landform, substrate, hydrology, biotope, theme,
+  hostability, and confidence diagnostics. The hostability invariant rejects
+  biotopes on water, hills, summits, and bare rock.
+- Added a game-localized Legacy v1 / Semantic v2 selector, visible engine
+  summary, and a validated source-analysis control to the clustering workspace.
+
 ## 1.18.3 - 2026-07-20
 
 - Made the requested cluster count a hard total output budget shared by deep

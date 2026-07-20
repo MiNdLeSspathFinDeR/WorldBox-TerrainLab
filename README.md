@@ -313,6 +313,12 @@ Choose `terrain` for adaptive semantic conversion (default), or `palette` for th
 imagetomap image.png --algorithm terrain
 ```
 
+An image-specific automatic-clustering sidecar selects the internal terrain
+engine. Schema-4 profiles created by TerrainLab use `semantic_v2`, which
+analyzes the source before output resizing and exports independent diagnostic
+layers. Schema-1..3 sidecars are migrated to `adaptive_v1` to preserve their
+existing output.
+
 #### `--palette`
 Choose the gameplay-safe tile set (default) or explicitly opt into every known tile.
 ```sh

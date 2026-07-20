@@ -17,6 +17,15 @@ CLUSTERING_PROFILE_SUFFIX = ".terrainlab-clustering.json"
 GENERATED_CLUSTERING_PROFILE_FILE_NAME = "terrainlab-clustering.json"
 MAXIMUM_CLUSTERING_PROFILE_BYTES = 1024 * 1024
 MAXIMUM_BOUNDARY_VERTICES = 256
+CLUSTERING_PROFILE_SCHEMA_VERSION = 4
+LEGACY_CLUSTERING_ALGORITHM = "adaptive_v1"
+SEMANTIC_CLUSTERING_ALGORITHM = "semantic_v2"
+SUPPORTED_CLUSTERING_ALGORITHMS = {
+    LEGACY_CLUSTERING_ALGORITHM: 1,
+    SEMANTIC_CLUSTERING_ALGORITHM: 2,
+}
+DEFAULT_ANALYSIS_MAX_DIMENSION = 2048
+MAXIMUM_ANALYSIS_DIMENSION = 4096
 DEFAULT_CLUSTERING_BIOTOPES = tuple(
     biotope for biotope in BIOTOPE_IDS if biotope not in {"auto", "none"}
 )
@@ -27,6 +36,9 @@ class ClusteringProfile:
     source_file_name: str
     source_width: int
     source_height: int
+    algorithm_id: str = SEMANTIC_CLUSTERING_ALGORITHM
+    algorithm_version: int = 2
+    analysis_max_dimension: int = DEFAULT_ANALYSIS_MAX_DIMENSION
     long_side_blocks: int = 20
     clusters: int = 14
     spline_radius: int = 0
@@ -48,14 +60,20 @@ class ClusteringProfile:
     allowed_biotopes: Tuple[str, ...] = DEFAULT_CLUSTERING_BIOTOPES
 
     def to_json_dict(self) -> Dict[str, Any]:
+        self.validate_algorithm()
         payload: Dict[str, Any] = {
-            "schema_version": 3,
+            "schema_version": CLUSTERING_PROFILE_SCHEMA_VERSION,
             "source": {
                 "file_name": self.source_file_name,
                 "width": self.source_width,
                 "height": self.source_height,
             },
+            "algorithm": {
+                "id": self.algorithm_id,
+                "version": self.algorithm_version,
+            },
             "settings": {
+                "analysis_max_dimension": self.analysis_max_dimension,
                 "long_side_blocks": self.long_side_blocks,
                 "clusters": self.clusters,
                 "spline_radius": self.spline_radius,
@@ -87,7 +105,29 @@ class ClusteringProfile:
             }
         return payload
 
+    def validate_algorithm(self) -> None:
+        expected_version = SUPPORTED_CLUSTERING_ALGORITHMS.get(
+            self.algorithm_id
+        )
+        if expected_version is None:
+            raise ValueError(
+                "algorithm_id must be adaptive_v1 or semantic_v2"
+            )
+        if self.algorithm_version != expected_version:
+            raise ValueError(
+                f"unsupported {self.algorithm_id} algorithm version: "
+                f"{self.algorithm_version}"
+            )
+        if (
+            self.analysis_max_dimension < 512
+            or self.analysis_max_dimension > MAXIMUM_ANALYSIS_DIMENSION
+        ):
+            raise ValueError(
+                "analysis_max_dimension must be between 512 and 4096"
+            )
+
     def to_terrain_settings(self) -> TerrainClusteringSettings:
+        self.validate_algorithm()
         return TerrainClusteringSettings(
             clusters=self.clusters,
             spline_radius=self.spline_radius,
@@ -173,10 +213,12 @@ def load_clustering_profile(
         1,
         2,
         3,
+        CLUSTERING_PROFILE_SCHEMA_VERSION,
     }:
         raise ValueError(
-            "clustering profile schema_version must be 1, 2, or 3"
+            "clustering profile schema_version must be 1, 2, 3, or 4"
         )
+    schema_version = int(payload["schema_version"])
 
     source = _mapping(payload.get("source"), "source")
     source_file_name = str(source.get("file_name") or "").strip()
@@ -195,6 +237,10 @@ def load_clustering_profile(
         )
 
     settings = _mapping(payload.get("settings", {}), "settings")
+    algorithm_id, algorithm_version = _load_algorithm(
+        payload.get("algorithm"),
+        schema_version,
+    )
     composition_value = payload.get("composition")
     composition = (
         {}
@@ -223,6 +269,17 @@ def load_clustering_profile(
         source_file_name=source_file_name,
         source_width=source_width,
         source_height=source_height,
+        algorithm_id=algorithm_id,
+        algorithm_version=algorithm_version,
+        analysis_max_dimension=_integer(
+            settings.get(
+                "analysis_max_dimension",
+                DEFAULT_ANALYSIS_MAX_DIMENSION,
+            ),
+            "analysis_max_dimension",
+            512,
+            MAXIMUM_ANALYSIS_DIMENSION,
+        ),
         long_side_blocks=_integer(
             settings.get("long_side_blocks", 20),
             "long_side_blocks",
@@ -320,6 +377,36 @@ def load_clustering_profile(
     )
     _validate_weights(profile)
     return profile
+
+
+def _load_algorithm(
+    value: Any,
+    schema_version: int,
+) -> Tuple[str, int]:
+    if schema_version < CLUSTERING_PROFILE_SCHEMA_VERSION:
+        return (
+            LEGACY_CLUSTERING_ALGORITHM,
+            SUPPORTED_CLUSTERING_ALGORITHMS[LEGACY_CLUSTERING_ALGORITHM],
+        )
+
+    algorithm = _mapping(value, "algorithm")
+    identifier = str(algorithm.get("id") or "").strip().lower()
+    if identifier not in SUPPORTED_CLUSTERING_ALGORITHMS:
+        raise ValueError(
+            "algorithm.id must be adaptive_v1 or semantic_v2"
+        )
+    version = _integer(
+        algorithm.get("version"),
+        "algorithm.version",
+        1,
+        2_147_483_647,
+    )
+    expected = SUPPORTED_CLUSTERING_ALGORITHMS[identifier]
+    if version != expected:
+        raise ValueError(
+            f"unsupported {identifier} algorithm version: {version}"
+        )
+    return identifier, version
 
 
 def rasterize_clustering_boundary(

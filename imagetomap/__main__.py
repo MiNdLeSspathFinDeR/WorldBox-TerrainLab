@@ -471,6 +471,7 @@ def process_image(image_path: Path, args: Dict[str, Any], tiles: Iterable[str]) 
     )
     clustering_status = (
         f", automatic clustering: {clustering_profile.clusters} clusters"
+        f" via {clustering_profile.algorithm_id}"
         if clustering_profile is not None
         else ""
     )

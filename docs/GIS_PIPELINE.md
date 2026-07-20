@@ -44,11 +44,52 @@ outside the polygon are written as deep ocean. This removes paper margins,
 legends, labels, and other background without teaching those colours to the
 classifier.
 
-The profile exposes 15 bounded and reproducible controls:
+### Versioned clustering engines
+
+Automatic profiles now use schema 4 and carry an explicit engine descriptor:
+
+```json
+{
+  "algorithm": {
+    "id": "semantic_v2",
+    "version": 2
+  }
+}
+```
+
+New profiles select `semantic_v2`. Profiles from schemas 1 through 3 migrate
+to `adaptive_v1` version 1, so merely opening or saving an existing sidecar
+cannot silently change its map output.
+
+`semantic_v2` implements the first 2.0 analysis stage:
+
+1. Crop and mask the published area of interest in source-raster coordinates.
+2. Analyze the source before WorldBox-grid resizing. The configurable longest
+   side defaults to 2048 pixels, is bounded to 512..4096, and also observes a
+   12-megapixel safety ceiling.
+3. Validate independent landform, substrate, hydrology, biotope, theme, and
+   confidence layers. Water, hills, summits, and bare rock cannot carry a
+   biotope.
+4. Reduce the categorical result to the requested WorldBox grid by covered-area
+   voting. Numeric tile IDs are never interpolated.
+5. Reapply the area-of-interest boundary on the final grid as an authoritative
+   mask, then publish its exterior as deep ocean.
+
+Generated semantic maps are written to `terrainlab-semantic/` beside the map:
+`landform.png`, `substrate.png`, `hydrology.png`, `biotope.png`, `theme.png`,
+`hostability.png`, `confidence.png`, and `semantic.json`. Confidence stores the
+winning area fraction of each reduced cell as UInt8.
+
+This is the stable Stage-A contract for the 2.0 alpha. Fine/coarse SLICO, RAG
+region features, separate open/linear-water heads, graph regularization, and
+river vector topology will be added behind later `semantic_v2` algorithm
+versions. They are not represented as completed by this stage.
+
+The profile exposes 16 bounded and reproducible controls:
 
 | Group | Controls |
 | --- | --- |
-| Basic | cluster count, spline radius, map smoothing passes, minimum land region, water sensitivity |
+| Basic | cluster count, spline radius, map smoothing passes, minimum land region, water sensitivity, source-analysis limit |
 | Spectral | RGB colour, luminance, and saturation weights |
 | Structure | local texture, edge/slope, and spatial-coordinate weights |
 | Quality | original-detail blend, training sample limit, K-means iteration limit |

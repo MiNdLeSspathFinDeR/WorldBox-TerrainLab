@@ -6,6 +6,7 @@ import unittest
 import zlib
 from dataclasses import replace
 from pathlib import Path
+from unittest.mock import patch
 
 import numpy as np
 from PIL import Image, ImageDraw
@@ -35,6 +36,8 @@ from imagetomap.calibration import (
 )
 from imagetomap.clustering import (
     ClusteringProfile,
+    LEGACY_CLUSTERING_ALGORITHM,
+    SEMANTIC_CLUSTERING_ALGORITHM,
     clustering_processing_extent,
     crop_clustering_profile,
     load_clustering_profile,
@@ -53,7 +56,13 @@ from imagetomap.georeference import (
     apply_transform,
     read_raster_georeference,
 )
-from imagetomap.saves import write_game_save_atomically
+from imagetomap.saves import write_game_save_atomically, write_map_folder
+from imagetomap.semantic import (
+    NO_CLASS,
+    categorical_area_resample,
+    derive_semantic_raster,
+    make_index_image,
+)
 from imagetomap.terrain import (
     TerrainClusteringSettings,
     assign_unique_cluster_tiles,
@@ -115,6 +124,9 @@ PARAMETER_TOOLTIP_KEYS = (
     "terrain_lab_cluster_smooth_passes",
     "terrain_lab_cluster_min_land_region",
     "terrain_lab_cluster_water_sensitivity",
+    "terrain_lab_cluster_analysis_max_dimension",
+    "terrain_lab_cluster_algorithm_legacy",
+    "terrain_lab_cluster_algorithm_semantic",
     "terrain_lab_cluster_color_weight",
     "terrain_lab_cluster_luma_weight",
     "terrain_lab_cluster_saturation_weight",
@@ -429,7 +441,7 @@ class TerrainConversionTests(unittest.TestCase):
         )
         self.assertIn("_profile.SetMapBoundary(_draftVertices);", overlay_source)
         self.assertIn("private void ToggleExpertPanel()", overlay_source)
-        self.assertEqual(overlay_source.count("CreateParameterRow(") - 1, 15)
+        self.assertEqual(overlay_source.count("CreateParameterRow(") - 1, 16)
         boundary_controls = overlay_source.split(
             "Transform boundaryModes =",
             maxsplit=1,
@@ -1006,7 +1018,15 @@ class TerrainConversionTests(unittest.TestCase):
             migrated = load_clustering_profile(path, source.size)
 
         self.assertEqual(restored, profile)
-        self.assertEqual(profile.to_json_dict()["schema_version"], 3)
+        self.assertEqual(profile.to_json_dict()["schema_version"], 4)
+        self.assertEqual(
+            restored.algorithm_id,
+            SEMANTIC_CLUSTERING_ALGORITHM,
+        )
+        self.assertEqual(
+            migrated.algorithm_id,
+            LEGACY_CLUSTERING_ALGORITHM,
+        )
         self.assertEqual(restored.long_side_blocks, 18)
         self.assertEqual(migrated.long_side_blocks, 20)
         converted = convert(
@@ -1031,6 +1051,202 @@ class TerrainConversionTests(unittest.TestCase):
                 9,
             )
             self.assertIsNone(converted.classification_profile)
+        finally:
+            converted.preview.close()
+            source.close()
+
+    def test_semantic_v2_analyzes_before_worldbox_downsampling(self) -> None:
+        source = Image.new("RGB", (300, 180), (80, 120, 160))
+        profile = ClusteringProfile(
+            source_file_name="native.png",
+            source_width=300,
+            source_height=180,
+            algorithm_id=SEMANTIC_CLUSTERING_ALGORITHM,
+            algorithm_version=2,
+            analysis_max_dimension=512,
+            clusters=4,
+        )
+
+        def classify_at_received_size(*args, **kwargs):
+            image = kwargs["image"]
+            return make_index_image(
+                np.zeros((image.height, image.width), dtype=np.uint8),
+                SAFE_TILES_TUPLE,
+            )
+
+        try:
+            with patch(
+                "imagetomap.core.classify_adaptive_terrain",
+                side_effect=classify_at_received_size,
+            ) as classifier:
+                converted = convert(
+                    source,
+                    width=1,
+                    height=1,
+                    clustering_profile=profile,
+                )
+            try:
+                received = classifier.call_args.kwargs["image"]
+                self.assertEqual(received.size, source.size)
+                self.assertEqual(converted.preview.size, (64, 64))
+                self.assertIsNotNone(converted.semantic)
+            finally:
+                converted.preview.close()
+        finally:
+            source.close()
+
+    def test_schema3_profile_preserves_legacy_v1_output(self) -> None:
+        y, x = np.indices((128, 128))
+        pixels = np.stack(
+            (
+                ((x * 3) % 256).astype(np.uint8),
+                ((y * 2) % 256).astype(np.uint8),
+                (((x + y) * 2) % 256).astype(np.uint8),
+            ),
+            axis=2,
+        )
+        source = Image.fromarray(pixels, mode="RGB")
+        payload = ClusteringProfile(
+            source_file_name="legacy.png",
+            source_width=128,
+            source_height=128,
+            algorithm_id=LEGACY_CLUSTERING_ALGORITHM,
+            algorithm_version=1,
+        ).to_json_dict()
+        payload["schema_version"] = 3
+        payload.pop("algorithm")
+        payload["settings"].pop("analysis_max_dimension")
+        try:
+            with tempfile.TemporaryDirectory() as temporary_directory:
+                profile_path = Path(temporary_directory) / "legacy.json"
+                profile_path.write_text(
+                    json.dumps(payload),
+                    encoding="utf-8",
+                )
+                migrated = load_clustering_profile(
+                    profile_path,
+                    source.size,
+                )
+            self.assertEqual(
+                migrated.algorithm_id,
+                LEGACY_CLUSTERING_ALGORITHM,
+            )
+            baseline = convert(source, width=2, height=2)
+            restored = convert(
+                source,
+                width=2,
+                height=2,
+                clustering_profile=migrated,
+            )
+            try:
+                self.assertTrue(
+                    np.array_equal(
+                        np.asarray(baseline.preview),
+                        np.asarray(restored.preview),
+                    )
+                )
+            finally:
+                baseline.preview.close()
+                restored.preview.close()
+        finally:
+            source.close()
+
+    def test_categorical_downsampling_votes_by_covered_area(self) -> None:
+        tile_names = SAFE_TILES_TUPLE
+        deep = tile_names.index("deep_ocean")
+        sand = tile_names.index("sand")
+        values = np.asarray(
+            (
+                (deep, deep, sand, sand),
+                (deep, sand, sand, sand),
+                (sand, sand, deep, deep),
+                (sand, sand, deep, sand),
+            ),
+            dtype=np.uint8,
+        )
+        source = make_index_image(values, tile_names)
+        try:
+            reduced = categorical_area_resample(
+                source,
+                (2, 2),
+                tile_names,
+            )
+            try:
+                self.assertEqual(
+                    np.asarray(reduced).tolist(),
+                    [[deep, sand], [sand, deep]],
+                )
+            finally:
+                reduced.close()
+        finally:
+            source.close()
+
+    def test_semantic_hostability_blocks_water_and_rock_biotopes(self) -> None:
+        tile_names = SAFE_TILES_TUPLE
+        values = np.asarray(
+            (
+                (
+                    tile_names.index("deep_ocean"),
+                    tile_names.index("hills"),
+                    tile_names.index("mountains"),
+                    tile_names.index("soil_low:grass_low"),
+                ),
+            ),
+            dtype=np.uint8,
+        )
+        image = make_index_image(values, tile_names)
+        try:
+            semantic = derive_semantic_raster(image, tile_names)
+            self.assertEqual(semantic.hostable.tolist(), [[False, False, False, True]])
+            self.assertEqual(
+                semantic.biotope[0, :3].tolist(),
+                [NO_CLASS, NO_CLASS, NO_CLASS],
+            )
+            self.assertNotEqual(int(semantic.biotope[0, 3]), NO_CLASS)
+            semantic.validate()
+        finally:
+            image.close()
+
+    def test_semantic_v2_writes_diagnostic_layers(self) -> None:
+        source = Image.new("RGB", (64, 64), (104, 134, 86))
+        profile = ClusteringProfile(
+            source_file_name="diagnostics.png",
+            source_width=64,
+            source_height=64,
+            clusters=4,
+        )
+        converted = convert(
+            source,
+            width=1,
+            height=1,
+            clustering_profile=profile,
+        )
+        try:
+            with tempfile.TemporaryDirectory() as temporary_directory:
+                output = Path(temporary_directory) / "map"
+                write_map_folder(output, converted, "Diagnostics")
+                diagnostics = output / "terrainlab-semantic"
+                self.assertEqual(
+                    {path.name for path in diagnostics.iterdir()},
+                    {
+                        "biotope.png",
+                        "confidence.png",
+                        "hostability.png",
+                        "hydrology.png",
+                        "landform.png",
+                        "semantic.json",
+                        "substrate.png",
+                        "theme.png",
+                    },
+                )
+                metadata = json.loads(
+                    (diagnostics / "semantic.json").read_text(
+                        encoding="utf-8"
+                    )
+                )
+                self.assertEqual(metadata["schema_version"], 1)
+                self.assertEqual(metadata["width"], 64)
+                self.assertEqual(metadata["height"], 64)
         finally:
             converted.preview.close()
             source.close()

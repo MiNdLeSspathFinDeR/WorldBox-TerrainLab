@@ -19,6 +19,7 @@ from .calibration import (
 from .clustering import GENERATED_CLUSTERING_PROFILE_FILE_NAME
 from .georeference import write_map_georeference
 from .models import Map
+from .semantic import write_semantic_diagnostics
 
 SAVE_SLOT_RE = re.compile(r"save(\d+)$")
 
@@ -259,6 +260,8 @@ def write_map_folder(
             + "\n",
             encoding="utf-8",
         )
+    if converted_map.semantic is not None:
+        write_semantic_diagnostics(output_path, converted_map.semantic)
 
 
 def write_game_save_atomically(

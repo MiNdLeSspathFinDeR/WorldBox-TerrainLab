@@ -1160,6 +1160,7 @@ internal static class Program
 
         TerrainImageClusteringProfile profile =
             TerrainImageClusteringProfile.Create(imagePath, 640, 360);
+        profile.Settings.AnalysisMaximumDimension = 3072;
         profile.Settings.LongSideBlocks = 27;
         profile.Settings.Clusters = 17;
         profile.Settings.SplineRadius = 3;
@@ -1192,6 +1193,11 @@ internal static class Program
                 640,
                 360);
         Assert(
+            restored.Algorithm.Id ==
+                TerrainImageClusteringAlgorithms.Semantic &&
+            restored.Algorithm.Version ==
+                TerrainImageClusteringAlgorithms.SemanticVersion &&
+            restored.Settings.AnalysisMaximumDimension == 3072 &&
             restored.Settings.LongSideBlocks == 27 &&
             restored.Settings.Clusters == 17 &&
             restored.Settings.SplineRadius == 3 &&
@@ -1229,8 +1235,12 @@ internal static class Program
         Assert(
             migrated.SchemaVersion ==
                 TerrainImageClusteringProfile.CurrentSchemaVersion &&
-            migrated.Settings.LongSideBlocks == 20,
-            "Schema-2 clustering profile did not receive the size default.");
+            migrated.Settings.LongSideBlocks == 20 &&
+            migrated.Algorithm.Id ==
+                TerrainImageClusteringAlgorithms.LegacyAdaptive &&
+            migrated.Algorithm.Version ==
+                TerrainImageClusteringAlgorithms.LegacyAdaptiveVersion,
+            "Schema-2 clustering profile migration is not legacy-safe.");
     }
 
     private static void ValidateGeneratedDem(
