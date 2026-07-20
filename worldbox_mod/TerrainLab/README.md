@@ -1,6 +1,6 @@
 # TerrainLab WorldBox mod
 
-TerrainLab 1.18 is an NML source mod that adds an in-game GIS workspace without
+TerrainLab 2.0 alpha is an NML source mod that adds an in-game GIS workspace without
 replacing WorldBox's normal save format. Its standalone transparent side icon
 opens an adaptive map toolbar styled from WorldBox's bottom panel and a stock
 internal window. Routine map commands stay in the toolbar, while project/import
@@ -11,7 +11,7 @@ window. Custom GIS data is stored in an adjacent WBXGEO project and a vanilla
 The source mod installs to `<WorldBox>/Mods/TerrainLab`. NML compiles the files
 under `Code` when the game starts.
 
-## Implemented 1.18 surface
+## Implemented 2.0 alpha surface
 
 - signed Int16 elevation in `-20000..9000 m`, sea level `0`, and reserved
   `NODATA=9999`, independent from vanilla terrain morphotypes;
@@ -91,6 +91,12 @@ under `Code` when the game starts.
   wider, source-pixel coverage gives dominant clusters first choice and rare
   groups merge into the nearest retained class. Invalid numeric model inputs
   are named and highlighted in red before conversion;
+- clustering profile schema 4 with an explicit engine selector. Existing
+  schema-1..3 projects stay on the bit-compatible `adaptive_v1` path, while new
+  projects default to `semantic_v2`: bounded source-resolution analysis,
+  categorical area-vote reduction, hostability constraints, and diagnostic
+  landform, substrate, hydrology, biotope, theme, hostability, and confidence
+  rasters;
 - a shared final-size control in both raster workspaces. It fixes the longer
   map side in 64-cell WorldBox blocks, derives the shorter side from the source
   aspect or the published boundary bounding box, and displays both the selected
