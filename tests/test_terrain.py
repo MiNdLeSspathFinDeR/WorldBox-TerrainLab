@@ -125,6 +125,48 @@ PARAMETER_TOOLTIP_KEYS = (
 
 
 class TerrainConversionTests(unittest.TestCase):
+    def test_new_project_save_uses_native_slot_picker_and_guards_empty_path(
+        self,
+    ) -> None:
+        ui_source = (
+            ROOT / "worldbox_mod" / "TerrainLab" / "Code" / "TerrainLabUi.cs"
+        ).read_text(encoding="utf-8")
+        confirm_save_source = ui_source.split(
+            "private void ConfirmSaveProject()",
+            maxsplit=1,
+        )[1].split(
+            "private void CancelSaveProject()",
+            maxsplit=1,
+        )[0]
+        self.assertIn(
+            'ScrollWindow.showWindow("saves_list");',
+            confirm_save_source,
+        )
+        self.assertNotIn(
+            'ScrollWindow.showWindow("save_world_confirm");',
+            confirm_save_source,
+        )
+
+        patch_source = (
+            ROOT
+            / "worldbox_mod"
+            / "TerrainLab"
+            / "Code"
+            / "TerrainLabPatches.cs"
+        ).read_text(encoding="utf-8")
+        self.assertIn(
+            "internal static class TerrainLabSaveSlotGuardPatch",
+            patch_source,
+        )
+        self.assertIn(
+            "string.IsNullOrWhiteSpace(SaveManager.currentSavePath)",
+            patch_source,
+        )
+        self.assertIn(
+            'ScrollWindow.showWindow("saves_list");',
+            patch_source,
+        )
+
     def test_mod_parameter_tooltips_are_complete_and_localized(self) -> None:
         locale_directory = ROOT / "worldbox_mod" / "TerrainLab" / "Locales"
         locales = {

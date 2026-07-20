@@ -146,6 +146,30 @@ internal static class Program
             postfixParameters[0].ParameterType == typeof(Building) &&
             postfixParameters[1].ParameterType == typeof(int),
             "The geyser Harmony patch no longer forwards the live Building instance.");
+
+        Type saveGuardType = typeof(TerrainLabMod).Assembly.GetType(
+            "TerrainLab.TerrainLabSaveSlotGuardPatch",
+            true);
+        MethodInfo saveGuardResolver = saveGuardType.GetMethod(
+            "TargetMethod",
+            BindingFlags.NonPublic | BindingFlags.Static);
+        MethodBase saveGuardTarget =
+            (MethodBase)saveGuardResolver?.Invoke(null, null);
+        Assert(
+            saveGuardTarget != null &&
+            saveGuardTarget.DeclaringType == typeof(SaveManager) &&
+            saveGuardTarget.Name == nameof(SaveManager.clickSaveSlot) &&
+            saveGuardTarget.GetParameters().Length == 0,
+            "The empty save-path guard no longer targets SaveManager.clickSaveSlot().");
+
+        MethodInfo saveGuardPrefix = saveGuardType.GetMethod(
+            "Prefix",
+            BindingFlags.NonPublic | BindingFlags.Static);
+        Assert(
+            saveGuardPrefix != null &&
+            saveGuardPrefix.ReturnType == typeof(bool) &&
+            saveGuardPrefix.GetParameters().Length == 0,
+            "The empty save-path guard no longer skips unsafe native saves.");
     }
 
     private static void ValidateVegetationSeedingContract()

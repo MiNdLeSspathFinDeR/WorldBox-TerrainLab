@@ -44,6 +44,32 @@ namespace TerrainLab
     }
 
     [HarmonyPatch]
+    internal static class TerrainLabSaveSlotGuardPatch
+    {
+        private static MethodBase TargetMethod()
+        {
+            return AccessTools.Method(
+                typeof(SaveManager),
+                nameof(SaveManager.clickSaveSlot),
+                Type.EmptyTypes);
+        }
+
+        private static bool Prefix()
+        {
+            if (!string.IsNullOrWhiteSpace(SaveManager.currentSavePath))
+            {
+                return true;
+            }
+
+            UnityEngine.Debug.LogWarning(
+                "[TerrainLab] Save confirmation had no selected slot; " +
+                "opening the native save-slot list.");
+            ScrollWindow.showWindow("saves_list");
+            return false;
+        }
+    }
+
+    [HarmonyPatch]
     internal static class TerrainLabMapSizeValidationPatch
     {
         private static MethodBase TargetMethod()

@@ -5282,7 +5282,7 @@ namespace TerrainLab
                     false,
                     true);
                 _suppressWindowHideAdvance = true;
-                ScrollWindow.showWindow("save_world_confirm");
+                ScrollWindow.showWindow("saves_list");
                 return;
             }
 

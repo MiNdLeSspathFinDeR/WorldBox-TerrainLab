@@ -2,6 +2,15 @@
 
 ## Unreleased
 
+## 1.18.1 - 2026-07-20
+
+- Fixed saving a new TerrainLab project: after the project name is accepted,
+  the mod now opens WorldBox's native save-slot list instead of the
+  current-slot confirmation window.
+- Added a Harmony guard for `SaveManager.clickSaveSlot()` so an empty
+  `currentSavePath` redirects to slot selection instead of reaching
+  `Directory.CreateDirectory("")` and crashing the save flow.
+
 ## 1.18.0 - 2026-07-19
 
 - Replaced automatic-clustering text toggles with separate game-style
