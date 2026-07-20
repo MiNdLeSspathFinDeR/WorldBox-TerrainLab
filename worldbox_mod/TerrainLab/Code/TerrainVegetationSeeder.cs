@@ -10,11 +10,11 @@ namespace TerrainLab
     {
         internal const string ImportedPlayerName = "ImageToMap";
         internal const string CompletionFlag =
-            "terrainlab_initial_vegetation_v1";
-        internal const int TilesPerSeed = 192;
-        internal const int MaximumSeedCount = 4096;
+            "terrainlab_initial_vegetation_v2";
+        internal const int TilesPerSeed = 48;
+        internal const int MaximumSeedCount = 16384;
         internal const int MaximumCandidateCount = MaximumSeedCount * 8;
-        internal const int WorkPerFrame = 48;
+        internal const int WorkPerFrame = 96;
 
         private static readonly FieldInfo TilesListField =
             AccessTools.Field(typeof(MapBox), "tiles_list");
@@ -71,8 +71,7 @@ namespace TerrainLab
                         return false;
                     }
 
-                    if (_target == 0 ||
-                        _mapStats.current_vegetation >= _target)
+                    if (_target == 0)
                     {
                         return Complete();
                     }
@@ -90,14 +89,7 @@ namespace TerrainLab
                         continue;
                     }
 
-                    VegetationType type = GetVegetationType(_attempted++);
-                    BuildingActions.tryGrowVegetationRandom(
-                        tile,
-                        type,
-                        true,
-                        true,
-                        false);
-                    if (tile.hasBuilding())
+                    if (TrySeedTile(tile, _attempted++))
                     {
                         _spawned++;
                     }
@@ -211,8 +203,30 @@ namespace TerrainLab
 
             _candidates = eligible.ToArray();
             Shuffle(_candidates, random);
-            _target = CalculateSeedTarget(_eligibleTileCount);
+            int desired = CalculateSeedTarget(_eligibleTileCount);
+            long missing = desired -
+                Math.Max(0L, _mapStats.current_vegetation);
+            _target = (int)Math.Max(0L, missing);
             return true;
+        }
+
+        private static bool TrySeedTile(WorldTile tile, int rotation)
+        {
+            for (int offset = 0; offset < 3; offset++)
+            {
+                BuildingActions.tryGrowVegetationRandom(
+                    tile,
+                    GetVegetationType(rotation + offset),
+                    true,
+                    false,
+                    false);
+                if (tile.hasBuilding())
+                {
+                    return true;
+                }
+            }
+
+            return false;
         }
 
         private bool Complete()

@@ -1227,7 +1227,10 @@ namespace TerrainLab
                 ? 0
                 : TerrainMapLimits.CountCells(state.Width, state.Height);
             double budgetPercent = cells * 100.0 / TerrainMapLimits.MaximumCellCount;
-            string tool = LM.Get(GetEditorToolLocalizationKey(_editor.Tool));
+            TerrainEditorTool statusTool = _editor.Tool == TerrainEditorTool.None
+                ? TerrainEditorTool.Inspect
+                : _editor.Tool;
+            string tool = LM.Get(GetEditorToolLocalizationKey(statusTool));
             string status;
 
             WorldTile tile = _editor.HoveredTile;
@@ -4233,7 +4236,7 @@ namespace TerrainLab
                 localizationKey,
                 GetEditorToolDescriptionLocalizationKey(tool),
                 iconRotation);
-            button.Background.color = _editor.Tool == tool
+            button.Background.color = IsEditorToolActive(tool)
                 ? Color.white
                 : InactiveButton;
             _editorToolButtons[tool] = button;
@@ -4299,6 +4302,22 @@ namespace TerrainLab
 
         private void SelectEditorTool(TerrainEditorTool tool)
         {
+            if (tool == TerrainEditorTool.Inspect)
+            {
+                bool enabled = !_editor.InspectorEnabled;
+                _editor.SetInspectorEnabled(enabled);
+                UpdateToolbarState();
+                UpdateMapStatusBarVisibility();
+                SetStatus(
+                    enabled
+                        ? string.Format(
+                            LM.Get("terrain_lab_selected_format"),
+                            LM.Get(GetEditorToolLocalizationKey(tool)))
+                        : LM.Get("terrain_lab_status_tool_deselected"),
+                    false);
+                return;
+            }
+
             if (_editor.Tool == tool)
             {
                 _editor.SetTool(TerrainEditorTool.None);
@@ -4331,7 +4350,7 @@ namespace TerrainLab
             foreach (KeyValuePair<TerrainEditorTool, SimpleButton> pair in
                      _editorToolButtons)
             {
-                pair.Value.Background.color = pair.Key == _editor.Tool
+                pair.Value.Background.color = IsEditorToolActive(pair.Key)
                     ? Color.white
                     : InactiveButton;
             }
@@ -4344,9 +4363,17 @@ namespace TerrainLab
                     : InactiveButton;
                 SetToolbarActivity(
                     pair.Value,
-                    pair.Key == _editor.Tool && pair.Value.Button.interactable,
+                    IsEditorToolActive(pair.Key) &&
+                    pair.Value.Button.interactable,
                     ActivityGreen);
             }
+        }
+
+        private bool IsEditorToolActive(TerrainEditorTool tool)
+        {
+            return tool == TerrainEditorTool.Inspect
+                ? _editor.InspectorEnabled
+                : tool == _editor.Tool;
         }
 
         private void HandleTargetElevationChanged(string value)
@@ -5881,7 +5908,7 @@ namespace TerrainLab
             }
 
             bool visible = _workspaceVisible && _editor != null &&
-                           _editor.Tool == TerrainEditorTool.Inspect;
+                           _editor.InspectorEnabled;
             if (_mapStatusBar.activeSelf != visible)
             {
                 _mapStatusBar.SetActive(visible);

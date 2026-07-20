@@ -2,6 +2,21 @@
 
 ## Unreleased
 
+## 1.18.2 - 2026-07-20
+
+- Decoupled the inspector from mutually exclusive editing tools. It now stays
+  enabled while elevation, surface, and digitizing tools are selected, and it
+  turns off only when its own button is pressed. The status bar continues to
+  report the visible DEM, relief, hydrology, erosion, or data-layer value under
+  the cursor.
+- Replaced random k-means initialization with deterministic k-means++ and
+  re-seeding for empty centers. Requested land clusters are assigned to
+  distinct enabled playable classes before any class is reused, preventing
+  many colour clusters from collapsing into the same few morphotypes.
+- Increased initial vegetation coverage for imported maps, tries trees,
+  plants, and bushes at each candidate, and added a `v2` completion pass so
+  previously sparse imported worlds are brought up to the new density.
+
 ## 1.18.1 - 2026-07-20
 
 - Fixed saving a new TerrainLab project: after the project name is accepted,

@@ -64,6 +64,8 @@ namespace TerrainLab
 
         public TerrainEditorTool Tool { get; private set; } = TerrainEditorTool.None;
 
+        public bool InspectorEnabled { get; private set; }
+
         public int BrushRadius { get; private set; } = 2;
 
         public short TargetElevation { get; private set; } = 100;
@@ -123,6 +125,12 @@ namespace TerrainLab
 
         public void SetTool(TerrainEditorTool tool)
         {
+            if (tool == TerrainEditorTool.Inspect)
+            {
+                InspectorEnabled = true;
+                return;
+            }
+
             if (Tool == tool)
             {
                 return;
@@ -132,6 +140,11 @@ namespace TerrainLab
             _digitizingVertices.Clear();
             SetDigitizingVisible(false);
             UpdateOutlineColor();
+        }
+
+        public void SetInspectorEnabled(bool enabled)
+        {
+            InspectorEnabled = enabled;
         }
 
         public void SetBrushRadius(int radius)

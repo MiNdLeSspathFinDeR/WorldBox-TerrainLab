@@ -7,9 +7,9 @@
     <GenerateAssemblyInfo>true</GenerateAssemblyInfo>
     <AssemblyName>TerrainLab</AssemblyName>
     <RootNamespace>TerrainLab</RootNamespace>
-    <Version>1.18.1</Version>
-    <AssemblyVersion>1.18.1.0</AssemblyVersion>
-    <FileVersion>1.18.1.0</FileVersion>
+    <Version>1.18.2</Version>
+    <AssemblyVersion>1.18.2.0</AssemblyVersion>
+    <FileVersion>1.18.2.0</FileVersion>
     <WorldBoxPath Condition="'$(WorldBoxPath)' == ''">C:\Program Files (x86)\Steam\steamapps\common\worldbox</WorldBoxPath>
     <ManagedPath>$(WorldBoxPath)\worldbox_Data\Managed</ManagedPath>
     <NmlPath>$(WorldBoxPath)\worldbox_Data\StreamingAssets\mods\NeoModLoader.dll</NmlPath>

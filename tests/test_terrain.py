@@ -1,3 +1,4 @@
+import colorsys
 import json
 import re
 import tempfile
@@ -53,7 +54,11 @@ from imagetomap.georeference import (
     read_raster_georeference,
 )
 from imagetomap.saves import write_game_save_atomically
-from imagetomap.terrain import fill_small_land_regions
+from imagetomap.terrain import (
+    TerrainClusteringSettings,
+    classify_adaptive_terrain,
+    fill_small_land_regions,
+)
 from imagetomap.utils import json_loads
 
 
@@ -472,6 +477,52 @@ class TerrainConversionTests(unittest.TestCase):
             workspace_source,
         )
 
+    def test_inspector_remains_active_with_other_tools_and_layers(self) -> None:
+        editor_source = (
+            ROOT
+            / "worldbox_mod"
+            / "TerrainLab"
+            / "Code"
+            / "TerrainLabEditor.cs"
+        ).read_text(encoding="utf-8")
+        ui_source = (
+            ROOT
+            / "worldbox_mod"
+            / "TerrainLab"
+            / "Code"
+            / "TerrainLabUi.cs"
+        ).read_text(encoding="utf-8")
+
+        self.assertIn(
+            "public bool InspectorEnabled { get; private set; }",
+            editor_source,
+        )
+        self.assertIn(
+            "public void SetInspectorEnabled(bool enabled)",
+            editor_source,
+        )
+        select_start = ui_source.index(
+            "private void SelectEditorTool(TerrainEditorTool tool)"
+        )
+        select_end = ui_source.index(
+            "private void UpdateEditorToolSelection()",
+            select_start,
+        )
+        select_source = ui_source[select_start:select_end]
+        self.assertLess(
+            select_source.index("tool == TerrainEditorTool.Inspect"),
+            select_source.index("if (_editor.Tool == tool)"),
+        )
+        self.assertEqual(
+            select_source.count("_editor.SetInspectorEnabled(enabled);"),
+            1,
+        )
+        self.assertIn("_editor.InspectorEnabled;", ui_source)
+        self.assertIn(
+            "GetDataOverlayCellValue(_dataOverlay.Mode, state, tile)",
+            ui_source,
+        )
+
     def test_layer_legends_match_gis_layer_semantics(self) -> None:
         legend_source = (
             ROOT
@@ -801,7 +852,14 @@ class TerrainConversionTests(unittest.TestCase):
                 f"VegetationType.{vegetation_type}",
                 seeder_source,
             )
-        self.assertIn("WorkPerFrame = 48", seeder_source)
+        self.assertIn("WorkPerFrame = 96", seeder_source)
+        self.assertIn(
+            '"terrainlab_initial_vegetation_v2"',
+            seeder_source,
+        )
+        self.assertIn("TilesPerSeed = 48", seeder_source)
+        self.assertIn("MaximumSeedCount = 16384", seeder_source)
+        self.assertIn("private static bool TrySeedTile(", seeder_source)
         self.assertIn(
             "MaximumCandidateCount = MaximumSeedCount * 8",
             seeder_source,
@@ -814,6 +872,40 @@ class TerrainConversionTests(unittest.TestCase):
 
         self.assertEqual((converted.width, converted.height), (2, 2))
         self.assertEqual(converted.preview.size, (128, 128))
+
+    def test_requested_land_clusters_remain_distinct(self) -> None:
+        pixels = np.empty((120, 300, 3), dtype=np.uint8)
+        for index in range(15):
+            hue = 0.01 + index * 0.017
+            saturation = 0.48 + (index % 4) * 0.12
+            value = 0.42 + (index % 5) * 0.11
+            color = colorsys.hsv_to_rgb(hue, saturation, value)
+            pixels[:, index * 20 : (index + 1) * 20] = [
+                round(channel * 255)
+                for channel in color
+            ]
+
+        source = Image.fromarray(pixels, mode="RGB")
+        clustered = classify_adaptive_terrain(
+            source,
+            SAFE_TILES_TUPLE,
+            clustering_settings=TerrainClusteringSettings(
+                clusters=15,
+                smooth_passes=0,
+                min_land_region=0,
+            ),
+        )
+        try:
+            selected = {
+                SAFE_TILES_TUPLE[int(index)]
+                for index in np.unique(np.asarray(clustered))
+            }
+            self.assertEqual(len(selected), 15)
+            self.assertNotIn("soil_low", selected)
+            self.assertNotIn("soil_high", selected)
+        finally:
+            clustered.close()
+            source.close()
 
     def test_clustering_profile_round_trips_and_masks_background(self) -> None:
         rng = np.random.default_rng(2026)

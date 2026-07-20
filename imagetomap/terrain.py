@@ -1,6 +1,7 @@
+import colorsys
 from collections import deque
 from dataclasses import dataclass
-from typing import Dict, Iterable, Optional, Sequence, Tuple
+from typing import Dict, Iterable, List, Optional, Sequence, Tuple
 
 import numpy as np
 from PIL import Image as Img
@@ -589,18 +590,61 @@ def fit_kmeans(
         sample = features
 
     unique_clusters = min(clusters, max(1, sample.shape[0]))
-    centers = sample[rng.choice(sample.shape[0], size=unique_clusters, replace=False)].copy()
+    centers = initialize_kmeans_centers(sample, unique_clusters, rng)
 
     for _ in range(iterations):
         labels = nearest_centers(sample, centers)
         next_centers = centers.copy()
+        nearest_distance = np.sum(
+            (sample - centers[labels]) ** 2,
+            axis=1,
+        )
         for label in range(unique_clusters):
             members = sample[labels == label]
             if members.size:
                 next_centers[label] = members.mean(axis=0)
+                continue
+
+            replacement = int(np.argmax(nearest_distance))
+            next_centers[label] = sample[replacement]
+            nearest_distance[replacement] = -1.0
         if np.allclose(centers, next_centers, atol=1e-4):
             break
         centers = next_centers
+
+    return centers
+
+
+def initialize_kmeans_centers(
+    sample: np.ndarray,
+    clusters: int,
+    rng: np.random.Generator,
+) -> np.ndarray:
+    """Choose deterministic k-means++ seeds without collapsing rare colours."""
+    centers = np.empty((clusters, sample.shape[1]), dtype=sample.dtype)
+    first = int(rng.integers(sample.shape[0]))
+    centers[0] = sample[first]
+    chosen = np.zeros(sample.shape[0], dtype=bool)
+    chosen[first] = True
+    closest_distance = np.sum((sample - centers[0]) ** 2, axis=1)
+
+    for index in range(1, clusters):
+        total_distance = float(np.sum(closest_distance))
+        if total_distance > 1e-12:
+            probabilities = closest_distance / total_distance
+            selected = int(rng.choice(sample.shape[0], p=probabilities))
+        else:
+            remaining = np.flatnonzero(~chosen)
+            selected = (
+                int(remaining[int(rng.integers(remaining.size))])
+                if remaining.size
+                else int(rng.integers(sample.shape[0]))
+            )
+
+        centers[index] = sample[selected]
+        chosen[selected] = True
+        distance = np.sum((sample - centers[index]) ** 2, axis=1)
+        closest_distance = np.minimum(closest_distance, distance)
 
     return centers
 
@@ -618,7 +662,8 @@ def classify_centers(
     state: TerrainState,
     settings: TerrainClusteringSettings,
 ) -> np.ndarray:
-    result = np.empty(centers.shape[0], dtype=np.uint8)
+    descriptors = []
+    heuristic_tiles = []
     for index, center in enumerate(centers):
         luma = unweight(center[0], 1.45, settings.luma_weight, 0.5)
         saturation = unweight(
@@ -672,13 +717,208 @@ def classify_centers(
             hue=hue,
             state=state,
         )
-        result[index] = tile_index(
-            tile_names,
-            tile,
-            "soil_low:grass_low",
-            "soil_high:grass_high",
+        descriptors.append(
+            (
+                luma,
+                saturation,
+                slope,
+                green_score,
+                red_score,
+                coolness,
+                hue,
+            )
         )
-    return result
+        heuristic_tiles.append(tile)
+
+    candidates = eligible_land_cluster_tiles(
+        tile_names,
+        settings,
+    )
+    if not candidates:
+        raise ValueError(
+            "selected clustering composition has no land tiles in the palette"
+        )
+
+    scores = cluster_candidate_scores(
+        descriptors,
+        heuristic_tiles,
+        tile_names,
+        candidates,
+    )
+    assignments = assign_unique_cluster_tiles(scores)
+    return np.asarray(
+        [candidates[assignment] for assignment in assignments],
+        dtype=np.uint8,
+    )
+
+
+def eligible_land_cluster_tiles(
+    tile_names: Sequence[str],
+    settings: TerrainClusteringSettings,
+) -> List[int]:
+    allowed_surfaces = set(settings.allowed_surfaces)
+    allowed_biotopes = set(settings.allowed_biotopes)
+    water_surfaces = {
+        "deep_ocean",
+        "shelf",
+        "shallow_water",
+        "river_lake",
+    }
+    eligible = [
+        index
+        for index, tile in enumerate(tile_names)
+        if tile not in {"soil_low", "soil_high"}
+        and _tile_allowed_for_composition(
+            tile,
+            allowed_surfaces,
+            allowed_biotopes,
+        )
+    ]
+    land = [
+        index
+        for index in eligible
+        if not set(_tile_surface_options(tile_names[index])) & water_surfaces
+    ]
+    return land or eligible
+
+
+def cluster_candidate_scores(
+    descriptors: Sequence[Tuple[float, ...]],
+    heuristic_tiles: Sequence[str],
+    tile_names: Sequence[str],
+    candidates: Sequence[int],
+) -> np.ndarray:
+    candidate_descriptors = [
+        cluster_tile_descriptor(tile_names[index])
+        for index in candidates
+    ]
+    lumas = np.asarray(
+        [descriptor[0] for descriptor in candidate_descriptors],
+        dtype=np.float32,
+    )
+    luma_span = float(np.ptp(lumas))
+    if luma_span > 1e-6:
+        lumas = (lumas - float(np.min(lumas))) / luma_span
+    else:
+        lumas.fill(0.5)
+
+    scores = np.empty(
+        (len(descriptors), len(candidates)),
+        dtype=np.float32,
+    )
+    for center_index, descriptor in enumerate(descriptors):
+        (
+            luma,
+            saturation,
+            slope,
+            green_score,
+            red_score,
+            coolness,
+            hue,
+        ) = descriptor
+        heuristic = heuristic_tiles[center_index]
+        heuristic_base = heuristic.split(":", 1)[0]
+        for candidate_position, candidate_index in enumerate(candidates):
+            candidate_name = tile_names[candidate_index]
+            (
+                _,
+                candidate_saturation,
+                candidate_slope,
+                candidate_green,
+                candidate_red,
+                candidate_coolness,
+                candidate_hue,
+            ) = candidate_descriptors[candidate_position]
+            hue_distance = abs(hue - candidate_hue)
+            hue_distance = min(hue_distance, 1.0 - hue_distance)
+            hue_weight = 0.25 + (
+                1.25 * max(saturation, candidate_saturation)
+            )
+            score = (
+                abs(luma - float(lumas[candidate_position])) * 1.25
+                + abs(saturation - candidate_saturation) * 0.70
+                + hue_distance * hue_weight
+                + abs(slope - candidate_slope) * 1.10
+                + abs(green_score - candidate_green) * 0.30
+                + abs(red_score - candidate_red) * 0.25
+                + abs(coolness - candidate_coolness) * 0.25
+            )
+            candidate_base = candidate_name.split(":", 1)[0]
+            if candidate_name == heuristic:
+                score -= 0.70
+            elif candidate_base == heuristic_base:
+                score -= 0.32
+            scores[center_index, candidate_position] = score
+    return scores
+
+
+def cluster_tile_descriptor(
+    tile: str,
+) -> Tuple[float, float, float, float, float, float, float]:
+    red, green, blue = (
+        channel / 255.0
+        for channel in TILES[tile]
+    )
+    hue, saturation, _ = colorsys.rgb_to_hsv(red, green, blue)
+    luma = 0.2126 * red + 0.7152 * green + 0.0722 * blue
+    green_score = green - max(red, blue)
+    red_score = red - max(green, blue * 0.75)
+    coolness = (blue - red) + (0.35 * (green - red))
+    base = tile.split(":", 1)[0]
+    slope = {
+        "sand": 0.04,
+        "soil_low": 0.12,
+        "soil_high": 0.34,
+        "hills": 0.62,
+        "mountains": 0.88,
+    }.get(base, 0.0)
+    return (
+        luma,
+        saturation,
+        slope,
+        green_score,
+        red_score,
+        coolness,
+        hue,
+    )
+
+
+def assign_unique_cluster_tiles(scores: np.ndarray) -> np.ndarray:
+    """Use each enabled class once before reusing the nearest class."""
+    center_count, candidate_count = scores.shape
+    assignments = np.full(center_count, -1, dtype=np.int32)
+    unassigned = set(range(center_count))
+    available = set(range(candidate_count))
+
+    while unassigned and available:
+        selected_center = -1
+        selected_candidate = -1
+        selected_rank = None
+        available_array = np.asarray(sorted(available), dtype=np.int32)
+        for center in sorted(unassigned):
+            ordered = available_array[
+                np.argsort(scores[center, available_array], kind="stable")
+            ]
+            best = int(ordered[0])
+            best_score = float(scores[center, best])
+            second_score = (
+                float(scores[center, int(ordered[1])])
+                if ordered.size > 1
+                else best_score + 1_000_000.0
+            )
+            rank = (second_score - best_score, -best_score, -center)
+            if selected_rank is None or rank > selected_rank:
+                selected_rank = rank
+                selected_center = center
+                selected_candidate = best
+
+        assignments[selected_center] = selected_candidate
+        unassigned.remove(selected_center)
+        available.remove(selected_candidate)
+
+    for center in sorted(unassigned):
+        assignments[center] = int(np.argmin(scores[center]))
+    return assignments
 
 
 def unweight(

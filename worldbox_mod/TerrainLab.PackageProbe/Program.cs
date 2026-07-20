@@ -70,6 +70,7 @@ internal static class Program
             ValidateImageWorkspaceProtocol(testRoot);
             ValidateImageClassificationProfile(testRoot);
             ValidateImageClusteringProfile(testRoot);
+            ValidateEditorContract();
             ValidateVegetationSeedingContract();
             if (generatedDemPath != null)
             {
@@ -198,7 +199,10 @@ internal static class Program
         Assert(
             shouldSeed != null &&
             calculateTarget != null &&
-            getVegetationType != null,
+            getVegetationType != null &&
+            seederType.GetMethod(
+                "TrySeedTile",
+                BindingFlags.NonPublic | BindingFlags.Static) != null,
             "Initial vegetation seeder test hooks are unavailable.");
 
         MapStats imported = new MapStats { player_name = "ImageToMap" };
@@ -209,9 +213,9 @@ internal static class Program
             "Initial vegetation is not restricted to imported maps.");
         Assert(
             (int)calculateTarget.Invoke(null, new object[] { 0 }) == 0 &&
-            (int)calculateTarget.Invoke(null, new object[] { 192 }) == 3 &&
+            (int)calculateTarget.Invoke(null, new object[] { 192 }) == 4 &&
             (int)calculateTarget.Invoke(null, new object[] { 1_000_000 }) ==
-                4096,
+                16384,
             "Initial vegetation density or cap changed.");
         Assert(
             (VegetationType)getVegetationType.Invoke(
@@ -241,6 +245,26 @@ internal static class Program
         Assert(
             nativeGrow != null,
             "WorldBox native vegetation API signature changed.");
+    }
+
+    private static void ValidateEditorContract()
+    {
+        PropertyInfo inspectorEnabled = typeof(TerrainLabEditor).GetProperty(
+            nameof(TerrainLabEditor.InspectorEnabled),
+            BindingFlags.Public | BindingFlags.Instance);
+        MethodInfo setInspectorEnabled = typeof(TerrainLabEditor).GetMethod(
+            nameof(TerrainLabEditor.SetInspectorEnabled),
+            BindingFlags.Public | BindingFlags.Instance);
+        Assert(
+            inspectorEnabled != null &&
+            inspectorEnabled.PropertyType == typeof(bool) &&
+            inspectorEnabled.CanRead &&
+            setInspectorEnabled != null &&
+            setInspectorEnabled.ReturnType == typeof(void) &&
+            setInspectorEnabled.GetParameters().Length == 1 &&
+            setInspectorEnabled.GetParameters()[0].ParameterType ==
+                typeof(bool),
+            "Inspector is no longer an independent persistent editor state.");
     }
 
     private static void ValidateReliefAlgorithm()
