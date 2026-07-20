@@ -3,8 +3,9 @@ TerrainLab combines an adaptive image-to-map converter with an extensible GIS
 project layer for WorldBox.
 
 > [!IMPORTANT]
-> TerrainLab 1.6 keeps WorldBox compatibility first: WBXGEO and scientific
-> layers are additive, while every normal save retains its vanilla `map.wbox`.
+> TerrainLab 2.0 alpha keeps WorldBox compatibility first: WBXGEO and
+> scientific layers are additive, while every normal save retains its vanilla
+> `map.wbox`.
 
 ## Table of contents
 - [Key Features](#key-features)
@@ -96,15 +97,17 @@ file there does not select it in WorldBox.
 
 The same image-import group offers two independent paths. **Automatic
 clustering** is the fast path: confirm a source raster, optionally outline one
-area-of-interest boundary, tune five basic controls or reveal ten expert
-controls, then build the map. The boundary excludes legends, margins, and other
-background from cluster fitting and turns its exterior into deep ocean.
+area-of-interest boundary, choose the bit-compatible `adaptive_v1` engine or
+the source-resolution `semantic_v2` engine, tune the controls, then build the
+map. The boundary excludes legends, margins, and other background from cluster
+fitting and turns its exterior into deep ocean.
 Settings and the boundary persist per source in
-`<image>.terrainlab-clustering.json`. The 15 controls cover cluster count,
-multiscale spline radius, cleanup, water sensitivity, colour, luminance,
-saturation, texture, edge and spatial weights, retained detail, sample budget,
-K-means iterations, and deterministic seed. Soil clusters always receive a
-living gameplay biome; sterile bare-soil tiles are not emitted.
+`<image>.terrainlab-clustering.json`. The 16 controls cover the algorithm,
+source-analysis limit, cluster count, multiscale spline radius, cleanup, water
+sensitivity, colour, luminance, saturation, texture, edge and spatial weights,
+retained detail, sample budget, K-means iterations, and deterministic seed.
+Soil clusters always receive a living gameplay biome; sterile bare-soil tiles
+are not emitted.
 
 **Manual classification** opens a compact previous/next file selector for
 deliberate training. Choose the source raster and press
