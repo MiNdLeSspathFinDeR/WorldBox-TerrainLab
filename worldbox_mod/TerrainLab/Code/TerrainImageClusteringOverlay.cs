@@ -103,6 +103,8 @@ namespace TerrainLab
             new List<Selectable>();
         private readonly Dictionary<string, InputField> _parameterInputs =
             new Dictionary<string, InputField>(StringComparer.Ordinal);
+        private readonly Dictionary<string, string> _parameterLocalizationKeys =
+            new Dictionary<string, string>(StringComparer.Ordinal);
         private readonly Dictionary<string, Toggle> _surfaceToggles =
             new Dictionary<string, Toggle>(StringComparer.Ordinal);
         private readonly Dictionary<string, Toggle> _biotopeToggles =
@@ -121,6 +123,7 @@ namespace TerrainLab
         private Text _summaryLabel;
         private Text _coordinateLabel;
         private Text _mapSizeLabel;
+        private Text _clusterBudgetLabel;
         private Text _panelStatus;
         private InputField _longSideInput;
         private Button _previousImageButton;
@@ -713,6 +716,21 @@ namespace TerrainLab
                 "terrain_lab_cluster_water_sensitivity",
                 "100");
 
+            _clusterBudgetLabel = CreateLabel(
+                content,
+                string.Empty,
+                10,
+                FontStyle.Bold,
+                26f,
+                new UnityColor(1f, 0.82f, 0.22f, 1f));
+            _clusterBudgetLabel.alignment = TextAnchor.MiddleCenter;
+            _clusterBudgetLabel.resizeTextForBestFit = true;
+            _clusterBudgetLabel.resizeTextMinSize = 7;
+            _clusterBudgetLabel.resizeTextMaxSize = 10;
+            ConfigureTooltip(
+                _clusterBudgetLabel.gameObject,
+                "terrain_lab_cluster_budget");
+
             _compositionButton = CreateButton(
                 content,
                 LM.Get("terrain_lab_cluster_composition_show"),
@@ -1240,6 +1258,7 @@ namespace TerrainLab
 
         private void ApplyParameterControls()
         {
+            ValidateParameterControls();
             TerrainImageClusteringSettings settings = _profile.Settings;
             settings.LongSideBlocks = ReadLongSideBlocks();
             settings.Clusters = ReadInteger("clusters", 4, 64);
@@ -1285,23 +1304,173 @@ namespace TerrainLab
 
         private int ReadInteger(string id, int minimum, int maximum)
         {
-            if (!_parameterInputs.TryGetValue(id, out InputField input) ||
-                !int.TryParse(
-                    input.text,
-                    NumberStyles.Integer,
-                    CultureInfo.InvariantCulture,
-                    out int value) ||
-                value < minimum || value > maximum)
+            if (!TryReadIntegerInput(
+                    id,
+                    minimum,
+                    maximum,
+                    out int value))
             {
-                throw new InvalidDataException(
+                throw CreateInvalidParameterException(
+                    id,
+                    minimum,
+                    maximum);
+            }
+            return value;
+        }
+
+        private void ValidateParameterControls()
+        {
+            List<string> invalid = new List<string>();
+            bool longSideValid = TryReadLongSideBlocks(out _);
+            SetInputValidationState(_longSideInput, longSideValid);
+            if (!longSideValid)
+            {
+                invalid.Add(LM.Get("terrain_lab_output_long_side"));
+            }
+
+            foreach (KeyValuePair<string, InputField> pair in _parameterInputs)
+            {
+                if (!TryGetParameterRange(
+                        pair.Key,
+                        out int minimum,
+                        out int maximum))
+                {
+                    continue;
+                }
+                bool valid = TryReadIntegerInput(
+                    pair.Key,
+                    minimum,
+                    maximum,
+                    out _);
+                SetInputValidationState(pair.Value, valid);
+                if (valid)
+                {
+                    continue;
+                }
+
+                string localizationKey =
+                    _parameterLocalizationKeys.TryGetValue(
+                        pair.Key,
+                        out string key)
+                        ? key
+                        : pair.Key;
+                invalid.Add(
                     string.Format(
                         CultureInfo.InvariantCulture,
-                        "{0}: {1}..{2}",
-                        LM.Get("terrain_lab_cluster_parameter_error"),
+                        "{0} ({1}..{2})",
+                        LM.Get(localizationKey),
                         minimum,
                         maximum));
             }
-            return value;
+
+            if (invalid.Count > 0)
+            {
+                throw new InvalidDataException(
+                    string.Format(
+                        LM.Get(
+                            "terrain_lab_cluster_invalid_fields_format"),
+                        string.Join(", ", invalid)));
+            }
+        }
+
+        private bool TryReadIntegerInput(
+            string id,
+            int minimum,
+            int maximum,
+            out int value)
+        {
+            value = 0;
+            return _parameterInputs.TryGetValue(
+                       id,
+                       out InputField input) &&
+                   int.TryParse(
+                       input.text,
+                       NumberStyles.Integer,
+                       CultureInfo.InvariantCulture,
+                       out value) &&
+                   value >= minimum &&
+                   value <= maximum;
+        }
+
+        private InvalidDataException CreateInvalidParameterException(
+            string id,
+            int minimum,
+            int maximum)
+        {
+            string localizationKey =
+                _parameterLocalizationKeys.TryGetValue(
+                    id,
+                    out string key)
+                    ? key
+                    : id;
+            return new InvalidDataException(
+                string.Format(
+                    LM.Get("terrain_lab_cluster_invalid_fields_format"),
+                    string.Format(
+                        CultureInfo.InvariantCulture,
+                        "{0} ({1}..{2})",
+                        LM.Get(localizationKey),
+                        minimum,
+                        maximum)));
+        }
+
+        private static bool TryGetParameterRange(
+            string id,
+            out int minimum,
+            out int maximum)
+        {
+            switch (id)
+            {
+                case "clusters":
+                    minimum = 4;
+                    maximum = 64;
+                    return true;
+                case "spline_radius":
+                    minimum = 0;
+                    maximum = 12;
+                    return true;
+                case "smooth_passes":
+                    minimum = 0;
+                    maximum = 8;
+                    return true;
+                case "min_land_region":
+                    minimum = 0;
+                    maximum = 4096;
+                    return true;
+                case "water_sensitivity":
+                    minimum = 50;
+                    maximum = 200;
+                    return true;
+                case "color_weight":
+                case "luma_weight":
+                case "saturation_weight":
+                case "texture_weight":
+                case "slope_weight":
+                case "spatial_weight":
+                    minimum = 0;
+                    maximum = 300;
+                    return true;
+                case "detail_weight":
+                    minimum = 0;
+                    maximum = 100;
+                    return true;
+                case "sample_limit":
+                    minimum = 1000;
+                    maximum = 250000;
+                    return true;
+                case "kmeans_iterations":
+                    minimum = 1;
+                    maximum = 100;
+                    return true;
+                case "random_seed":
+                    minimum = 0;
+                    maximum = int.MaxValue;
+                    return true;
+                default:
+                    minimum = 0;
+                    maximum = 0;
+                    return false;
+            }
         }
 
         private void PopulateParameterControls()
@@ -1330,6 +1499,7 @@ namespace TerrainLab
             SetParameter("sample_limit", settings.SampleLimit);
             SetParameter("kmeans_iterations", settings.KMeansIterations);
             SetParameter("random_seed", settings.RandomSeed);
+            RefreshParameterValidationVisuals();
         }
 
         private void PopulateCompositionControls()
@@ -1353,6 +1523,7 @@ namespace TerrainLab
                     biotopes.Contains(pair.Key));
                 UpdateCompositionToggleVisual(pair.Value);
             }
+            UpdateClusterBudgetLabel();
         }
 
         private static int Percent(double value)
@@ -1393,31 +1564,43 @@ namespace TerrainLab
             {
                 _mapSizeLabel.text = string.Empty;
             }
+            if (_clusterBudgetLabel != null)
+            {
+                _clusterBudgetLabel.text = string.Empty;
+            }
             SetEditorControlsEnabled(false);
         }
 
         private int ReadLongSideBlocks()
         {
-            GetOutputAspectDimensions(
-                out int aspectWidth,
-                out int aspectHeight);
-            if (_longSideInput == null ||
-                !int.TryParse(
-                    _longSideInput.text,
-                    NumberStyles.Integer,
-                    CultureInfo.InvariantCulture,
-                    out int value) ||
-                !TerrainMapLimits.TryGetBlockDimensions(
-                    aspectWidth,
-                    aspectHeight,
-                    value,
-                    out _,
-                    out _))
+            if (!TryReadLongSideBlocks(out int value))
             {
+                SetInputValidationState(_longSideInput, false);
                 throw new InvalidDataException(
                     LM.Get("terrain_lab_output_size_error"));
             }
+            SetInputValidationState(_longSideInput, true);
             return value;
+        }
+
+        private bool TryReadLongSideBlocks(out int value)
+        {
+            value = 0;
+            GetOutputAspectDimensions(
+                out int aspectWidth,
+                out int aspectHeight);
+            return _longSideInput != null &&
+                   int.TryParse(
+                       _longSideInput.text,
+                       NumberStyles.Integer,
+                       CultureInfo.InvariantCulture,
+                       out value) &&
+                   TerrainMapLimits.TryGetBlockDimensions(
+                       aspectWidth,
+                       aspectHeight,
+                       value,
+                       out _,
+                       out _);
         }
 
         private void UpdateMapSizePreview()
@@ -1480,6 +1663,7 @@ namespace TerrainLab
             _mapSizeLabel.color = valid
                 ? new UnityColor(0.72f, 0.84f, 0.94f, 1f)
                 : new UnityColor(0.95f, 0.52f, 0.46f, 1f);
+            SetInputValidationState(_longSideInput, valid);
         }
 
         private void GetOutputAspectDimensions(
@@ -1583,6 +1767,149 @@ namespace TerrainLab
                 _profile.MapBoundary?.Vertices?.Count ?? 0,
                 _draftVertices.Count);
             UpdateBoundaryButtons();
+            UpdateClusterBudgetLabel();
+        }
+
+        private void UpdateClusterBudgetLabel()
+        {
+            if (_clusterBudgetLabel == null)
+            {
+                return;
+            }
+            if (_profile == null)
+            {
+                _clusterBudgetLabel.text = string.Empty;
+                return;
+            }
+
+            bool budgetValid = TryReadIntegerInput(
+                "clusters",
+                4,
+                64,
+                out int budget);
+            if (!budgetValid)
+            {
+                budget = _profile.Settings.Clusters;
+            }
+
+            HashSet<string> surfaces = new HashSet<string>(
+                _surfaceToggles
+                    .Where(pair =>
+                        pair.Value != null &&
+                        pair.Value.isOn)
+                    .Select(pair => pair.Key),
+                StringComparer.Ordinal);
+            int biotopeCount = _biotopeToggles.Count(pair =>
+                pair.Value != null &&
+                pair.Value.isOn);
+            int candidates = CountCompositionCandidateClasses(
+                surfaces,
+                biotopeCount);
+            int effective = Math.Min(budget, candidates);
+            _clusterBudgetLabel.text = string.Format(
+                CultureInfo.InvariantCulture,
+                LM.Get("terrain_lab_cluster_budget_format"),
+                effective,
+                budget,
+                candidates);
+            _clusterBudgetLabel.color =
+                budgetValid && candidates > 0
+                    ? new UnityColor(1f, 0.82f, 0.22f, 1f)
+                    : new UnityColor(1f, 0.42f, 0.36f, 1f);
+        }
+
+        private static int CountCompositionCandidateClasses(
+            ISet<string> surfaces,
+            int biotopeCount)
+        {
+            int count = 0;
+            if (surfaces.Contains("deep_ocean"))
+            {
+                count++;
+            }
+            if (surfaces.Contains("shelf"))
+            {
+                count++;
+            }
+            if (surfaces.Contains("shallow_water") ||
+                surfaces.Contains("river_lake"))
+            {
+                count++;
+            }
+            if (surfaces.Contains("sand"))
+            {
+                count++;
+            }
+            if (surfaces.Contains("plain") ||
+                surfaces.Contains("lowland") ||
+                surfaces.Contains("depression"))
+            {
+                count += biotopeCount;
+            }
+            if (surfaces.Contains("upland"))
+            {
+                count += biotopeCount;
+            }
+            if (surfaces.Contains("hills"))
+            {
+                count++;
+            }
+            if (surfaces.Contains("rocks") ||
+                surfaces.Contains("summit"))
+            {
+                count++;
+            }
+            return count;
+        }
+
+        private void RefreshParameterValidationVisuals()
+        {
+            foreach (string id in _parameterInputs.Keys)
+            {
+                UpdateParameterValidationVisual(id);
+            }
+            UpdateMapSizePreview();
+        }
+
+        private void UpdateParameterValidationVisual(string id)
+        {
+            if (!_parameterInputs.TryGetValue(
+                    id,
+                    out InputField input) ||
+                !TryGetParameterRange(
+                    id,
+                    out int minimum,
+                    out int maximum))
+            {
+                return;
+            }
+            SetInputValidationState(
+                input,
+                TryReadIntegerInput(
+                    id,
+                    minimum,
+                    maximum,
+                    out _));
+            if (string.Equals(
+                    id,
+                    "clusters",
+                    StringComparison.Ordinal))
+            {
+                UpdateClusterBudgetLabel();
+            }
+        }
+
+        private static void SetInputValidationState(
+            InputField input,
+            bool valid)
+        {
+            Image background = input?.GetComponent<Image>();
+            if (background != null)
+            {
+                background.color = valid
+                    ? new UnityColor(0.06f, 0.06f, 0.055f, 1f)
+                    : new UnityColor(0.38f, 0.075f, 0.055f, 1f);
+            }
         }
 
         private void UpdateCoordinateLabel(int x, int y)
@@ -1834,6 +2161,8 @@ namespace TerrainLab
                 input.GetComponent<LayoutElement>();
             inputElement.preferredWidth = 104f;
             input.characterLimit = id == "random_seed" ? 10 : 7;
+            input.onValueChanged.AddListener(
+                delegate { UpdateParameterValidationVisual(id); });
             input.onEndEdit.AddListener(
                 delegate
                 {
@@ -1854,6 +2183,7 @@ namespace TerrainLab
                     }
                 });
             _parameterInputs[id] = input;
+            _parameterLocalizationKeys[id] = localizationKey;
             TrackEditorControl(input);
         }
 
@@ -1980,7 +2310,11 @@ namespace TerrainLab
             toggle.graphic = lamp;
 
             toggle.onValueChanged.AddListener(
-                delegate(bool _) { UpdateCompositionToggleVisual(toggle); });
+                delegate(bool _)
+                {
+                    UpdateCompositionToggleVisual(toggle);
+                    UpdateClusterBudgetLabel();
+                });
             ConfigureTooltip(toggleObject, tooltipKey);
             TrackEditorControl(toggle);
             UpdateCompositionToggleVisual(toggle);

@@ -193,6 +193,10 @@ def classify_adaptive_terrain(
         )
 
     assign_water(indices, water_mask, void_mask, tile_names)
+    if valid_mask is not None:
+        indices[~analysis_mask] = tile_index(tile_names, "deep_ocean")
+
+    water_class_count = count_tile_classes(indices, water_mask)
     land_mask = analysis_mask & ~water_mask
     assign_land_clusters(
         indices=indices,
@@ -207,6 +211,7 @@ def classify_adaptive_terrain(
         blue=blue,
         settings=settings,
         state=state,
+        cluster_budget=max(1, settings.clusters - water_class_count),
     )
 
     if settings.smooth_passes > 0:
@@ -225,6 +230,11 @@ def classify_adaptive_terrain(
     )
     if valid_mask is not None:
         indices[~analysis_mask] = tile_index(tile_names, "deep_ocean")
+    indices = enforce_cluster_budget(
+        indices,
+        tile_names,
+        settings.clusters,
+    )
 
     return make_index_image(indices, tile_names)
 
@@ -495,6 +505,7 @@ def assign_land_clusters(
     blue: np.ndarray,
     settings: TerrainClusteringSettings,
     state: TerrainState,
+    cluster_budget: int,
 ) -> None:
     land_positions = np.flatnonzero(land_mask.ravel())
     if land_positions.size == 0:
@@ -516,24 +527,36 @@ def assign_land_clusters(
 
     centers = fit_kmeans(
         land_features,
-        max(4, settings.clusters),
+        max(1, cluster_budget),
         sample_limit=settings.sample_limit,
         iterations=settings.kmeans_iterations,
         random_seed=settings.random_seed,
+    )
+    cluster_labels = np.empty(land_positions.size, dtype=np.uint8)
+    chunk_size = 250_000
+    for start in range(0, land_positions.size, chunk_size):
+        stop = min(start + chunk_size, land_positions.size)
+        cluster_labels[start:stop] = nearest_centers(
+            land_features[start:stop],
+            centers,
+        )
+    cluster_populations = np.bincount(
+        cluster_labels,
+        minlength=centers.shape[0],
     )
     center_tiles = classify_centers(
         centers,
         tile_names,
         state,
         settings,
+        cluster_populations,
     )
 
-    chunk_size = 250_000
     flat_indices = indices.ravel()
     for start in range(0, land_positions.size, chunk_size):
-        pos = land_positions[start : start + chunk_size]
-        labels = nearest_centers(flat_features[pos], centers)
-        flat_indices[pos] = center_tiles[labels]
+        stop = min(start + chunk_size, land_positions.size)
+        pos = land_positions[start:stop]
+        flat_indices[pos] = center_tiles[cluster_labels[start:stop]]
 
 
 def make_features(
@@ -661,6 +684,7 @@ def classify_centers(
     tile_names: Sequence[str],
     state: TerrainState,
     settings: TerrainClusteringSettings,
+    cluster_populations: Optional[np.ndarray] = None,
 ) -> np.ndarray:
     descriptors = []
     heuristic_tiles = []
@@ -745,7 +769,10 @@ def classify_centers(
         tile_names,
         candidates,
     )
-    assignments = assign_unique_cluster_tiles(scores)
+    assignments = assign_unique_cluster_tiles(
+        scores,
+        cluster_populations,
+    )
     return np.asarray(
         [candidates[assignment] for assignment in assignments],
         dtype=np.uint8,
@@ -883,9 +910,20 @@ def cluster_tile_descriptor(
     )
 
 
-def assign_unique_cluster_tiles(scores: np.ndarray) -> np.ndarray:
-    """Use each enabled class once before reusing the nearest class."""
+def assign_unique_cluster_tiles(
+    scores: np.ndarray,
+    cluster_populations: Optional[np.ndarray] = None,
+) -> np.ndarray:
+    """Give dominant source clusters first choice from the enabled palette."""
     center_count, candidate_count = scores.shape
+    if cluster_populations is None:
+        populations = np.ones(center_count, dtype=np.int64)
+    else:
+        populations = np.asarray(cluster_populations, dtype=np.int64)
+        if populations.shape != (center_count,):
+            raise ValueError(
+                "cluster populations must match the number of centers"
+            )
     assignments = np.full(center_count, -1, dtype=np.int32)
     unassigned = set(range(center_count))
     available = set(range(candidate_count))
@@ -906,7 +944,12 @@ def assign_unique_cluster_tiles(scores: np.ndarray) -> np.ndarray:
                 if ordered.size > 1
                 else best_score + 1_000_000.0
             )
-            rank = (second_score - best_score, -best_score, -center)
+            rank = (
+                int(populations[center]),
+                second_score - best_score,
+                -best_score,
+                -center,
+            )
             if selected_rank is None or rank > selected_rank:
                 selected_rank = rank
                 selected_center = center
@@ -919,6 +962,72 @@ def assign_unique_cluster_tiles(scores: np.ndarray) -> np.ndarray:
     for center in sorted(unassigned):
         assignments[center] = int(np.argmin(scores[center]))
     return assignments
+
+
+def count_tile_classes(
+    indices: np.ndarray,
+    mask: np.ndarray,
+) -> int:
+    if not np.any(mask):
+        return 0
+    return int(np.unique(indices[mask]).size)
+
+
+def enforce_cluster_budget(
+    indices: np.ndarray,
+    tile_names: Sequence[str],
+    maximum_classes: int,
+) -> np.ndarray:
+    """Collapse rare overflow classes into the nearest dominant class."""
+    classes, counts = np.unique(indices, return_counts=True)
+    if classes.size <= maximum_classes:
+        return indices
+
+    ranked = sorted(
+        zip(classes.tolist(), counts.tolist()),
+        key=lambda item: (-item[1], item[0]),
+    )
+    kept = [int(tile) for tile, _ in ranked[:maximum_classes]]
+    water_bases = {"deep_ocean", "close_ocean", "shallow_waters"}
+    result = indices.copy()
+
+    for source_value, _ in ranked[maximum_classes:]:
+        source = int(source_value)
+        source_name = tile_names[source]
+        source_is_water = source_name.split(":", 1)[0] in water_bases
+        same_domain = [
+            candidate
+            for candidate in kept
+            if (
+                tile_names[candidate].split(":", 1)[0] in water_bases
+            )
+            == source_is_water
+        ]
+        candidates = same_domain or kept
+        source_color = np.asarray(TILES[source_name], dtype=np.float32)
+        replacement = min(
+            candidates,
+            key=lambda candidate: (
+                float(
+                    np.sum(
+                        (
+                            np.asarray(
+                                TILES[tile_names[candidate]],
+                                dtype=np.float32,
+                            )
+                            - source_color
+                        )
+                        ** 2
+                    )
+                ),
+                candidate,
+            ),
+        )
+        result[result == source] = replacement
+
+    if np.unique(result).size > maximum_classes:
+        raise RuntimeError("failed to enforce clustering class budget")
+    return result
 
 
 def unweight(

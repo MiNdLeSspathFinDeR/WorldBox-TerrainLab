@@ -85,8 +85,12 @@ under `Code` when the game starts.
 - a collapsible automatic-clustering class-composition editor. Players can
   open separate game-style Morphotype and Biotope icon palettes, enable any safe
   morphotype and any of the 23 normal seed biomes before clustering, and read
-  state from native green lamps; disallowed results are remapped to the nearest
-  permitted class;
+  state from native green lamps. A live counter shows the effective class limit,
+  requested total budget, and deduplicated candidate-pool size. Deep water,
+  shelf, shallow water, and land share the same hard budget; when the pool is
+  wider, source-pixel coverage gives dominant clusters first choice and rare
+  groups merge into the nearest retained class. Invalid numeric model inputs
+  are named and highlighted in red before conversion;
 - a shared final-size control in both raster workspaces. It fixes the longer
   map side in 64-cell WorldBox blocks, derives the shorter side from the source
   aspect or the published boundary bounding box, and displays both the selected

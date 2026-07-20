@@ -56,6 +56,7 @@ from imagetomap.georeference import (
 from imagetomap.saves import write_game_save_atomically
 from imagetomap.terrain import (
     TerrainClusteringSettings,
+    assign_unique_cluster_tiles,
     classify_adaptive_terrain,
     fill_small_land_regions,
 )
@@ -124,6 +125,7 @@ PARAMETER_TOOLTIP_KEYS = (
     "terrain_lab_cluster_sample_limit",
     "terrain_lab_cluster_iterations",
     "terrain_lab_cluster_seed",
+    "terrain_lab_cluster_budget",
     "terrain_lab_cluster_composition_surfaces",
     "terrain_lab_cluster_composition_biotopes",
 )
@@ -906,6 +908,59 @@ class TerrainConversionTests(unittest.TestCase):
         finally:
             clustered.close()
             source.close()
+
+    def test_cluster_budget_caps_water_and_land_classes_together(self) -> None:
+        pixels = np.empty((160, 320, 3), dtype=np.uint8)
+        pixels[:, :120] = (34, 92, 168)
+        for index in range(10):
+            hue = 0.02 + index * 0.035
+            color = colorsys.hsv_to_rgb(
+                hue,
+                0.55 + (index % 3) * 0.12,
+                0.48 + (index % 4) * 0.10,
+            )
+            pixels[:, 120 + index * 20 : 140 + index * 20] = [
+                round(channel * 255)
+                for channel in color
+            ]
+
+        source = Image.fromarray(pixels, mode="RGB")
+        clustered = classify_adaptive_terrain(
+            source,
+            SAFE_TILES_TUPLE,
+            clustering_settings=TerrainClusteringSettings(
+                clusters=6,
+                smooth_passes=0,
+                min_land_region=0,
+            ),
+        )
+        try:
+            selected = {
+                SAFE_TILES_TUPLE[int(index)]
+                for index in np.unique(np.asarray(clustered))
+            }
+            self.assertLessEqual(len(selected), 6)
+            self.assertTrue(selected & WATER_TILES)
+            self.assertTrue(selected - WATER_TILES)
+        finally:
+            clustered.close()
+            source.close()
+
+    def test_dominant_cluster_gets_first_choice_from_palette(self) -> None:
+        scores = np.asarray(
+            (
+                (0.0, 100.0),
+                (0.1, 0.2),
+            ),
+            dtype=np.float32,
+        )
+
+        assignments = assign_unique_cluster_tiles(
+            scores,
+            np.asarray((1, 100), dtype=np.int64),
+        )
+
+        self.assertEqual(assignments.tolist(), [1, 0])
 
     def test_clustering_profile_round_trips_and_masks_background(self) -> None:
         rng = np.random.default_rng(2026)

@@ -2,6 +2,20 @@
 
 ## Unreleased
 
+## 1.18.3 - 2026-07-20
+
+- Made the requested cluster count a hard total output budget shared by deep
+  water, shelf, shallow water, and land. A final dominant-area guard guarantees
+  that generated maps never contain more unique playable classes than `K`.
+- Ranked learned clusters by covered source pixels before assigning enabled
+  palette classes. When the candidate pool is larger than the budget, dominant
+  colours and terrain groups get first choice and rare clusters merge into the
+  nearest retained class.
+- Added a live `effective / K` class counter with the deduplicated palette-pool
+  size to the clustering panel. Invalid model inputs now identify their field
+  and allowed range, turn red immediately, and return to the normal input style
+  after correction.
+
 ## 1.18.2 - 2026-07-20
 
 - Decoupled the inspector from mutually exclusive editing tools. It now stays
