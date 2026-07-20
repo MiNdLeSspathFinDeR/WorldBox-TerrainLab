@@ -2,6 +2,17 @@
 
 ## Unreleased
 
+## 2.0.0-alpha.2 - 2026-07-20
+
+- Fixed semantic-v2 water detection for RGBA source maps. Transparent and
+  partially transparent pixels are now composited onto the classifier's black
+  void before semantic analysis, so hidden RGB data cannot turn the exterior
+  or its connected muted water into land.
+- Preserved the legacy-v1 pipeline unchanged and added an integration test for
+  transparent extents. On the reported 1024x1024 source, semantic-v2 water
+  coverage recovered from 15,402 to 974,243 output cells; legacy-v1 produces
+  965,200 cells for the same profile.
+
 ## 2.0.0-alpha.1 - 2026-07-20
 
 - Added clustering profile schema 4 with explicit `adaptive_v1` and

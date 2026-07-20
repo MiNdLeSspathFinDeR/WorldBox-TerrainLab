@@ -147,7 +147,12 @@ def resize_for_semantic_analysis(
     image: Image,
     maximum_dimension: int,
 ) -> Image:
-    """Preserve source detail under an explicit analysis memory bound."""
+    """Preserve source detail under an explicit analysis memory bound.
+
+    Transparent source pixels represent map exterior, not hidden RGB data.
+    Flatten them onto black before classification so the terrain detector sees
+    the same void/water seed that the legacy RGBA resize path produced.
+    """
     if maximum_dimension < 512 or maximum_dimension > 4096:
         raise ValueError(
             "analysis_max_dimension must be between 512 and 4096"
@@ -159,16 +164,39 @@ def resize_for_semantic_analysis(
         maximum_dimension / longest,
         sqrt(pixel_limit / (image.width * image.height)),
     )
-    if scale >= 1.0:
+    resized = None
+    try:
+        working_image = image
+        if scale < 1.0:
+            size = (
+                max(1, int(round(image.width * scale))),
+                max(1, int(round(image.height * scale))),
+            )
+            resized = image.resize(
+                size,
+                resample=Img.Resampling.LANCZOS,
+            )
+            working_image = resized
+        return flatten_transparency_as_void(working_image)
+    finally:
+        if resized is not None:
+            resized.close()
+
+
+def flatten_transparency_as_void(image: Image) -> Image:
+    """Return RGB with alpha composited onto the classifier's black void."""
+    has_alpha = "A" in image.getbands() or "transparency" in image.info
+    if not has_alpha:
         return image.convert("RGB")
-    size = (
-        max(1, int(round(image.width * scale))),
-        max(1, int(round(image.height * scale))),
-    )
-    return image.resize(
-        size,
-        resample=Img.Resampling.LANCZOS,
-    ).convert("RGB")
+
+    rgba = image.convert("RGBA")
+    background = Img.new("RGBA", rgba.size, (0, 0, 0, 255))
+    try:
+        background.alpha_composite(rgba)
+        return background.convert("RGB")
+    finally:
+        background.close()
+        rgba.close()
 
 
 def fit_map_size_to_budget(

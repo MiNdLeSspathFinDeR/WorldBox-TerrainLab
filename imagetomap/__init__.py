@@ -38,4 +38,4 @@ __all__ = (
     "read_raster_georeference",
     "validate_map_size",
 )
-__version__ = "14.0.0a1"
+__version__ = "14.0.0a2"

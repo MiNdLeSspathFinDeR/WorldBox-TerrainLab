@@ -1095,6 +1095,54 @@ class TerrainConversionTests(unittest.TestCase):
         finally:
             source.close()
 
+    def test_semantic_v2_treats_transparent_extent_as_water_void(self) -> None:
+        pixels = np.zeros((192, 192, 4), dtype=np.uint8)
+        pixels[:, :, :3] = (92, 142, 76)
+        pixels[56:136, 56:136, 3] = 255
+        source = Image.fromarray(pixels, mode="RGBA")
+        profile = ClusteringProfile(
+            source_file_name="transparent.png",
+            source_width=192,
+            source_height=192,
+            algorithm_id=SEMANTIC_CLUSTERING_ALGORITHM,
+            algorithm_version=2,
+            analysis_max_dimension=512,
+            clusters=4,
+            min_land_region=0,
+            allowed_surfaces=(
+                "deep_ocean",
+                "shelf",
+                "shallow_water",
+                "plain",
+            ),
+            allowed_biotopes=("grass",),
+        )
+
+        converted = convert(
+            source,
+            width=1,
+            height=1,
+            clustering_profile=profile,
+        )
+        try:
+            tiles = np.asarray(converted.preview)
+            deep_ocean = SAFE_TILES_TUPLE.index("deep_ocean")
+            water = {
+                SAFE_TILES_TUPLE.index("deep_ocean"),
+                SAFE_TILES_TUPLE.index("close_ocean"),
+                SAFE_TILES_TUPLE.index("shallow_waters"),
+            }
+            self.assertEqual(int(tiles[0, 0]), deep_ocean)
+            self.assertEqual(int(tiles[-1, -1]), deep_ocean)
+            self.assertNotIn(int(tiles[32, 32]), water)
+            self.assertGreater(
+                float(np.isin(tiles, tuple(water)).mean()),
+                0.70,
+            )
+        finally:
+            converted.preview.close()
+            source.close()
+
     def test_schema3_profile_preserves_legacy_v1_output(self) -> None:
         y, x = np.indices((128, 128))
         pixels = np.stack(
