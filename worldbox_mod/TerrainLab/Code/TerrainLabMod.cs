@@ -48,7 +48,7 @@ namespace TerrainLab
                 }
 
                 _ui.Initialize(GetDeclaration(), _editor);
-                LogInfo("TerrainLab 2.0.0-alpha.3 GIS runtime initialized.");
+                LogInfo("TerrainLab 2.0.0-alpha.4 GIS runtime initialized.");
             }
             catch (Exception exception)
             {

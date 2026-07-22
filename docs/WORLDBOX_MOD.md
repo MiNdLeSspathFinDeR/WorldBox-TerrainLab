@@ -52,8 +52,9 @@ watcher waits for an image to have the same size and modification time across
 two scans, then invokes the installed `imagetomap` command directly without
 PowerShell. Only one conversion runs at once. The adaptive terrain algorithm
 uses the gameplay-safe palette and fits the source aspect ratio to the largest
-grid inside the 1,884,160-cell budget; elongated projections are not forced to
-a square. The watched-folder contract is exactly `PNG`, `JPG/JPEG/JFIF`,
+grid inside the recommended 1,884,160-cell budget; elongated projections are
+not forced to a square. The watched-folder contract is exactly `PNG`,
+`JPG/JPEG/JFIF`,
 `TIFF/TIF`, `WebP`, `BMP`, `GIF`, `TGA`, `DDS`, and `JP2`. SVG, PDF, PSD,
 archives, and every unlisted extension are ignored.
 
@@ -241,7 +242,7 @@ matching sidecar is present.
 
 The exchange directory is
 `<WorldBox persistent data>/TerrainLab/Exchange`. Direct package import validates
-schema, checksums, dimensions, cell budget, embedded base-map hash, and fixed
+schema, checksums, addressable dimensions, embedded base-map hash, and fixed
 payload names before atomically renaming a staging directory into `saveN`.
 
 Format details: [WBXGEO overlay format](WBXGEO_FORMAT.md).

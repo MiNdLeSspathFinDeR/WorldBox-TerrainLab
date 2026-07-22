@@ -15,7 +15,7 @@ from .consts import (
     ELEVATION_MAXIMUM,
     ELEVATION_MINIMUM,
     ELEVATION_NODATA,
-    MAX_MAP_CELLS,
+    MAX_ADDRESSABLE_MAP_BLOCKS,
 )
 from .georeference import (
     RasterGeoreference,
@@ -790,7 +790,7 @@ def load_classification_profile(
             settings.get("long_side_blocks", 20),
             "settings.long_side_blocks",
             1,
-            MAX_MAP_CELLS // (CHUNK_SIZE * CHUNK_SIZE),
+            MAX_ADDRESSABLE_MAP_BLOCKS,
         ),
         color_weight=weights[0],
         texture_weight=weights[1],

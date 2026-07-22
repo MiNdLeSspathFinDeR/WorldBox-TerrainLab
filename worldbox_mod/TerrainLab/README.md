@@ -99,8 +99,10 @@ under `Code` when the game starts.
   rasters;
 - a shared final-size control in both raster workspaces. It fixes the longer
   map side in 64-cell WorldBox blocks, derives the shorter side from the source
-  aspect or the published boundary bounding box, and displays both the selected
-  dimensions and the largest dimensions permitted by the 1,884,160-cell budget;
+  aspect or the published boundary bounding box, accepts sizes from `1 x 1`
+  upward, and displays both the selected dimensions and the recommendation
+  derived from the 1,884,160-cell memory budget. Larger selections warn but are
+  not blocked;
 - corrected save-gallery labels: vanilla presets retain their localized names,
   while custom or unresolved legacy sizes display actual world-cell dimensions
   instead of `-1`;

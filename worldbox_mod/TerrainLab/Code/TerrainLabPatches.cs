@@ -93,7 +93,10 @@ namespace TerrainLab
             long side = (long)pMapSize * TerrainMapLimits.WorldBoxBlockSize;
             if (side <= int.MaxValue)
             {
-                __result = TerrainMapLimits.IsWithinBudget((int)side, (int)side);
+                __result = TerrainMapLimits.TryValidate(
+                    (int)side,
+                    (int)side,
+                    out _);
             }
         }
     }

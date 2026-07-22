@@ -96,14 +96,14 @@ parser.add_argument(
 parser.add_argument(
     "-W",
     "--width",
-    help="Target width of the map(s). Default to auto",
+    help="Target width in 64-cell WorldBox blocks, starting at 1. Default to auto",
     type=int,
     default=0,
 )
 parser.add_argument(
     "-H",
     "--height",
-    help="Target height of the map(s). Default to auto",
+    help="Target height in 64-cell WorldBox blocks, starting at 1. Default to auto",
     type=int,
     default=0,
 )
@@ -153,7 +153,7 @@ parser.add_argument(
 )
 parser.add_argument(
     "--fit-budget",
-    help="Fit automatic dimensions to the largest aspect-preserving TerrainLab map",
+    help="Fit automatic dimensions to the recommended aspect-preserving memory budget",
     action="store_true",
     default=False,
 )

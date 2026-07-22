@@ -628,7 +628,7 @@ namespace TerrainLab
                 _longSideInput.GetComponent<LayoutElement>();
             mapSizeInputElement.preferredWidth = 48f;
             mapSizeInputElement.flexibleWidth = 0f;
-            _longSideInput.characterLimit = 3;
+            _longSideInput.characterLimit = 10;
             _longSideInput.onValueChanged.AddListener(
                 delegate { UpdateMapSizePreview(); });
             _mapSizeLabel = CreateLabel(
@@ -1690,11 +1690,11 @@ namespace TerrainLab
             GetOutputAspectDimensions(
                 out int aspectWidth,
                 out int aspectHeight);
-            if (!TerrainMapLimits.TryGetMaximumBlockDimensions(
+            if (!TerrainMapLimits.TryGetRecommendedBlockDimensions(
                     aspectWidth,
                     aspectHeight,
-                    out int maximumWidth,
-                    out int maximumHeight))
+                    out int recommendedWidth,
+                    out int recommendedHeight))
             {
                 _mapSizeLabel.text = string.Empty;
                 return;
@@ -1715,19 +1715,27 @@ namespace TerrainLab
                     longSide,
                     out width,
                     out height);
+            bool aboveRecommendation =
+                valid &&
+                TerrainMapLimits.IsAboveRecommendedBudgetForBlocks(
+                    width,
+                    height);
             string sizeText = valid
                 ? string.Format(
                     CultureInfo.InvariantCulture,
-                    LM.Get("terrain_lab_output_size_preview_format"),
+                    LM.Get(
+                        aboveRecommendation
+                            ? "terrain_lab_output_size_warning_format"
+                            : "terrain_lab_output_size_preview_format"),
                     width,
                     height,
-                    maximumWidth,
-                    maximumHeight)
+                    recommendedWidth,
+                    recommendedHeight)
                 : string.Format(
                     CultureInfo.InvariantCulture,
                     LM.Get("terrain_lab_output_size_maximum_format"),
-                    maximumWidth,
-                    maximumHeight);
+                    recommendedWidth,
+                    recommendedHeight);
             _mapSizeLabel.text =
                 sizeText + "  " +
                 string.Format(
@@ -1738,10 +1746,21 @@ namespace TerrainLab
                             : "terrain_lab_output_size_scope_extent_format"),
                     aspectWidth,
                     aspectHeight);
-            _mapSizeLabel.color = valid
-                ? new UnityColor(0.72f, 0.84f, 0.94f, 1f)
-                : new UnityColor(0.95f, 0.52f, 0.46f, 1f);
+            _mapSizeLabel.color = !valid
+                ? new UnityColor(0.95f, 0.52f, 0.46f, 1f)
+                : aboveRecommendation
+                    ? new UnityColor(1f, 0.72f, 0.24f, 1f)
+                    : new UnityColor(0.72f, 0.84f, 0.94f, 1f);
             SetInputValidationState(_longSideInput, valid);
+            if (valid && aboveRecommendation)
+            {
+                Image background = _longSideInput?.GetComponent<Image>();
+                if (background != null)
+                {
+                    background.color =
+                        new UnityColor(0.28f, 0.18f, 0.035f, 1f);
+                }
+            }
         }
 
         private void GetOutputAspectDimensions(

@@ -9,7 +9,7 @@ from PIL import Image as Img
 from PIL import ImageDraw
 
 from .calibration import BIOTOPE_IDS, SURFACE_IDS
-from .consts import CHUNK_SIZE, MAX_MAP_CELLS
+from .consts import MAX_ADDRESSABLE_MAP_BLOCKS
 from .terrain import TerrainClusteringSettings
 
 
@@ -284,7 +284,7 @@ def load_clustering_profile(
             settings.get("long_side_blocks", 20),
             "long_side_blocks",
             1,
-            MAX_MAP_CELLS // (CHUNK_SIZE * CHUNK_SIZE),
+            MAX_ADDRESSABLE_MAP_BLOCKS,
         ),
         clusters=_integer(settings.get("clusters", 14), "clusters", 4, 64),
         spline_radius=_integer(

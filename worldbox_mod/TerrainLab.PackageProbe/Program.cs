@@ -846,8 +846,11 @@ internal static class Program
     {
         int block = TerrainMapLimits.WorldBoxBlockSize;
         Assert(
-            TerrainMapLimits.MaximumCellCount == 1884160,
-            "TerrainLab maximum cell budget changed unexpectedly.");
+            TerrainMapLimits.RecommendedMaximumCellCount == 1884160,
+            "TerrainLab recommended cell budget changed unexpectedly.");
+        Assert(
+            TerrainMapLimits.MaximumAddressableCellCount == int.MaxValue,
+            "TerrainLab technical array ceiling changed unexpectedly.");
         Assert(
             TerrainMapLimits.WorldBoxRuntimeChunkSize == 16 &&
             TerrainMapLimits.WorldBoxBlockSize == 64,
@@ -868,8 +871,18 @@ internal static class Program
             TerrainMapLimits.TryValidate(40 * block, 10 * block, out _),
             "A valid elongated map was rejected.");
         Assert(
-            !TerrainMapLimits.TryValidate(22 * block, 22 * block, out _),
-            "An over-budget square map was accepted.");
+            TerrainMapLimits.TryValidate(22 * block, 22 * block, out _) &&
+            TerrainMapLimits.IsAboveRecommendedBudgetForBlocks(22, 22),
+            "An above-recommendation square map was blocked or not warned.");
+        Assert(
+            TerrainMapLimits.TryGetBlockDimensions(
+                1,
+                1,
+                1,
+                out int minimumWidth,
+                out int minimumHeight) &&
+            minimumWidth == 1 && minimumHeight == 1,
+            "The minimum 1 x 1 map block was rejected.");
         Assert(
             TerrainMapLimits.TryGetBlockDimensions(
                 2000,
@@ -881,20 +894,24 @@ internal static class Program
             selectedHeight == 10,
             "Long-side map sizing did not preserve a 2:1 raster.");
         Assert(
-            TerrainMapLimits.TryGetMaximumBlockDimensions(
+            TerrainMapLimits.TryGetRecommendedBlockDimensions(
                 2000,
                 1000,
-                out int maximumWidth,
-                out int maximumHeight) &&
-            maximumWidth == 30 &&
-            maximumHeight == 15 &&
-            !TerrainMapLimits.TryGetBlockDimensions(
+                out int recommendedWidth,
+                out int recommendedHeight) &&
+            recommendedWidth == 30 &&
+            recommendedHeight == 15 &&
+            TerrainMapLimits.TryGetBlockDimensions(
                 2000,
                 1000,
                 31,
-                out _,
-                out _),
-            "Displayed 2:1 map maximum does not match the cell budget.");
+                out int largerWidth,
+                out int largerHeight) &&
+            largerWidth == 31 && largerHeight == 16 &&
+            TerrainMapLimits.IsAboveRecommendedBudgetForBlocks(
+                largerWidth,
+                largerHeight),
+            "Recommended 2:1 size and unrestricted selection disagree.");
     }
 
     private static void ValidateImageWorkspaceProtocol(string testRoot)
@@ -1303,8 +1320,8 @@ internal static class Program
         int width = 23 * TerrainMapLimits.WorldBoxBlockSize;
         int height = 20 * TerrainMapLimits.WorldBoxBlockSize;
         int count = checked(width * height);
-        Assert(count == TerrainMapLimits.MaximumCellCount,
-            "Stress canvas is not the exact maximum size.");
+        Assert(count == TerrainMapLimits.RecommendedMaximumCellCount,
+            "Stress canvas is not the exact recommended size.");
 
         short[] elevation = new short[count];
         for (int y = 0; y < height; y++)

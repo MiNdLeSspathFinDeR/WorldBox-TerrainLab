@@ -2,6 +2,7 @@ from .core import (
     convert,
     fit_map_size_to_budget,
     fit_map_size_to_long_side,
+    map_size_budget_warning,
     maximum_map_size_for_aspect,
     quantize,
     validate_map_size,
@@ -31,6 +32,7 @@ __all__ = (
     "convert",
     "fit_map_size_to_budget",
     "fit_map_size_to_long_side",
+    "map_size_budget_warning",
     "maximum_map_size_for_aspect",
     "load_classification_profile",
     "load_clustering_profile",
@@ -38,4 +40,4 @@ __all__ = (
     "read_raster_georeference",
     "validate_map_size",
 )
-__version__ = "14.0.0a3"
+__version__ = "14.0.0a4"

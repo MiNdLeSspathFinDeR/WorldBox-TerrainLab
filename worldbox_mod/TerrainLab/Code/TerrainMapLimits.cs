@@ -14,12 +14,25 @@ namespace TerrainLab
             (long)BaselineBlocksPerAxis * WorldBoxBlockSize *
             BaselineBlocksPerAxis * WorldBoxBlockSize;
 
-        public const long MaximumCellCount =
+        public const long RecommendedMaximumCellCount =
             BaselineCellCount * (100 + TolerancePercent) / 100;
 
-        public const int MaximumBlockCount =
-            (int)(MaximumCellCount /
+        public const int RecommendedMaximumBlockCount =
+            (int)(RecommendedMaximumCellCount /
                   (WorldBoxBlockSize * WorldBoxBlockSize));
+
+        // TerrainWorldState uses one-dimensional CLR arrays and checked int
+        // indices. This is an implementation ceiling, not a gameplay budget.
+        public const long MaximumAddressableCellCount = int.MaxValue;
+
+        public const int MaximumAddressableBlockCount =
+            (int)(MaximumAddressableCellCount /
+                  (WorldBoxBlockSize * WorldBoxBlockSize));
+
+        // Retain the old public names for package/API compatibility. New code
+        // must distinguish the technical ceiling from the recommendation.
+        public const long MaximumCellCount = MaximumAddressableCellCount;
+        public const int MaximumBlockCount = MaximumAddressableBlockCount;
 
         public static long CountCells(int width, int height)
         {
@@ -56,10 +69,30 @@ namespace TerrainLab
             return true;
         }
 
-        public static bool IsWithinBudget(int width, int height)
+        public static bool IsWithinRecommendedBudget(int width, int height)
         {
             long cells = CountCells(width, height);
-            return cells > 0 && cells <= MaximumCellCount;
+            return cells > 0 && cells <= RecommendedMaximumCellCount;
+        }
+
+        public static bool IsWithinBudget(int width, int height)
+        {
+            return IsWithinRecommendedBudget(width, height);
+        }
+
+        public static bool IsAboveRecommendedBudgetForBlocks(
+            int widthBlocks,
+            int heightBlocks)
+        {
+            if (!TryGetCellDimensionsFromBlocks(
+                    widthBlocks,
+                    heightBlocks,
+                    out int widthCells,
+                    out int heightCells))
+            {
+                return false;
+            }
+            return !IsWithinRecommendedBudget(widthCells, heightCells);
         }
 
         public static bool TryValidate(int width, int height, out string error)
@@ -71,12 +104,12 @@ namespace TerrainLab
                 return false;
             }
 
-            if (cells > MaximumCellCount)
+            if (cells > MaximumAddressableCellCount)
             {
                 error = string.Format(
-                    "Map has {0:N0} cells; TerrainLab limit is {1:N0} cells.",
+                    "Map has {0:N0} cells; TerrainLab arrays can address at most {1:N0} cells.",
                     cells,
-                    MaximumCellCount);
+                    MaximumAddressableCellCount);
                 return false;
             }
 
@@ -110,10 +143,15 @@ namespace TerrainLab
                     MidpointRounding.AwayFromZero));
             widthBlocks = landscape ? longSideBlocks : shortSideBlocks;
             heightBlocks = landscape ? shortSideBlocks : longSideBlocks;
-            return (long)widthBlocks * heightBlocks <= MaximumBlockCount;
+            return TryGetCellDimensionsFromBlocks(
+                       widthBlocks,
+                       heightBlocks,
+                       out int widthCells,
+                       out int heightCells) &&
+                   TryValidate(widthCells, heightCells, out _);
         }
 
-        public static bool TryGetMaximumBlockDimensions(
+        public static bool TryGetRecommendedBlockDimensions(
             int aspectWidth,
             int aspectHeight,
             out int widthBlocks,
@@ -127,7 +165,7 @@ namespace TerrainLab
             }
 
             for (int longSide = 1;
-                 longSide <= MaximumBlockCount;
+                 longSide <= RecommendedMaximumBlockCount;
                  longSide++)
             {
                 if (!TryGetBlockDimensions(
@@ -140,10 +178,30 @@ namespace TerrainLab
                     break;
                 }
 
+                if (IsAboveRecommendedBudgetForBlocks(
+                        candidateWidth,
+                        candidateHeight))
+                {
+                    break;
+                }
+
                 widthBlocks = candidateWidth;
                 heightBlocks = candidateHeight;
             }
             return widthBlocks > 0 && heightBlocks > 0;
+        }
+
+        public static bool TryGetMaximumBlockDimensions(
+            int aspectWidth,
+            int aspectHeight,
+            out int widthBlocks,
+            out int heightBlocks)
+        {
+            return TryGetRecommendedBlockDimensions(
+                aspectWidth,
+                aspectHeight,
+                out widthBlocks,
+                out heightBlocks);
         }
 
         public static void GetEffectiveAspectDimensions(

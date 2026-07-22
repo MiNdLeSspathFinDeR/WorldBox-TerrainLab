@@ -118,8 +118,10 @@ the longer side of the generated map in `64 x 64`-cell WorldBox blocks; the
 shorter side is rounded from the current processing aspect. Before a boundary
 is published this is the source aspect; afterwards it is the published
 boundary's bounding-box aspect. The in-game editor immediately recomputes the
-selected `width x height`, source/extent dimensions, and largest admissible pair
-under the `1,884,160`-cell budget with the same algorithm used by the converter.
+selected `width x height`, source/extent dimensions, and largest recommended
+pair under the `1,884,160`-cell budget with the same algorithm used by the
+converter. This pair is advisory: explicit sizes begin at `1 x 1` block and
+may exceed it, in which case the editor warns without blocking conversion.
 Existing schema-1 and schema-2 profiles migrate to a 20-block long side.
 
 ## Implemented manual calibration

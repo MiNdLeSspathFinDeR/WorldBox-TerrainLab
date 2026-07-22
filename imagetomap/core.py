@@ -5,6 +5,7 @@ from decimal import ROUND_CEILING as CEILING, ROUND_HALF_EVEN as HALF_EVEN, Deci
 
 from itertools import groupby
 from math import ceil, floor, sqrt
+import warnings
 import zlib
 
 import numpy as np
@@ -25,7 +26,15 @@ from .clustering import (
     crop_clustering_profile,
     rasterize_clustering_boundary,
 )
-from .consts import CHUNK_SIZE, MAP_TEMPLATE, MAX_MAP_CELLS, SAFE_TILES_TUPLE, TILES
+from .consts import (
+    CHUNK_SIZE,
+    MAP_TEMPLATE,
+    MAX_ADDRESSABLE_MAP_CELLS,
+    MAX_MAP_CELLS,
+    RECOMMENDED_MAP_CELLS,
+    SAFE_TILES_TUPLE,
+    TILES,
+)
 from .models import Map
 from .semantic import (
     categorical_area_resample_with_confidence,
@@ -131,6 +140,9 @@ def resolve_map_geometry(
     map_width = int(width_dcm)
     map_height = int(height_dcm)
     validate_map_size(map_width, map_height)
+    warning = map_size_budget_warning(map_width, map_height)
+    if warning is not None:
+        warnings.warn(warning, RuntimeWarning, stacklevel=2)
 
     target_size = (
         map_width * CHUNK_SIZE,
@@ -255,14 +267,14 @@ def fit_map_size_to_long_side(
     pixel_width: int,
     pixel_height: int,
     long_side_blocks: int,
-    maximum_cells: int = MAX_MAP_CELLS,
+    maximum_cells: Optional[int] = None,
 ) -> Tuple[int, int]:
     """Set the longer WorldBox side and preserve the raster aspect."""
     if pixel_width <= 0 or pixel_height <= 0:
         raise ValueError("image dimensions must be greater than 0")
     if long_side_blocks <= 0:
         raise ValueError("long side must be greater than 0")
-    if maximum_cells < CHUNK_SIZE * CHUNK_SIZE:
+    if maximum_cells is not None and maximum_cells < CHUNK_SIZE * CHUNK_SIZE:
         raise ValueError("maximum cell budget cannot fit one WorldBox block")
 
     landscape = pixel_width >= pixel_height
@@ -277,8 +289,10 @@ def fit_map_size_to_long_side(
     )
     width = long_side_blocks if landscape else short_side_blocks
     height = short_side_blocks if landscape else long_side_blocks
-    maximum_blocks = maximum_cells // (CHUNK_SIZE * CHUNK_SIZE)
-    if width * height > maximum_blocks:
+    if (
+        maximum_cells is not None
+        and width * CHUNK_SIZE * height * CHUNK_SIZE > maximum_cells
+    ):
         maximum_width, maximum_height = maximum_map_size_for_aspect(
             pixel_width,
             pixel_height,
@@ -297,7 +311,7 @@ def maximum_map_size_for_aspect(
     pixel_height: int,
     maximum_cells: int = MAX_MAP_CELLS,
 ) -> Tuple[int, int]:
-    """Return the largest selectable long side under the shared cell budget."""
+    """Return the largest recommended long side for an image aspect."""
     if pixel_width <= 0 or pixel_height <= 0:
         raise ValueError("image dimensions must be greater than 0")
     maximum_blocks = maximum_cells // (CHUNK_SIZE * CHUNK_SIZE)
@@ -322,16 +336,36 @@ def maximum_map_size_for_aspect(
 
 
 def validate_map_size(width: int, height: int) -> None:
-    """Validate the shared TerrainLab cell budget without restricting aspect."""
+    """Validate dimensions against WorldBox's addressable array space."""
     if width <= 0 or height <= 0:
         raise ValueError("width and height must be greater than 0")
 
-    cells = width * CHUNK_SIZE * height * CHUNK_SIZE
-    if cells > MAX_MAP_CELLS:
+    width_cells = width * CHUNK_SIZE
+    height_cells = height * CHUNK_SIZE
+    cells = width_cells * height_cells
+    if (
+        width_cells > 2_147_483_647
+        or height_cells > 2_147_483_647
+        or cells > MAX_ADDRESSABLE_MAP_CELLS
+    ):
         raise ValueError(
-            f"map has {cells:,} cells; the TerrainLab limit is "
-            f"{MAX_MAP_CELLS:,} cells",
+            f"map has {cells:,} cells; WorldBox can address at most "
+            f"{MAX_ADDRESSABLE_MAP_CELLS:,} cells in TerrainLab arrays",
         )
+
+
+def map_size_budget_warning(width: int, height: int) -> Optional[str]:
+    """Describe a size above the former recommended memory budget."""
+    if width <= 0 or height <= 0:
+        return None
+    cells = width * CHUNK_SIZE * height * CHUNK_SIZE
+    if cells <= RECOMMENDED_MAP_CELLS:
+        return None
+    return (
+        f"map has {cells:,} cells, above the recommended TerrainLab budget "
+        f"of {RECOMMENDED_MAP_CELLS:,}; conversion is allowed but WorldBox "
+        "may use substantially more memory or become unstable"
+    )
 
 
 def build_map(

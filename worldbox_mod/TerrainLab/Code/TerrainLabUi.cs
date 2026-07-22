@@ -1226,7 +1226,9 @@ namespace TerrainLab
             long cells = state == null
                 ? 0
                 : TerrainMapLimits.CountCells(state.Width, state.Height);
-            double budgetPercent = cells * 100.0 / TerrainMapLimits.MaximumCellCount;
+            double budgetPercent =
+                cells * 100.0 /
+                TerrainMapLimits.RecommendedMaximumCellCount;
             TerrainEditorTool statusTool = _editor.Tool == TerrainEditorTool.None
                 ? TerrainEditorTool.Inspect
                 : _editor.Tool;
@@ -2040,14 +2042,18 @@ namespace TerrainLab
                 CreateInfoText(
                     string.Format(LM.Get("terrain_lab_dimensions_format"), width, height),
                     NeutralText);
-                double budgetPercent = cells * 100.0 / TerrainMapLimits.MaximumCellCount;
+                double budgetPercent =
+                    cells * 100.0 /
+                    TerrainMapLimits.RecommendedMaximumCellCount;
                 CreateInfoText(
                     string.Format(
                         LM.Get("terrain_lab_budget_format"),
                         cells,
-                        TerrainMapLimits.MaximumCellCount,
+                        TerrainMapLimits.RecommendedMaximumCellCount,
                         budgetPercent),
-                    TerrainMapLimits.IsWithinBudget(width, height) ? NeutralText : ErrorText,
+                    TerrainMapLimits.IsWithinRecommendedBudget(width, height)
+                        ? NeutralText
+                        : WarningText,
                     32f);
             }
 
@@ -5181,7 +5187,7 @@ namespace TerrainLab
             CreateInfoText(
                 string.Format(
                     LM.Get("terrain_lab_limit_format"),
-                    TerrainMapLimits.MaximumCellCount),
+                    TerrainMapLimits.RecommendedMaximumCellCount),
                 NeutralText,
                 30f);
             CreateInfo("terrain_lab_aspect_unrestricted", NeutralText, 30f);

@@ -2,6 +2,8 @@ __pycache__/
 *.py[cod]
 .pytest_cache/
 *.egg-info/
+/build/
+/dist/
 tests/_tmp/
 
 # Local reference maps. Keep third-party game artwork out of the public repo.

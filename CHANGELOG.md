@@ -2,6 +2,20 @@
 
 ## Unreleased
 
+## 2.0.0-alpha.4 - 2026-07-22
+
+- Replaced the former 1,884,160-cell hard map limit with an advisory memory
+  threshold. Manual classification, clustering, direct conversion, GeoTIFF,
+  and WBXGEO now accept larger technically addressable grids.
+- Added amber in-game warnings for selections above the recommendation while
+  keeping save and conversion actions enabled. The project view reports the
+  same recommendation instead of treating it as an error.
+- Allowed final map sizes from `1 x 1` WorldBox block upward and expanded the
+  long-side input beyond three digits. Automatic `--fit-budget` sizing still
+  targets the established safe recommendation.
+- Added distinct recommended and technical cell counts to new WBXGEO manifests;
+  compatible older packages remain readable.
+
 ## 2.0.0-alpha.3 - 2026-07-22
 
 - Bound dynamically created TerrainLab labels, buttons, parameter rows, and

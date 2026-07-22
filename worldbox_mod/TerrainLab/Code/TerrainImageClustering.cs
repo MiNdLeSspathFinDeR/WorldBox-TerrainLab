@@ -368,7 +368,7 @@ namespace TerrainLab
                     out _))
             {
                 throw new InvalidDataException(
-                    "Clustering output size exceeds the map cell budget.");
+                    "Clustering output size exceeds TerrainLab's addressable grid.");
             }
             ValidateComposition();
 
@@ -485,7 +485,6 @@ namespace TerrainLab
             if (settings.AnalysisMaximumDimension < 512 ||
                 settings.AnalysisMaximumDimension > 4096 ||
                 settings.LongSideBlocks < 1 ||
-                settings.LongSideBlocks > TerrainMapLimits.MaximumBlockCount ||
                 settings.Clusters < 4 || settings.Clusters > 64 ||
                 settings.SplineRadius < 0 || settings.SplineRadius > 12 ||
                 settings.SmoothPasses < 0 || settings.SmoothPasses > 8 ||

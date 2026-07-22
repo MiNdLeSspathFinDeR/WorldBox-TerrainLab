@@ -20,7 +20,7 @@ against screen edges and can be collapsed independently.
 
 ## Implementation status
 
-Version 2.0.0-alpha.3 implements the standalone side button, an adaptive top GIS
+Version 2.0.0-alpha.4 implements the standalone side button, an adaptive top GIS
 toolbar, and a stock WorldBox internal window. The toolbar copies the bottom
 WorldBox panel and button sprites, stretches to the logical canvas width, and
 balances commands across as few rows as the current UI scale permits. Its frame
@@ -100,11 +100,13 @@ an independent `8 x 8` city-zone grid. The
 chosen value fixes the longer output side; the shorter side follows the source
 raster aspect until an area boundary is published, then follows that
 boundary's bounding-box aspect. A live adjacent caption shows
-`selected width x height; maximum width x height`, where the maximum is the
-last aspect-derived integer pair below the shared `1,884,160`-cell threshold.
-It also states whether the calculation uses the complete source or the
-published extent. The default is 20 blocks, and out-of-budget values cannot be
-saved or queued. Editable values use yellow text; labels retain the stock
+`selected width x height; recommended width x height`, where the recommendation
+is the last aspect-derived integer pair below the shared `1,884,160`-cell
+memory threshold. It also states whether the calculation uses the complete
+source or the published extent. The default is 20 blocks and the minimum is
+`1 x 1`. Values above the recommendation remain saveable and queueable, but
+the caption turns amber to warn about increased memory use and possible
+WorldBox instability. Editable values use yellow text; labels retain the stock
 panel colour.
 
 The vanilla save gallery keeps localized preset names when they resolve.

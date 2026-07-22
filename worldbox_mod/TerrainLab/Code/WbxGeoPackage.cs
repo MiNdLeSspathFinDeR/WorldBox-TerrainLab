@@ -110,6 +110,9 @@ namespace TerrainLab
         [JsonProperty("maximum_cell_count")]
         public long MaximumCellCount { get; set; }
 
+        [JsonProperty("recommended_cell_count")]
+        public long RecommendedCellCount { get; set; }
+
         [JsonProperty("origin")]
         public string Origin { get; set; }
 
@@ -501,7 +504,9 @@ namespace TerrainLab
                     WidthBlocks = savedMap.width,
                     HeightBlocks = savedMap.height,
                     CellCount = TerrainMapLimits.CountCells(state.Width, state.Height),
-                    MaximumCellCount = TerrainMapLimits.MaximumCellCount,
+                    MaximumCellCount = TerrainMapLimits.MaximumAddressableCellCount,
+                    RecommendedCellCount =
+                        TerrainMapLimits.RecommendedMaximumCellCount,
                     Origin = "south-west",
                     RowOrder = "south-to-north",
                     CellSize = state.HorizontalMetresPerCell

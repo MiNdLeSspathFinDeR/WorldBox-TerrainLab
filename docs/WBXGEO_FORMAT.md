@@ -84,30 +84,35 @@ level by shifting valid samples onto the zero datum.
 authoritative elevation representation, and `NODATA` cells are not copied into
 that cache.
 
-## Map budget
+## Map size recommendation
 
-The budget is based on a `20 x 20` WorldBox-block map. One block is `64 x 64`
-game cells.
+The memory recommendation is based on a `20 x 20` WorldBox-block map. One
+block is `64 x 64` game cells.
 
 ```text
 baseline = 20 * 64 * 20 * 64 = 1,638,400 cells
-hard limit = baseline * 1.15 = 1,884,160 cells
+recommended threshold = baseline * 1.15 = 1,884,160 cells
 ```
 
-Only total cell count is constrained. Aspect ratio is unrestricted because a
-long, narrow canvas may be a valid result of a projection. Rendering and
-analysis code must therefore use chunked textures and chunked processing, not a
-single texture whose dimensions match the whole world.
+This threshold is advisory. The smallest map is `1 x 1` block, larger maps are
+accepted, and aspect ratio is unrestricted because a long, narrow canvas may
+be a valid result of a projection. Above the threshold TerrainLab warns about
+memory use and possible instability instead of rejecting the map. The remaining
+implementation ceiling is the 32-bit address space used by WorldBox and
+TerrainWorldState arrays, currently 2,147,483,647 cells. Rendering and analysis
+code must use chunked textures and chunked processing, not a single texture
+whose dimensions match the whole world.
 
 Examples:
 
 | WorldBox blocks | Game cells | Result |
 |---|---:|---|
+| `1 x 1` | 4,096 | accepted |
 | `20 x 20` | 1,638,400 | accepted |
 | `21 x 21` | 1,806,336 | accepted |
 | `23 x 20` | 1,884,160 | accepted |
 | `40 x 10` | 1,638,400 | accepted by WBXGEO |
-| `22 x 22` | 1,982,464 | rejected |
+| `22 x 22` | 1,982,464 | accepted with warning |
 
 WorldBox or Steam Workshop may impose additional UI restrictions. Those are
 compatibility restrictions, not WBXGEO geometry restrictions.
@@ -134,7 +139,8 @@ boundaries; readers accept compatible `1.x` packages and preserve unknown data.
     "width_blocks": 20,
     "height_blocks": 20,
     "cell_count": 1638400,
-    "maximum_cell_count": 1884160,
+    "maximum_cell_count": 2147483647,
+    "recommended_cell_count": 1884160,
     "origin": "south-west",
     "row_order": "south-to-north",
     "cell_size": 1000.0
@@ -382,7 +388,7 @@ Load:
 
 1. WorldBox loads `map.wbox` normally.
 2. TerrainLab opens the adjacent `terrainlab.wbxgeo`.
-3. Schema, dimensions, cell budget, lengths, and checksums are validated.
+3. Schema, addressable dimensions, lengths, and checksums are validated.
 4. The base map hash is compared with the map WorldBox loaded.
 5. Valid continuous layers are attached to the world state.
 6. On any mismatch, TerrainLab bootstraps a lossy state from vanilla tile types.

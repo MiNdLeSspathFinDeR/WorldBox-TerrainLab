@@ -44,8 +44,8 @@ project layer for WorldBox.
    the internal window.
 9. In-game image import: a persisted watched folder queues stable rasters,
    converts one at a time with the safe adaptive classifier, preserves extreme
-   aspect ratios inside the shared cell budget, and atomically creates complete
-   new WorldBox save slots without changing the open world.
+   aspect ratios using the shared recommended cell budget, and atomically
+   creates complete new WorldBox save slots without changing the open world.
 10. Correct gallery sizing: custom and unresolved legacy worlds show their
     actual `width x height` world-cell dimensions instead of `-1`.
 
@@ -166,15 +166,16 @@ To save the converted map directly into WorldBox saves as a new `saveN` slot:
 imagetomap image.png --save-to-game
 ```
 
-For a maximum-baseline 20 by 20 world using adaptive terrain and the safe palette:
+For a baseline 20 by 20 world using adaptive terrain and the safe palette:
 ```sh
 imagetomap image.png --save-to-game -W 20 -H 20 --algorithm terrain --palette safe
 ```
 
-TerrainLab limits maps to 1,884,160 game cells: the cell count of a 20 by 20
-WorldBox-block map plus 15%. Aspect ratio is unrestricted, so a 40 by 10 map is
-valid while a 22 by 22 map is rejected.
-To select the largest allowed dimensions while retaining the source aspect:
+TerrainLab recommends at most 1,884,160 game cells: the cell count of a 20 by
+20 WorldBox-block map plus 15%. This is a warning threshold, not a conversion
+limit. Sizes start at `1 x 1` block, aspect ratio is unrestricted, and larger
+maps are accepted while the UI and CLI warn about memory use and instability.
+To select the largest recommended dimensions while retaining the source aspect:
 ```sh
 imagetomap image.png --fit-budget --save-to-game
 ```
@@ -395,9 +396,10 @@ imagetomap image.png --save-to-game
 
 #### `--fit-budget`
 When width and height are automatic, choose the largest block dimensions that
-preserve the source aspect ratio within TerrainLab's 1,884,160-cell budget.
+preserve the source aspect ratio within TerrainLab's recommended
+1,884,160-cell budget.
 Square images become 21 by 21 blocks; extreme projection aspect ratios remain
-valid.
+valid. Explicit `-W`/`-H` dimensions may exceed this recommendation.
 ```sh
 imagetomap image.png --fit-budget
 ```

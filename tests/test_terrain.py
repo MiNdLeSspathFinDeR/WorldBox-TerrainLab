@@ -15,10 +15,12 @@ from imagetomap import (
     convert,
     fit_map_size_to_budget,
     fit_map_size_to_long_side,
+    map_size_budget_warning,
     maximum_map_size_for_aspect,
     validate_map_size,
 )
 from imagetomap.__main__ import process_image
+from imagetomap.core import resolve_map_geometry
 from imagetomap.calibration import (
     ClassificationLine,
     ClassificationProfile,
@@ -556,7 +558,7 @@ class TerrainConversionTests(unittest.TestCase):
         self.assertIn("_longSideInput", overlay_source)
         self.assertIn("UpdateMapSizePreview()", overlay_source)
         self.assertIn(
-            "TerrainMapLimits.TryGetMaximumBlockDimensions(",
+            "TerrainMapLimits.TryGetRecommendedBlockDimensions(",
             overlay_source,
         )
         self.assertIn("CreateCompositionPalette(", overlay_source)
@@ -765,9 +767,26 @@ class TerrainConversionTests(unittest.TestCase):
         validate_map_size(40, 10)
         validate_map_size(23, 20)
 
-    def test_map_budget_rejects_excess_total_cells(self) -> None:
-        with self.assertRaisesRegex(ValueError, "TerrainLab limit"):
-            validate_map_size(22, 22)
+    def test_map_budget_warns_but_allows_excess_total_cells(self) -> None:
+        validate_map_size(22, 22)
+        self.assertRegex(
+            map_size_budget_warning(22, 22) or "",
+            "above the recommended TerrainLab budget",
+        )
+        self.assertIsNone(map_size_budget_warning(20, 20))
+        with self.assertWarnsRegex(RuntimeWarning, "above the recommended"):
+            geometry, size = resolve_map_geometry((64, 64), 22, 22)
+        self.assertEqual(geometry, (22, 22))
+        self.assertEqual(size, (1408, 1408))
+
+    def test_map_size_still_rejects_unaddressable_arrays(self) -> None:
+        with self.assertRaisesRegex(ValueError, "can address at most"):
+            validate_map_size(725, 725)
+
+    def test_one_by_one_map_block_is_supported(self) -> None:
+        source = Image.new("RGB", (8, 8), (70, 160, 70))
+        converted = convert(source, width=1, height=1)
+        self.assertEqual((converted.width, converted.height), (1, 1))
 
     def test_budget_fit_preserves_common_and_extreme_aspects(self) -> None:
         self.assertEqual(fit_map_size_to_budget(1000, 1000), (21, 21))
@@ -775,7 +794,7 @@ class TerrainConversionTests(unittest.TestCase):
         self.assertEqual(fit_map_size_to_budget(4000, 100), (120, 3))
         self.assertEqual(fit_map_size_to_budget(100, 4000), (3, 120))
 
-    def test_long_side_map_size_and_displayed_maximum_share_one_budget(self) -> None:
+    def test_long_side_size_can_exceed_displayed_recommendation(self) -> None:
         self.assertEqual(
             fit_map_size_to_long_side(2000, 1000, 20),
             (20, 10),
@@ -792,8 +811,11 @@ class TerrainConversionTests(unittest.TestCase):
             maximum_map_size_for_aspect(1000, 1000),
             (21, 21),
         )
-        with self.assertRaisesRegex(ValueError, "maximum.*30x15"):
-            fit_map_size_to_long_side(2000, 1000, 31)
+        self.assertEqual(
+            fit_map_size_to_long_side(2000, 1000, 31),
+            (31, 16),
+        )
+        self.assertIsNotNone(map_size_budget_warning(31, 16))
 
     def test_gallery_uses_world_cells_for_unresolved_map_sizes(self) -> None:
         code_directory = (
@@ -983,7 +1005,7 @@ class TerrainConversionTests(unittest.TestCase):
             overlay_source,
         )
         self.assertIn(
-            "TerrainMapLimits.TryGetMaximumBlockDimensions(",
+            "TerrainMapLimits.TryGetRecommendedBlockDimensions(",
             overlay_source,
         )
         self.assertIn(
