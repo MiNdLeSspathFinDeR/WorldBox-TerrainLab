@@ -238,6 +238,100 @@ class TerrainConversionTests(unittest.TestCase):
             ui_source,
         )
 
+    def test_all_mod_ui_localization_keys_are_complete_and_bound(self) -> None:
+        mod_directory = ROOT / "worldbox_mod" / "TerrainLab"
+        locale_directory = mod_directory / "Locales"
+        locales = {
+            name: json.loads((locale_directory / name).read_text(encoding="utf-8"))
+            for name in ("en.json", "ru.json")
+        }
+
+        self.assertEqual(set(locales["en.json"]), set(locales["ru.json"]))
+        for locale_name, locale in locales.items():
+            empty_keys = {
+                key
+                for key, value in locale.items()
+                if not isinstance(value, str) or not value.strip()
+            }
+            self.assertFalse(
+                empty_keys,
+                f"{locale_name} contains empty translations: "
+                f"{sorted(empty_keys)}",
+            )
+
+        code_sources = {
+            path.name: path.read_text(encoding="utf-8")
+            for path in (mod_directory / "Code").glob("*.cs")
+        }
+        literal_keys = {
+            key
+            for source in code_sources.values()
+            for key in re.findall(r'"(terrain_lab_[a-z0-9_]+)"', source)
+        }
+        non_localization_ids = {"terrain_lab_window"}
+        dynamic_prefixes = {
+            "terrain_lab_hydro_feature_",
+            "terrain_lab_landform_",
+            "terrain_lab_legend_direction_",
+            "terrain_lab_material_",
+        }
+        required_keys = literal_keys - non_localization_ids - dynamic_prefixes
+        for locale_name, locale in locales.items():
+            missing = required_keys - set(locale)
+            self.assertFalse(
+                missing,
+                f"{locale_name} is missing code-used translations: "
+                f"{sorted(missing)}",
+            )
+
+        tooltip_keys = set()
+        for source in code_sources.values():
+            tooltip_keys.update(
+                re.findall(
+                    r"(?:ConfigureTooltip|ConfigureParameterTooltip)"
+                    r'\(\s*[^,]+,\s*"(terrain_lab_[a-z0-9_]+)"',
+                    source,
+                    re.DOTALL,
+                )
+            )
+        for locale_name, locale in locales.items():
+            missing_tooltips = {
+                key
+                for key in tooltip_keys
+                if key not in locale or f"{key}_description" not in locale
+            }
+            self.assertFalse(
+                missing_tooltips,
+                f"{locale_name} is missing tooltip translations: "
+                f"{sorted(missing_tooltips)}",
+            )
+
+        localization_source = code_sources["TerrainLocalizedUi.cs"]
+        self.assertIn("text.gameObject.AddComponent<LocalizedText>()", localization_source)
+        self.assertIn("localized.setKeyAndUpdate(localizationKey);", localization_source)
+        for overlay_name in (
+            "TerrainImageClassificationOverlay.cs",
+            "TerrainImageClusteringOverlay.cs",
+        ):
+            overlay_source = code_sources[overlay_name]
+            self.assertIn("CreateLocalizedLabel(", overlay_source)
+            self.assertIn(
+                "TerrainLocalizedUi.Matches(text, tooltipKey)",
+                overlay_source,
+            )
+            self.assertIn(
+                "SetButtonLocalizationKey(",
+                overlay_source,
+            )
+        self.assertIn(
+            "RefreshLocalizedDropdowns();",
+            code_sources["TerrainImageClassificationOverlay.cs"],
+        )
+        self.assertIn(
+            "return TerrainLocalizedUi.Bind(",
+            code_sources["TerrainLabUi.cs"],
+        )
+
     def test_manual_image_picker_requires_explicit_confirmation(self) -> None:
         overlay_source = (
             ROOT
@@ -700,6 +794,41 @@ class TerrainConversionTests(unittest.TestCase):
         )
         with self.assertRaisesRegex(ValueError, "maximum.*30x15"):
             fit_map_size_to_long_side(2000, 1000, 31)
+
+    def test_gallery_uses_world_cells_for_unresolved_map_sizes(self) -> None:
+        code_directory = (
+            ROOT / "worldbox_mod" / "TerrainLab" / "Code"
+        )
+        limits_source = (
+            code_directory / "TerrainMapLimits.cs"
+        ).read_text(encoding="utf-8")
+        patches_source = (
+            code_directory / "TerrainLabPatches.cs"
+        ).read_text(encoding="utf-8")
+        ru_locale = json.loads(
+            (
+                ROOT
+                / "worldbox_mod"
+                / "TerrainLab"
+                / "Locales"
+                / "ru.json"
+            ).read_text(encoding="utf-8")
+        )
+
+        self.assertIn("WorldBoxRuntimeChunkSize = 16", limits_source)
+        self.assertIn("WorldBoxBlockSize = 64", limits_source)
+        self.assertIn("TryGetCellDimensionsFromBlocks", limits_source)
+        self.assertIn("typeof(SaveWindowIcons)", patches_source)
+        self.assertIn('mapSizeText.text.Trim(),\n                    "-1"', patches_source)
+        self.assertIn("localized.enabled = false", patches_source)
+        self.assertEqual(
+            ru_locale["terrain_lab_output_long_side"],
+            "Большая сторона, блоков",
+        )
+        self.assertEqual(
+            ru_locale["terrain_lab_gallery_map_size_pixels_format"],
+            "{0} x {1} пикс.",
+        )
 
     def test_safe_palette_excludes_gameplay_hazards(self) -> None:
         self.assertFalse(set(SAFE_TILES_TUPLE) & set(UNPLAYABLE_TILES))

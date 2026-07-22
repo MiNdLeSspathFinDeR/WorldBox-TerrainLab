@@ -248,6 +248,7 @@ namespace TerrainLab
                 string previous = _imagePath;
                 _images = _workspace.GetRecentImages(64).ToList();
                 EnsureUi();
+                RefreshLocalizedDropdowns();
                 ResetLoadedImage();
                 InitializePendingImage(previous);
                 _root.SetActive(true);
@@ -927,16 +928,16 @@ namespace TerrainLab
             layout.childForceExpandHeight = false;
             Transform content = contentObject.transform;
 
-            CreateLabel(
+            CreateLocalizedLabel(
                 content,
-                LM.Get("terrain_lab_manual_heading"),
+                "terrain_lab_manual_heading",
                 18,
                 FontStyle.Bold,
                 30f,
                 UnityColor.white);
-            CreateLabel(
+            CreateLocalizedLabel(
                 content,
-                LM.Get("terrain_lab_manual_image_choice"),
+                "terrain_lab_manual_image_choice",
                 11,
                 FontStyle.Bold,
                 18f,
@@ -979,17 +980,17 @@ namespace TerrainLab
                     252f,
                     "terrain_lab_manual_fit"));
 
-            CreateLabel(
+            CreateLocalizedLabel(
                 content,
-                LM.Get("terrain_lab_output_size_heading"),
+                "terrain_lab_output_size_heading",
                 11,
                 FontStyle.Bold,
                 18f,
                 new UnityColor(0.83f, 0.79f, 0.66f, 1f));
             Transform mapSizeRow = CreateRow(content, 34f);
-            Text mapSizeCaption = CreateLabel(
+            Text mapSizeCaption = CreateLocalizedLabel(
                 mapSizeRow,
-                LM.Get("terrain_lab_output_long_side"),
+                "terrain_lab_output_long_side",
                 9,
                 FontStyle.Normal,
                 34f,
@@ -1030,9 +1031,9 @@ namespace TerrainLab
                 _mapSizeLabel.gameObject,
                 "terrain_lab_output_long_side");
 
-            CreateLabel(
+            CreateLocalizedLabel(
                 content,
-                LM.Get("terrain_lab_manual_geometry_heading"),
+                "terrain_lab_manual_geometry_heading",
                 11,
                 FontStyle.Bold,
                 18f,
@@ -1088,16 +1089,16 @@ namespace TerrainLab
                     118f,
                     "terrain_lab_manual_cancel_draft"));
 
-            CreateLabel(
+            CreateLocalizedLabel(
                 content,
-                LM.Get("terrain_lab_manual_attributes_heading"),
+                "terrain_lab_manual_attributes_heading",
                 11,
                 FontStyle.Bold,
                 18f,
                 new UnityColor(0.83f, 0.79f, 0.66f, 1f));
-            CreateLabel(
+            CreateLocalizedLabel(
                 content,
-                LM.Get("terrain_lab_manual_surface"),
+                "terrain_lab_manual_surface",
                 10,
                 FontStyle.Bold,
                 16f,
@@ -1116,9 +1117,9 @@ namespace TerrainLab
             _surfaceDropdown.onValueChanged.AddListener(
                 HandleSurfaceChanged);
 
-            CreateLabel(
+            CreateLocalizedLabel(
                 content,
-                LM.Get("terrain_lab_manual_elevation"),
+                "terrain_lab_manual_elevation",
                 10,
                 FontStyle.Bold,
                 16f,
@@ -1135,9 +1136,9 @@ namespace TerrainLab
                     UpdateModeButtons();
                 });
 
-            CreateLabel(
+            CreateLocalizedLabel(
                 content,
-                LM.Get("terrain_lab_manual_line_width"),
+                "terrain_lab_manual_line_width",
                 10,
                 FontStyle.Bold,
                 16f,
@@ -1163,9 +1164,9 @@ namespace TerrainLab
                     "terrain_lab_manual_publish_feature",
                     true));
 
-            CreateLabel(
+            CreateLocalizedLabel(
                 content,
-                LM.Get("terrain_lab_manual_extent_heading"),
+                "terrain_lab_manual_extent_heading",
                 11,
                 FontStyle.Bold,
                 18f,
@@ -1197,16 +1198,16 @@ namespace TerrainLab
                     118f,
                     "terrain_lab_manual_mode_delete_polygon"));
 
-            CreateLabel(
+            CreateLocalizedLabel(
                 content,
-                LM.Get("terrain_lab_manual_outside_heading"),
+                "terrain_lab_manual_outside_heading",
                 10,
                 FontStyle.Bold,
                 16f,
                 new UnityColor(0.83f, 0.79f, 0.66f, 1f));
-            CreateLabel(
+            CreateLocalizedLabel(
                 content,
-                LM.Get("terrain_lab_manual_outside_surface"),
+                "terrain_lab_manual_outside_surface",
                 9,
                 FontStyle.Normal,
                 14f,
@@ -1219,9 +1220,9 @@ namespace TerrainLab
                     "terrain_lab_manual_outside_surface"));
             _outsideSurfaceDropdown.onValueChanged.AddListener(
                 HandleOutsideSurfaceChanged);
-            CreateLabel(
+            CreateLocalizedLabel(
                 content,
-                LM.Get("terrain_lab_manual_outside_biotope"),
+                "terrain_lab_manual_outside_biotope",
                 9,
                 FontStyle.Normal,
                 14f,
@@ -1234,9 +1235,9 @@ namespace TerrainLab
                     "terrain_lab_manual_outside_biotope"));
             _outsideBiotopeDropdown.onValueChanged.AddListener(
                 delegate { SaveOutsideMapAreaFromControls(); });
-            CreateLabel(
+            CreateLocalizedLabel(
                 content,
-                LM.Get("terrain_lab_manual_outside_elevation"),
+                "terrain_lab_manual_outside_elevation",
                 9,
                 FontStyle.Normal,
                 14f,
@@ -1249,9 +1250,9 @@ namespace TerrainLab
             _outsideElevationInput.onEndEdit.AddListener(
                 delegate { SaveOutsideMapAreaFromControls(); });
 
-            CreateLabel(
+            CreateLocalizedLabel(
                 content,
-                LM.Get("terrain_lab_manual_markup_heading"),
+                "terrain_lab_manual_markup_heading",
                 10,
                 FontStyle.Bold,
                 16f,
@@ -1696,9 +1697,9 @@ namespace TerrainLab
                 string finishKey = boundaryMode
                     ? "terrain_lab_manual_finish_boundary"
                     : "terrain_lab_manual_finish_geometry";
-                SetButtonText(
+                SetButtonLocalizationKey(
                     _finishPolygonButton,
-                    LM.Get(finishKey));
+                    finishKey);
                 ConfigureTooltip(
                     _finishPolygonButton.gameObject,
                     finishKey);
@@ -1714,9 +1715,9 @@ namespace TerrainLab
                         ? "terrain_lab_manual_cancel_boundary"
                         : "terrain_lab_manual_remove_boundary")
                     : "terrain_lab_manual_cancel_draft";
-                SetButtonText(
+                SetButtonLocalizationKey(
                     _cancelPolygonButton,
-                    LM.Get(cancelKey));
+                    cancelKey);
                 ConfigureTooltip(
                     _cancelPolygonButton.gameObject,
                     cancelKey);
@@ -1796,12 +1797,14 @@ namespace TerrainLab
                    TerrainImageClassificationProfile.MaximumLineWidthCells;
         }
 
-        private static void SetButtonText(Button button, string value)
+        private static void SetButtonLocalizationKey(
+            Button button,
+            string localizationKey)
         {
             Text label = button?.GetComponentInChildren<Text>();
             if (label != null)
             {
-                label.text = value;
+                TerrainLocalizedUi.Bind(label, localizationKey);
             }
         }
 
@@ -3562,6 +3565,25 @@ namespace TerrainLab
             return label;
         }
 
+        private static Text CreateLocalizedLabel(
+            Transform parent,
+            string localizationKey,
+            int fontSize,
+            FontStyle style,
+            float height,
+            UnityColor color)
+        {
+            return TerrainLocalizedUi.Bind(
+                CreateLabel(
+                    parent,
+                    LM.Get(localizationKey),
+                    fontSize,
+                    style,
+                    height,
+                    color),
+                localizationKey);
+        }
+
         private Text CreateFileSelectorField(
             Transform parent,
             string tooltipKey)
@@ -3673,6 +3695,10 @@ namespace TerrainLab
             label.resizeTextForBestFit = true;
             label.resizeTextMinSize = 7;
             label.resizeTextMaxSize = 11;
+            if (TerrainLocalizedUi.Matches(text, tooltipKey))
+            {
+                TerrainLocalizedUi.Bind(label, tooltipKey);
+            }
             LayoutElement element =
                 buttonObject.AddComponent<LayoutElement>();
             element.minWidth = 0f;
@@ -3718,6 +3744,46 @@ namespace TerrainLab
             element.preferredHeight = 28f;
             ConfigureTooltip(dropdownObject, tooltipKey);
             return dropdown;
+        }
+
+        private void RefreshLocalizedDropdowns()
+        {
+            RefreshLocalizedDropdown(
+                _surfaceDropdown,
+                new[]
+                {
+                    "terrain_lab_manual_not_selected"
+                }.Concat(
+                    TerrainImageClassificationCatalog.Surfaces
+                        .Select(option => option.LocalizationKey)));
+            RefreshLocalizedDropdown(
+                _outsideSurfaceDropdown,
+                TerrainImageClassificationCatalog.OutsideSurfaces
+                    .Select(option => option.LocalizationKey));
+            RefreshLocalizedDropdown(
+                _outsideBiotopeDropdown,
+                TerrainImageClassificationCatalog.OutsideBiotopes
+                    .Select(option => option.LocalizationKey));
+        }
+
+        private static void RefreshLocalizedDropdown(
+            Dropdown dropdown,
+            IEnumerable<string> localizationKeys)
+        {
+            if (dropdown == null)
+            {
+                return;
+            }
+
+            int selected = dropdown.value;
+            dropdown.ClearOptions();
+            dropdown.AddOptions(
+                localizationKeys
+                    .Select(key => LM.Get(key))
+                    .ToList());
+            dropdown.SetValueWithoutNotify(
+                Mathf.Clamp(selected, 0, dropdown.options.Count - 1));
+            dropdown.RefreshShownValue();
         }
 
         private static void StyleDropdownPopup(GameObject dropdownObject)
@@ -3880,6 +3946,10 @@ namespace TerrainLab
             label.fontSize = 11;
             label.color = UnityColor.white;
             label.text = labelText;
+            if (TerrainLocalizedUi.Matches(labelText, tooltipKey))
+            {
+                TerrainLocalizedUi.Bind(label, tooltipKey);
+            }
             LayoutElement element =
                 toggleObject.AddComponent<LayoutElement>();
             element.preferredHeight = 24f;

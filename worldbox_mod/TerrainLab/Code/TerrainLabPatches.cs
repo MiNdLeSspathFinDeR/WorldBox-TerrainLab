@@ -1,6 +1,9 @@
 using System;
+using System.Collections;
 using System.Reflection;
 using HarmonyLib;
+using NeoModLoader.General;
+using UnityEngine.UI;
 
 namespace TerrainLab
 {
@@ -92,6 +95,97 @@ namespace TerrainLab
             {
                 __result = TerrainMapLimits.IsWithinBudget((int)side, (int)side);
             }
+        }
+    }
+
+    [HarmonyPatch]
+    internal static class TerrainLabSaveWindowMapSizePatch
+    {
+        private static readonly FieldInfo MapSizeTextField =
+            AccessTools.Field(typeof(SaveWindowIcons), "_text_map_size");
+
+        private static readonly FieldInfo MetaDataField =
+            AccessTools.Field(typeof(SaveWindowIcons), "metaData");
+
+        private static MethodBase TargetMethod()
+        {
+            return AccessTools.Method(
+                typeof(SaveWindowIcons),
+                nameof(SaveWindowIcons.Awake),
+                Type.EmptyTypes);
+        }
+
+        private static void Postfix(SaveWindowIcons __instance)
+        {
+            Apply(__instance);
+            __instance?.StartCoroutine(ApplyAfterVanillaLocalization(__instance));
+        }
+
+        private static IEnumerator ApplyAfterVanillaLocalization(
+            SaveWindowIcons instance)
+        {
+            yield return null;
+            Apply(instance);
+        }
+
+        private static void Apply(SaveWindowIcons instance)
+        {
+            Text mapSizeText =
+                MapSizeTextField?.GetValue(instance) as Text;
+            MapMetaData metaData =
+                MetaDataField?.GetValue(instance) as MapMetaData;
+            if (mapSizeText == null || metaData == null)
+            {
+                return;
+            }
+
+            MapSizeAsset preset =
+                MapSizeLibrary.getPresetAsset(metaData.width);
+            bool invalidVanillaLabel =
+                string.IsNullOrWhiteSpace(mapSizeText.text) ||
+                string.Equals(
+                    mapSizeText.text.Trim(),
+                    "-1",
+                    StringComparison.Ordinal);
+            if (preset != null && !invalidVanillaLabel)
+            {
+                return;
+            }
+
+            if (!TerrainMapLimits.TryGetCellDimensionsFromBlocks(
+                    metaData.width,
+                    metaData.height,
+                    out int widthCells,
+                    out int heightCells))
+            {
+                return;
+            }
+
+            LocalizedText localized =
+                mapSizeText.GetComponent<LocalizedText>();
+            if (localized != null)
+            {
+                localized.enabled = false;
+            }
+
+            string format = LM.Get(
+                "terrain_lab_gallery_map_size_pixels_format");
+            if (string.IsNullOrWhiteSpace(format) ||
+                string.Equals(
+                    format,
+                    "-1",
+                    StringComparison.Ordinal) ||
+                string.Equals(
+                    format,
+                    "terrain_lab_gallery_map_size_pixels_format",
+                    StringComparison.Ordinal))
+            {
+                format = "{0} x {1} px";
+            }
+            mapSizeText.text = string.Format(
+                format,
+                widthCells,
+                heightCells);
         }
     }
 

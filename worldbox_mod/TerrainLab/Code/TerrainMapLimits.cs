@@ -5,6 +5,7 @@ namespace TerrainLab
 {
     public static class TerrainMapLimits
     {
+        public const int WorldBoxRuntimeChunkSize = 16;
         public const int WorldBoxBlockSize = 64;
         public const int BaselineBlocksPerAxis = 20;
         public const int TolerancePercent = 15;
@@ -28,6 +29,31 @@ namespace TerrainLab
             }
 
             return (long)width * height;
+        }
+
+        public static bool TryGetCellDimensionsFromBlocks(
+            int widthBlocks,
+            int heightBlocks,
+            out int widthCells,
+            out int heightCells)
+        {
+            widthCells = 0;
+            heightCells = 0;
+            if (widthBlocks <= 0 || heightBlocks <= 0)
+            {
+                return false;
+            }
+
+            long candidateWidth = (long)widthBlocks * WorldBoxBlockSize;
+            long candidateHeight = (long)heightBlocks * WorldBoxBlockSize;
+            if (candidateWidth > int.MaxValue || candidateHeight > int.MaxValue)
+            {
+                return false;
+            }
+
+            widthCells = (int)candidateWidth;
+            heightCells = (int)candidateHeight;
+            return true;
         }
 
         public static bool IsWithinBudget(int width, int height)

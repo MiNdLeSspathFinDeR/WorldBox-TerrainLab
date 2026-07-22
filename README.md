@@ -46,6 +46,8 @@ project layer for WorldBox.
    converts one at a time with the safe adaptive classifier, preserves extreme
    aspect ratios inside the shared cell budget, and atomically creates complete
    new WorldBox save slots without changing the open world.
+10. Correct gallery sizing: custom and unresolved legacy worlds show their
+    actual `width x height` world-cell dimensions instead of `-1`.
 
 The implemented terrain-analysis stages are described in
 [GIS terrain pipeline](docs/GIS_PIPELINE.md). The

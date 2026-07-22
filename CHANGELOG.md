@@ -2,6 +2,19 @@
 
 ## Unreleased
 
+## 2.0.0-alpha.3 - 2026-07-22
+
+- Bound dynamically created TerrainLab labels, buttons, parameter rows, and
+  manual-classification dropdowns to the active WorldBox language so both
+  Russian and English update consistently at runtime.
+- Distinguished vanilla `16 x 16` runtime chunks from `64 x 64` map blocks in
+  the size controls and documentation.
+- Fixed custom and unresolved legacy save-gallery sizes being overwritten by
+  `-1`. They now display actual world-cell dimensions such as
+  `1280 x 1152 px`, without modifying the save.
+- Verified the hard dominant-class budget and water classes on the real TIFF
+  and semantic-v2 workspace profiles; neither conversion emitted bare soil.
+
 ## 2.0.0-alpha.2 - 2026-07-20
 
 - Fixed semantic-v2 water detection for RGBA source maps. Transparent and

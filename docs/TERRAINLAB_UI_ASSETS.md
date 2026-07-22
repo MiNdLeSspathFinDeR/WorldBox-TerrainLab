@@ -20,7 +20,7 @@ against screen edges and can be collapsed independently.
 
 ## Implementation status
 
-Version 1.18.0 implements the standalone side button, an adaptive top GIS
+Version 2.0.0-alpha.3 implements the standalone side button, an adaptive top GIS
 toolbar, and a stock WorldBox internal window. The toolbar copies the bottom
 WorldBox panel and button sprites, stretches to the logical canvas width, and
 balances commands across as few rows as the current UI scale permits. Its frame
@@ -94,6 +94,9 @@ game asset ID differs between WorldBox versions.
 
 Both raster workspaces expose the same **Long side, blocks** field immediately
 after the source selector. One WorldBox block is `64 x 64` game cells. The
+block is the vanilla map-generation/save unit, not the `16 x 16` runtime
+`MapChunk`; one map block contains `4 x 4` runtime chunks. WorldBox also uses
+an independent `8 x 8` city-zone grid. The
 chosen value fixes the longer output side; the shorter side follows the source
 raster aspect until an area boundary is published, then follows that
 boundary's bounding-box aspect. A live adjacent caption shows
@@ -103,6 +106,12 @@ It also states whether the calculation uses the complete source or the
 published extent. The default is 20 blocks, and out-of-budget values cannot be
 saved or queued. Editable values use yellow text; labels retain the stock
 panel colour.
+
+The vanilla save gallery keeps localized preset names when they resolve.
+Custom sizes and legacy labels that resolve to `-1` instead show their actual
+world-cell dimensions, for example a `20 x 18` block map is displayed as
+`1280 x 1152 px`. This fallback only changes the label and never rewrites the
+save metadata.
 
 Both interpretation paths now reject sterile bare-soil output. Soil always has
 a living biome, the manual selector omits `none`, and old profiles using it

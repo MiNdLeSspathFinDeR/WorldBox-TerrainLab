@@ -548,16 +548,16 @@ namespace TerrainLab
             layout.childForceExpandHeight = false;
             Transform content = contentObject.transform;
 
-            CreateLabel(
+            CreateLocalizedLabel(
                 content,
-                LM.Get("terrain_lab_cluster_heading"),
+                "terrain_lab_cluster_heading",
                 18,
                 FontStyle.Bold,
                 30f,
                 UnityColor.white);
-            CreateLabel(
+            CreateLocalizedLabel(
                 content,
-                LM.Get("terrain_lab_cluster_image_choice"),
+                "terrain_lab_cluster_image_choice",
                 11,
                 FontStyle.Bold,
                 18f,
@@ -599,17 +599,17 @@ namespace TerrainLab
                     292f,
                     "terrain_lab_cluster_fit"));
 
-            CreateLabel(
+            CreateLocalizedLabel(
                 content,
-                LM.Get("terrain_lab_output_size_heading"),
+                "terrain_lab_output_size_heading",
                 11,
                 FontStyle.Bold,
                 18f,
                 NeutralText());
             Transform mapSizeRow = CreateRow(content, 34f);
-            Text mapSizeCaption = CreateLabel(
+            Text mapSizeCaption = CreateLocalizedLabel(
                 mapSizeRow,
-                LM.Get("terrain_lab_output_long_side"),
+                "terrain_lab_output_long_side",
                 9,
                 FontStyle.Normal,
                 34f,
@@ -650,9 +650,9 @@ namespace TerrainLab
                 _mapSizeLabel.gameObject,
                 "terrain_lab_output_long_side");
 
-            CreateLabel(
+            CreateLocalizedLabel(
                 content,
-                LM.Get("terrain_lab_cluster_algorithm_heading"),
+                "terrain_lab_cluster_algorithm_heading",
                 11,
                 FontStyle.Bold,
                 18f,
@@ -680,9 +680,9 @@ namespace TerrainLab
                     },
                     "terrain_lab_cluster_algorithm_semantic"));
 
-            CreateLabel(
+            CreateLocalizedLabel(
                 content,
-                LM.Get("terrain_lab_cluster_boundary_heading"),
+                "terrain_lab_cluster_boundary_heading",
                 11,
                 FontStyle.Bold,
                 18f,
@@ -715,9 +715,9 @@ namespace TerrainLab
                     292f,
                     "terrain_lab_cluster_boundary_clear"));
 
-            CreateLabel(
+            CreateLocalizedLabel(
                 content,
-                LM.Get("terrain_lab_cluster_basic_heading"),
+                "terrain_lab_cluster_basic_heading",
                 11,
                 FontStyle.Bold,
                 18f,
@@ -1182,11 +1182,11 @@ namespace TerrainLab
             }
             if (_expertButton != null)
             {
-                SetButtonText(
+                SetButtonLocalizationKey(
                     _expertButton,
-                    LM.Get(_expertVisible
+                    _expertVisible
                         ? "terrain_lab_cluster_expert_hide"
-                        : "terrain_lab_cluster_expert_show"));
+                        : "terrain_lab_cluster_expert_show");
             }
             Canvas.ForceUpdateCanvases();
         }
@@ -1204,11 +1204,11 @@ namespace TerrainLab
             }
             if (_compositionButton != null)
             {
-                SetButtonText(
+                SetButtonLocalizationKey(
                     _compositionButton,
-                    LM.Get(_compositionVisible
+                    _compositionVisible
                         ? "terrain_lab_cluster_composition_hide"
-                        : "terrain_lab_cluster_composition_show"));
+                        : "terrain_lab_cluster_composition_show");
             }
             Canvas.ForceUpdateCanvases();
         }
@@ -2226,9 +2226,9 @@ namespace TerrainLab
             Transform row = CreateRow(parent, 28f);
             ConfigureTooltip(row.gameObject, localizationKey);
 
-            Text label = CreateLabel(
+            Text label = CreateLocalizedLabel(
                 row,
-                LM.Get(localizationKey),
+                localizationKey,
                 10,
                 FontStyle.Normal,
                 28f,
@@ -2532,6 +2532,25 @@ namespace TerrainLab
             return label;
         }
 
+        private static Text CreateLocalizedLabel(
+            Transform parent,
+            string localizationKey,
+            int fontSize,
+            FontStyle style,
+            float height,
+            UnityColor color)
+        {
+            return TerrainLocalizedUi.Bind(
+                CreateLabel(
+                    parent,
+                    LM.Get(localizationKey),
+                    fontSize,
+                    style,
+                    height,
+                    color),
+                localizationKey);
+        }
+
         private Text CreateFileSelectorField(
             Transform parent,
             string tooltipKey)
@@ -2641,6 +2660,10 @@ namespace TerrainLab
             label.resizeTextForBestFit = true;
             label.resizeTextMinSize = 7;
             label.resizeTextMaxSize = 11;
+            if (TerrainLocalizedUi.Matches(text, tooltipKey))
+            {
+                TerrainLocalizedUi.Bind(label, tooltipKey);
+            }
             LayoutElement element =
                 buttonObject.AddComponent<LayoutElement>();
             element.minWidth = 0f;
@@ -2703,12 +2726,14 @@ namespace TerrainLab
             return input;
         }
 
-        private static void SetButtonText(Button button, string value)
+        private static void SetButtonLocalizationKey(
+            Button button,
+            string localizationKey)
         {
             Text label = button?.GetComponentInChildren<Text>();
             if (label != null)
             {
-                label.text = value;
+                TerrainLocalizedUi.Bind(label, localizationKey);
             }
         }
 

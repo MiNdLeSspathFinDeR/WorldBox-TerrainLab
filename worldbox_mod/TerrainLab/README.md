@@ -101,6 +101,9 @@ under `Code` when the game starts.
   map side in 64-cell WorldBox blocks, derives the shorter side from the source
   aspect or the published boundary bounding box, and displays both the selected
   dimensions and the largest dimensions permitted by the 1,884,160-cell budget;
+- corrected save-gallery labels: vanilla presets retain their localized names,
+  while custom or unresolved legacy sizes display actual world-cell dimensions
+  instead of `-1`;
 - extent-aware GeoTIFF round-trip: a published image boundary crops processing,
   translates the original six-coefficient affine before resampling, and keeps
   every exported layer aligned with the selected source area in QGIS;

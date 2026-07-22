@@ -171,6 +171,20 @@ internal static class Program
             saveGuardPrefix.ReturnType == typeof(bool) &&
             saveGuardPrefix.GetParameters().Length == 0,
             "The empty save-path guard no longer skips unsafe native saves.");
+
+        Type gallerySizeType = typeof(TerrainLabMod).Assembly.GetType(
+            "TerrainLab.TerrainLabSaveWindowMapSizePatch",
+            true);
+        MethodInfo gallerySizeResolver = gallerySizeType.GetMethod(
+            "TargetMethod",
+            BindingFlags.NonPublic | BindingFlags.Static);
+        MethodBase gallerySizeTarget =
+            (MethodBase)gallerySizeResolver?.Invoke(null, null);
+        Assert(
+            gallerySizeTarget != null &&
+            gallerySizeTarget.DeclaringType == typeof(SaveWindowIcons) &&
+            gallerySizeTarget.Name == nameof(SaveWindowIcons.Awake),
+            "The gallery size fallback no longer targets SaveWindowIcons.Awake().");
     }
 
     private static void ValidateVegetationSeedingContract()
@@ -834,6 +848,19 @@ internal static class Program
         Assert(
             TerrainMapLimits.MaximumCellCount == 1884160,
             "TerrainLab maximum cell budget changed unexpectedly.");
+        Assert(
+            TerrainMapLimits.WorldBoxRuntimeChunkSize == 16 &&
+            TerrainMapLimits.WorldBoxBlockSize == 64,
+            "WorldBox runtime chunk and map-block units were conflated.");
+        Assert(
+            TerrainMapLimits.TryGetCellDimensionsFromBlocks(
+                20,
+                18,
+                out int widthCells,
+                out int heightCells) &&
+            widthCells == 1280 &&
+            heightCells == 1152,
+            "Map-block dimensions were not converted to gallery pixels.");
         Assert(
             TerrainMapLimits.TryValidate(23 * block, 20 * block, out _),
             "The exact 115-percent boundary was rejected.");

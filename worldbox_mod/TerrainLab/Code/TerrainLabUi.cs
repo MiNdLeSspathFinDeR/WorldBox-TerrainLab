@@ -2414,6 +2414,9 @@ namespace TerrainLab
                 TextAnchor.MiddleLeft,
                 NeutralText,
                 78f);
+            TerrainLocalizedUi.Bind(
+                radiusLabel,
+                "terrain_lab_brush_radius");
             ConfigureParameterTooltip(
                 radiusLabel.gameObject,
                 "terrain_lab_brush_radius");
@@ -3148,6 +3151,9 @@ namespace TerrainLab
                 TextAnchor.MiddleLeft,
                 NeutralText,
                 78f);
+            TerrainLocalizedUi.Bind(
+                radiusLabel,
+                "terrain_lab_brush_radius");
             ConfigureParameterTooltip(
                 radiusLabel.gameObject,
                 "terrain_lab_brush_radius");
@@ -4260,6 +4266,7 @@ namespace TerrainLab
                 TextAnchor.MiddleLeft,
                 NeutralText,
                 78f);
+            TerrainLocalizedUi.Bind(label, labelKey);
             ConfigureParameterTooltip(label.gameObject, labelKey);
 
             TextInput input = TextInput.Instantiate(row, false);
@@ -6029,12 +6036,17 @@ namespace TerrainLab
 
         private void CreateInfo(string localizationKey, Color color, float height = 24f)
         {
-            CreateInfoText(LM.Get(localizationKey), color, height);
+            TerrainLocalizedUi.Bind(
+                CreateInfoText(LM.Get(localizationKey), color, height),
+                localizationKey);
         }
 
-        private void CreateInfoText(string text, Color color, float height = 24f)
+        private Text CreateInfoText(
+            string text,
+            Color color,
+            float height = 24f)
         {
-            CreateTextLabel(
+            return CreateTextLabel(
                 _moduleContent,
                 "TerrainLabInfo",
                 text,
@@ -6918,6 +6930,10 @@ namespace TerrainLab
                 });
             button.Text.resizeTextMinSize = 7;
             button.Text.resizeTextMaxSize = 11;
+            if (TerrainLocalizedUi.Matches(text, tooltipNameKey))
+            {
+                TerrainLocalizedUi.Bind(button.Text, tooltipNameKey);
+            }
             if (icon != null)
             {
                 ConfigureActionButtonIcon(button, width, height, iconRotation);
@@ -7001,15 +7017,17 @@ namespace TerrainLab
             TextAnchor alignment,
             Color color)
         {
-            return CreateTextLabel(
-                parent,
-                "TerrainLabLabel_" + localizationKey,
-                LM.Get(localizationKey),
-                fontSize,
-                fontStyle,
-                height,
-                alignment,
-                color);
+            return TerrainLocalizedUi.Bind(
+                CreateTextLabel(
+                    parent,
+                    "TerrainLabLabel_" + localizationKey,
+                    LM.Get(localizationKey),
+                    fontSize,
+                    fontStyle,
+                    height,
+                    alignment,
+                    color),
+                localizationKey);
         }
 
         private static Text CreateTextLabel(

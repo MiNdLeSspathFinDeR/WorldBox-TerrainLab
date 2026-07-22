@@ -753,6 +753,7 @@
   "terrain_lab_output_size_scope_source_format": "source {0}x{1} px",
   "terrain_lab_output_size_scope_extent_format": "published extent {0}x{1} px",
   "terrain_lab_output_size_error": "The requested long side is invalid or exceeds the displayed map-cell limit.",
+  "terrain_lab_gallery_map_size_pixels_format": "{0} x {1} px",
   "terrain_lab_legend_maximum_format": "max {0} {1}",
   "terrain_lab_legend_minimum_format": "min {0} {1}",
   "terrain_lab_legend_zero_format": "0 {0}",
